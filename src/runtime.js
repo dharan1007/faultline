@@ -2,6 +2,8 @@ import { semanticUnits, removeUnits, ddminReduce, createRevisionStore } from './
 
 const $ = id => document.getElementById(id);
 const clone = v => JSON.parse(JSON.stringify(v));
+const STORAGE_KEY = 'faultline-prod-v3';
+const LEGACY_STORAGE_KEY = 'faultline-prod-v2';
 const fixture = {
   html:'<dialog id="modal" open><button id="save">Save</button></dialog><p id="noise">Irrelevant debug noise</p>',
   css:'#modal{display:block;position:fixed;z-index:10} #noise{color:gray} button{padding:8px}',
@@ -21,8 +23,42 @@ function revision(){ return store.inspect().revision; }
 function normalizeExpected(v){ const s=String(v); if(s==='true')return true;if(s==='false')return false;if(s==='null')return null;if(s==='undefined')return undefined;if(s!==''&&!Number.isNaN(Number(s)))return Number(s);return v; }
 function unitsFor(targetAxis=axis, source=value()[targetAxis]){ return semanticUnits(targetAxis,source); }
 function pinKey(targetAxis,unitId){ return `${targetAxis}|${unitId}`; }
-function persist(){ try{ localStorage.setItem('faultline-prod-v2',JSON.stringify({state:store.inspect(),axis,pins:[...pins],experimentLedger})); }catch{} }
-function restoreLocal(){ try{ const raw=JSON.parse(localStorage.getItem('faultline-prod-v2')); if(!raw?.state?.value)return; store=createRevisionStore(raw.state.value); axis=raw.axis||'html'; pins=new Set(raw.pins||[]); experimentLedger=raw.experimentLedger||[]; }catch{} }
+function validRevisionEntry(entry){ return Array.isArray(entry)&&entry.length===2&&/^r[1-9]\d*$/.test(String(entry[0]))&&entry[1]?.value; }
+function persist(){
+  try{
+    localStorage.setItem(STORAGE_KEY,JSON.stringify({version:3,store:store.dump(),axis,pins:[...pins],experimentLedger,revisions:[...revisions.entries()].map(([rev,snapshot])=>[rev,clone(snapshot)])}));
+  }catch{}
+}
+function restoreLocal(){
+  try{
+    const raw=JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if(raw?.store){
+      store=createRevisionStore(fixture,raw.store);
+      axis=['html','css','js'].includes(raw.axis)?raw.axis:'html';
+      pins=new Set(Array.isArray(raw.pins)?raw.pins:[]);
+      experimentLedger=Array.isArray(raw.experimentLedger)?raw.experimentLedger:[];
+      revisions.clear();
+      for(const entry of Array.isArray(raw.revisions)?raw.revisions:[]) if(validRevisionEntry(entry)) revisions.set(String(entry[0]),clone(entry[1]));
+      if(!revisions.has(revision())) revisions.set(revision(),{value:clone(value()),pins:[...pins]});
+      return;
+    }
+  }catch{ try{localStorage.removeItem(STORAGE_KEY);}catch{} }
+  try{
+    const legacy=JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY));
+    if(!legacy?.state?.value)return;
+    const match=/^r([1-9]\d*)$/.exec(String(legacy.state.revision||'r1'));
+    const legacyRevision=match?Number(match[1]):1;
+    const currentRevision=`r${legacyRevision}`;
+    store=createRevisionStore(fixture,{version:1,revision:legacyRevision,value:legacy.state.value,snapshots:[[currentRevision,legacy.state.value]],ledger:Array.isArray(legacy.state.history)?legacy.state.history:[]});
+    axis=['html','css','js'].includes(legacy.axis)?legacy.axis:'html';
+    pins=new Set(Array.isArray(legacy.pins)?legacy.pins:[]);
+    experimentLedger=Array.isArray(legacy.experimentLedger)?legacy.experimentLedger:[];
+    revisions.clear();
+    revisions.set(currentRevision,{value:clone(value()),pins:[...pins]});
+    persist();
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  }catch{}
+}
 
 function buildSandboxDocument(c,runId){
   const safeJs=String(c.js).replace(/<\/script/gi,'<\\/script');
@@ -63,7 +99,7 @@ function commitCase(next,event,expectedRevision=revision()){ const result=store.
 function defineOracle({expectedRevision=revision(),oracle}){ return commitCase({...value(),oracle:clone(oracle)},{kind:'define_oracle'},expectedRevision); }
 function applySource({expectedRevision=revision(),targetAxis=axis,source}){ if(!['html','css','js'].includes(targetAxis))throw new Error('INVALID_AXIS'); return commitCase({...value(),[targetAxis]:String(source)},{kind:'source_edit',axis:targetAxis},expectedRevision); }
 async function probe({expectedRevision=revision(),targetAxis=axis,unitId}){ store.assertRevision(expectedRevision);const source=value()[targetAxis];const unit=unitsFor(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(pins.has(pinKey(targetAxis,unitId)))throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const result=await runCase(candidate);record('probe',result,{axis:targetAxis,unitId,mutated:false});return {...result,mutated:false,canonicalRevision:revision()}; }
-function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);pinned?pins.add(key):pins.delete(key);experimentLedger.push({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:revision(),at:new Date().toISOString()});persist();render();return inspect(); }
+function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);pinned?pins.add(key):pins.delete(key);experimentLedger.push({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:revision(),at:new Date().toISOString()});revisions.set(revision(),{value:clone(value()),pins:[...pins]});persist();render();return inspect(); }
 async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}={}){
   store.assertRevision(expectedRevision);
   const source=value()[targetAxis], all=unitsFor(targetAxis,source);
@@ -111,5 +147,5 @@ $('reduce').onclick=()=>reduce({targetAxis:axis}).then(r=>renderHealth(r.status)
 $('autopilot').onclick=()=>autopilot().then(()=>renderHealth('COMPLETE')).catch(e=>{renderHealth('ERROR');$('summary').textContent=e.message;});
 $('lock').onclick=()=>defineOracle({oracle:{kind:$('oracle-kind').value,selector:$('oracle-selector').value,property:$('oracle-property').value,equals:normalizeExpected($('oracle-equals').value),action:{kind:$('action-kind').value,selector:$('action-selector').value},delayMs:0}});
 $('export').onclick=()=>{const a=document.createElement('a'),blob=new Blob([exportCase()],{type:'text/html'});a.href=URL.createObjectURL(blob);a.download='faultline-reproducer.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
-$('reset').onclick=()=>{store=createRevisionStore(fixture);pins.clear();experimentLedger=[];axis='html';revisions.clear();revisions.set('r1',{value:clone(fixture),pins:[]});render();};
-restoreLocal();revisions.set(revision(),{value:clone(value()),pins:[...pins]});render();registerWebMCP();$('preview').srcdoc=buildSandboxDocument(value(),'initial-preview');
+$('reset').onclick=()=>{store=createRevisionStore(fixture);pins.clear();experimentLedger=[];axis='html';revisions.clear();revisions.set('r1',{value:clone(fixture),pins:[]});try{localStorage.removeItem(STORAGE_KEY);localStorage.removeItem(LEGACY_STORAGE_KEY);}catch{}render();};
+restoreLocal();revisions.set(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();registerWebMCP();$('preview').srcdoc=buildSandboxDocument(value(),'initial-preview');

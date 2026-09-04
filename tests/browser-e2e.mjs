@@ -10,6 +10,8 @@ let browser;
 try{
   browser=await chromium.launch({headless:true});
   const page=await browser.newPage({viewport:{width:1440,height:1000}});
+  const requests=[];
+  page.on('request',request=>requests.push(request.url()));
   await page.addInitScript(()=>{
     const tools=[];
     Object.defineProperty(document,'modelContext',{configurable:true,value:{
@@ -61,12 +63,19 @@ try{
   assert.ok(!restored.case.html.includes('reload-noise'));
   assert.ok(restored.revision!==edited.revision);
 
+  const requestCountBeforeContainment=requests.length;
+  await page.evaluate(()=>window.faultline.applySource({targetAxis:'js',source:"fetch('/__faultline_side_effect__').catch(()=>{});"}));
+  const containedRun=await page.evaluate(()=>window.faultline.run());
+  assert.equal(containedRun.status,'FAIL');
+  await page.waitForTimeout(150);
+  assert.equal(requests.slice(requestCountBeforeContainment).some(url=>url.includes('/__faultline_side_effect__')),false,'experiment source escaped the sandbox and reached the network');
+
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
   assert.equal(await page.locator('#source').isVisible(),true);
   assert.equal(await page.locator('#preview').isVisible(),true);
   assert.equal(errors.length,0,errors.join('\n'));
-  console.log('Browser gate PASS: Chromium loaded UI, registered 10 spec-valid WebMCP tools, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, and passed mobile overflow checks.');
+  console.log('Browser gate PASS: Chromium loaded UI, registered 10 spec-valid WebMCP tools, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, blocked experiment network side effects, and passed mobile overflow checks.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

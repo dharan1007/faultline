@@ -3,39 +3,98 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>FAULTLINE — Causal Web Failure Reducer</title>
-<meta name="description" content="Deterministically minimize browser failures while preserving causal evidence.">
-<meta name="theme-color" content="#07080a">
-<style>
-:root{color-scheme:dark;--bg:#07080a;--panel:#0d1015;--line:#29313d;--text:#f5f7fa;--muted:#9aa5b3;--accent:#ff4f91;--ok:#7bd88f;--bad:#ff7f88}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}header{position:sticky;top:0;z-index:10;display:flex;justify-content:space-between;gap:18px;align-items:center;padding:18px 22px;border-bottom:1px solid var(--line);background:rgba(7,8,10,.97)}.brand strong{letter-spacing:.14em}.brand span,.muted,.small{color:var(--muted)}.small{font-size:12px}.status{display:flex;gap:8px;flex-wrap:wrap}.pill{border:1px solid var(--line);border-radius:999px;padding:6px 10px;font-size:12px;color:var(--muted)}.pill[data-state="FAIL"],.pill[data-state="ERROR"]{color:var(--bad)}.pill[data-state="PASS"],.pill[data-state="COMPLETE"],.pill[data-state="ready"]{color:var(--ok)}main{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(290px,.8fr);min-height:calc(100vh - 70px)}.panel{padding:20px;border-right:1px solid var(--line);min-width:0}.panel:last-child{border-right:0}.eyebrow{margin:0 0 4px;font-size:11px;letter-spacing:.13em;color:var(--muted)}h1,h2{margin:0 0 12px}h1{font-size:22px}h2{font-size:17px}.card{margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.tabs,.actions{display:flex;gap:8px;flex-wrap:wrap}.tabs{margin:12px 0}.btn,.tab,.unit{border:1px solid var(--line);background:#11151b;color:var(--text);border-radius:10px;padding:9px 12px}.btn.primary,.tab.active{border-color:#6c2745;background:#29111d;color:#ffe0eb}.btn:disabled{opacity:.45;cursor:not-allowed}textarea{width:100%;min-height:300px;resize:vertical;padding:14px;border:1px solid var(--line);border-radius:12px;background:#090c10;color:#e8edf4;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}.units{display:grid;gap:7px;max-height:250px;overflow:auto}.unit{text-align:left;display:flex;justify-content:space-between;gap:12px;width:100%}.unit[aria-pressed="true"]{border-color:#8d355e;background:#211018}.unit span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.unit small{color:var(--muted)}label{display:block;color:var(--muted);font-size:12px;margin:9px 0 5px}input,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#090c10;color:var(--text)}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}iframe{width:100%;height:330px;border:1px solid var(--line);border-radius:10px;background:white}.trace{list-style:none;margin:12px 0 0;padding:0}.trace li{margin-bottom:8px;padding:10px;border:1px solid var(--line);border-radius:10px}.trace strong,.trace span,.trace code{display:block}.trace span,.trace code{margin-top:3px;color:var(--muted);font-size:11px;word-break:break-word}.connection pre{white-space:pre-wrap;word-break:break-word;background:#090c10;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12px}.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-@media(max-width:980px){header{position:static;align-items:flex-start;flex-direction:column}main{grid-template-columns:1fr}.panel{border-right:0;border-bottom:1px solid var(--line)}iframe{height:280px}.row{grid-template-columns:1fr}textarea{min-height:240px}}
-</style>
+<title>FAULTLINE — Causal Web Debugging</title>
+<meta name="description" content="Connect modern web applications, reproduce browser failures, isolate causal conditions, verify results, and hand evidence to developers or agents.">
+<meta name="theme-color" content="#070708">
+<link rel="stylesheet" href="./styles/app.css">
 </head>
 <body>
-<header>
-  <div class="brand"><strong>FAULTLINE</strong> <span>causal browser failure reducer</span><div class="small">Direct static runtime · deterministic oracle · WebMCP-native tools</div></div>
-  <div class="status" aria-label="Runtime status"><span id="health" class="pill" data-state="READY" aria-live="polite">READY</span><span id="webmcp" class="pill" data-state="unknown">WebMCP checking</span><span id="revision" class="pill">r1</span></div>
-</header>
-<main>
-<section class="panel" aria-labelledby="source-title">
-  <p class="eyebrow">SOURCE</p><h1 id="source-title">Failure case</h1>
-  <p class="small">Edit one axis, lock a deterministic oracle, then probe or reduce semantic units without guessing.</p>
-  <div class="tabs" role="tablist" aria-label="Source axis"><button class="tab active" data-axis="html" role="tab" aria-selected="true">HTML</button><button class="tab" data-axis="css" role="tab" aria-selected="false">CSS</button><button class="tab" data-axis="js" role="tab" aria-selected="false">JS</button></div>
-  <label class="sr" for="source">Source editor</label><textarea id="source" spellcheck="false"></textarea>
-  <div class="actions" style="margin-top:10px"><button id="apply" class="btn primary">Apply source</button><button id="run" class="btn">Run oracle</button><button id="reset" class="btn">Reset fixture</button></div>
-  <div class="card"><div style="display:flex;justify-content:space-between;gap:10px"><div><p class="eyebrow">REDUCTION FRONTIER</p><h2>Semantic units</h2></div><span id="unit-count" class="small">0 units</span></div><div class="actions" style="margin-bottom:10px"><button id="pin" class="btn" disabled>Pin / unpin selected</button><button id="probe" class="btn" disabled>Probe selected</button><button id="reduce" class="btn primary">Reduce HTML</button><button id="autopilot" class="btn">Autopilot all axes</button></div><div id="units" class="units" role="listbox" aria-label="Semantic units"></div></div>
-  <div class="card connection"><p class="eyebrow">CONNECTION SURFACES</p><h2>Browser API and WebMCP</h2><p class="small">The same canonical engine backs the UI, <code>window.faultline</code>, and ten WebMCP tools.</p><pre>await window.faultline.inspect()
-await window.faultline.probe({targetAxis:'html',unitId:'...'})
-await window.faultline.reduce({targetAxis:'html'})
-await window.faultline.autopilot()</pre></div>
-</section>
-<section class="panel" aria-labelledby="experiment-title">
-  <p class="eyebrow">LIVE EXPERIMENT</p><h1 id="experiment-title">Deterministic oracle</h1>
-  <iframe id="preview" sandbox="allow-scripts" title="FAULTLINE isolated experiment"></iframe>
-  <div class="card"><div class="row"><div><label for="oracle-kind">Oracle type</label><select id="oracle-kind"><option value="dom_property">DOM property</option><option value="computed_style">Computed style</option><option value="dom_exists">DOM existence</option><option value="runtime_error">Runtime error</option></select></div><div><label for="oracle-selector">Target selector</label><input id="oracle-selector" value="#modal"></div></div><div class="row"><div><label for="oracle-property">Property</label><input id="oracle-property" value="open"></div><div><label for="oracle-equals">Failure value</label><input id="oracle-equals" value="true"></div></div><div class="row"><div><label for="action-kind">Before measurement</label><select id="action-kind"><option value="click">Click element</option><option value="none">No action</option></select></div><div><label for="action-selector">Action selector</label><input id="action-selector" value="#save"></div></div><div class="actions" style="margin-top:12px"><button id="lock" class="btn primary">Lock oracle</button></div></div>
-</section>
-<aside class="panel" aria-labelledby="evidence-title"><p class="eyebrow">CAUSAL EVIDENCE</p><h1 id="evidence-title">Experiment trace</h1><div id="summary" class="card" aria-live="polite">No experiments yet.</div><div class="actions" style="margin-top:10px"><button id="export" class="btn">Export reproducer</button></div><ol id="trace" class="trace"></ol></aside>
-</main>
+<div class="app">
+  <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+    <a class="logo" href="#/projects" aria-label="FAULTLINE projects"><span class="logo-mark">F</span><span>FAULTLINE</span></a>
+    <nav>
+      <div class="nav-group"><div class="nav-label">WORKSPACE</div>
+        <a class="nav-link" data-nav="projects" href="#/projects"><span class="nav-icon">◇</span>Projects</a>
+        <a class="nav-link" data-nav="investigations" href="#/investigations"><span class="nav-icon">⌁</span>Investigations</a>
+        <a class="nav-link" data-nav="runs" href="#/runs"><span class="nav-icon">↳</span>Runs</a>
+        <a class="nav-link" data-nav="evidence" href="#/evidence"><span class="nav-icon">⊙</span>Evidence</a>
+      </div>
+      <div class="nav-group"><div class="nav-label">DEVELOPER</div>
+        <a class="nav-link" data-nav="integrations" href="#/integrations"><span class="nav-icon">⌘</span>Integrations</a>
+        <a class="nav-link" data-nav="minimal" href="#/minimal"><span class="nav-icon">&lt;/&gt;</span>Minimal reproducer</a>
+      </div>
+      <div class="nav-group"><div class="nav-label">SYSTEM</div>
+        <a class="nav-link" data-nav="settings" href="#/settings"><span class="nav-icon">○</span>Settings</a>
+      </div>
+    </nav>
+    <div class="sidebar-foot"><div class="sidebar-status"><span class="dot"></span><span>Local evidence store ready</span></div></div>
+  </aside>
+
+  <div class="workspace">
+    <header class="topbar">
+      <div class="context"><button id="mobile-nav-toggle" class="btn ghost" type="button" aria-controls="sidebar" aria-label="Open navigation">☰</button><span class="crumb" id="context-label">Projects</span><span aria-hidden="true" class="crumb">/</span><strong id="context-detail">Connected applications</strong></div>
+      <div class="top-actions"><span class="status-chip ok"><span class="dot"></span>Engine ready</span><a class="btn" href="#/connect">Connect project</a></div>
+    </header>
+
+    <main class="content" id="main-content">
+      <section data-view="projects" aria-labelledby="projects-title">
+        <div class="page-head"><div><p class="eyebrow">WORKSPACE</p><h1 id="projects-title">Projects</h1><p>Connect the application you actually run. FAULTLINE keeps investigations, evidence and agent connections tied to a real project instead of making you flatten modern stacks into raw HTML, CSS and JavaScript.</p></div><div class="actions"><button id="new-investigation" class="btn primary" type="button">New investigation</button><a class="btn" href="#/connect">Connect project</a></div></div>
+        <div id="projects-body"></div>
+      </section>
+
+      <section data-view="investigations" hidden aria-labelledby="investigations-title">
+        <div class="page-head"><div><p class="eyebrow">DEBUGGING</p><h1 id="investigations-title">Investigations</h1><p>Each investigation moves from reproducible symptom to verified causal evidence and developer handoff.</p></div><div class="actions"><button class="btn primary" type="button" onclick="location.hash='#/projects'">New investigation</button></div></div><div id="investigations-body"></div>
+      </section>
+
+      <section data-view="connect" hidden aria-labelledby="connect-title">
+        <div class="page-head"><div><p class="eyebrow">CONNECT</p><h1 id="connect-title">Connect a project</h1><p>Start with a live application, repository, or deliberate minimal reproducer. FAULTLINE will progressively verify what it can actually execute.</p></div></div>
+        <form id="connect-form" class="card form-card" novalidate>
+          <p class="eyebrow">SOURCE TYPE</p><div class="source-choice" aria-label="Project source">
+            <button type="button" data-source-kind="url" aria-pressed="true"><strong>Live URL</strong><span>Production, preview or staging target</span></button>
+            <button type="button" data-source-kind="git" aria-pressed="false"><strong>Git repository</strong><span>Framework-aware isolated execution</span></button>
+            <button type="button" data-source-kind="minimal" aria-pressed="false"><strong>Minimal case</strong><span>Advanced HTML/CSS/JS reducer</span></button>
+          </div>
+          <div class="field"><label for="connect-project-name">Project name</label><input class="input" id="connect-project-name" required placeholder="Checkout web"></div>
+          <div id="url-fields"><div class="field"><label for="connect-live-url">Live or staging URL</label><input class="input" id="connect-live-url" type="url" inputmode="url" placeholder="https://staging.example.com"><div class="field-help">Only HTTP(S) targets are accepted. Private-network target protections are enforced by the remote runner.</div></div></div>
+          <div id="git-fields" hidden><div class="field"><label for="connect-git-url">Git repository URL</label><input class="input" id="connect-git-url" type="url" inputmode="url" placeholder="https://github.com/org/app.git"></div><div class="field"><label for="connect-git-branch">Branch or revision</label><input class="input" id="connect-git-branch" value="main"></div><div class="notice warn">Private repository credentials are request-scoped and are never written to the browser evidence store.</div></div>
+          <div id="minimal-fields" hidden><div class="notice">The minimal reproducer remains available for already-isolated browser cases. It is no longer the default product workflow.</div></div>
+          <div id="connect-status" class="notice" hidden aria-live="polite"></div><div class="actions" style="margin-top:18px"><button class="btn primary" type="submit">Verify project</button><a class="btn ghost" href="#/projects">Cancel</a></div>
+        </form>
+      </section>
+
+      <section data-view="project" hidden aria-label="Project overview"><div id="project-content"></div></section>
+      <section data-view="investigation" hidden aria-label="Investigation"><div id="investigation-content"></div></section>
+
+      <section data-view="runs" hidden aria-labelledby="runs-title"><div class="page-head"><div><p class="eyebrow">EXECUTION</p><h1 id="runs-title">Runs</h1><p>Operational history from provisioning through reproduction, isolation and verification. Failures expose their exact stage instead of collapsing into a generic error.</p></div></div><div id="runs-body"></div></section>
+      <section data-view="evidence" hidden aria-labelledby="evidence-page-title"><div class="page-head"><div><p class="eyebrow">CAUSAL RECORD</p><h1 id="evidence-page-title">Evidence</h1><p>Observations, counterfactual interventions and verification runs are separated so FAULTLINE never presents an explanation as causal proof.</p></div></div><div id="evidence-body"></div></section>
+
+      <section data-view="integrations" hidden aria-labelledby="integrations-title">
+        <div class="page-head"><div><p class="eyebrow">DEVELOPER SURFACES</p><h1 id="integrations-title">Integrations</h1><p>Use the same canonical investigation engine from the browser, external coding agents and CI. Page-scoped WebMCP and hosted Remote MCP are intentionally different surfaces.</p></div></div>
+        <div class="grid-3">
+          <div class="card integration-card"><p class="eyebrow">PAGE-SCOPED</p><h2>WebMCP</h2><p>Tools registered into <code>document.modelContext</code> for agents operating the current FAULTLINE page.</p><div class="endpoint">document.modelContext</div></div>
+          <div class="card integration-card"><p class="eyebrow">EXTERNAL AGENTS</p><h2>Remote MCP</h2><p>Hosted endpoint for coding agents, IDEs and automation that need FAULTLINE without driving this browser page.</p><div class="endpoint">/mcp</div></div>
+          <div class="card integration-card"><p class="eyebrow">PROGRAMMATIC</p><h2>REST API</h2><p>Structured project inspection, run and evidence contracts for CI/CD and platform integrations.</p><div class="endpoint">/api/v1</div></div>
+        </div>
+        <div class="card" style="margin-top:14px"><div class="label-row"><div><p class="eyebrow">CONNECTION MODEL</p><h2>One engine, explicit capabilities</h2></div><span class="badge working">Bridge verification pending</span></div><p>Remote endpoints are promoted only after the API, MCP protocol and isolated execution gates pass. This page will generate capability-scoped client configuration when the bridge is verified.</p></div>
+      </section>
+
+      <section data-view="settings" hidden aria-labelledby="settings-title"><div class="page-head"><div><p class="eyebrow">SYSTEM</p><h1 id="settings-title">Settings</h1><p>Browser defaults, execution limits, local evidence controls and security boundaries.</p></div></div><div class="grid-2"><div class="card"><h2>Execution safety</h2><p>Repository commands execute only in the isolated runner. Secrets never become evidence.</p></div><div class="card"><h2>Local data</h2><p>Project and investigation metadata is stored locally in IndexedDB. Capability secrets are excluded.</p></div></div></section>
+
+      <section data-view="minimal" hidden class="minimal-shell" aria-labelledby="minimal-title">
+        <div class="minimal-intro"><div><p class="eyebrow">ADVANCED</p><h1 id="minimal-title" style="margin:0 0 6px">Minimal reproducer</h1><p class="muted" style="margin:0">Low-level deterministic reduction for browser cases that are already represented as HTML, CSS and JavaScript.</p></div><div class="runtime-strip" aria-label="Reducer runtime status"><span id="health" class="pill" data-state="READY" aria-live="polite">READY</span><span id="webmcp" class="pill" data-state="unknown">WebMCP checking</span><span id="revision" class="pill">r1</span></div></div>
+        <div class="minimal-workbench">
+          <section class="panel" aria-labelledby="source-title"><p class="eyebrow">SOURCE</p><h2 id="source-title">Failure case</h2><p class="small">Edit one axis only when you intentionally use the advanced minimal-case workflow.</p><div class="tabs" role="tablist" aria-label="Source axis"><button class="tab active" data-axis="html" role="tab" aria-selected="true">HTML</button><button class="tab" data-axis="css" role="tab" aria-selected="false">CSS</button><button class="tab" data-axis="js" role="tab" aria-selected="false">JS</button></div><label class="sr" for="source">Source editor</label><textarea id="source" spellcheck="false"></textarea><div class="actions" style="margin-top:9px"><button id="apply" class="btn primary">Apply source</button><button id="run" class="btn">Run oracle</button><button id="reset" class="btn">Reset fixture</button></div><div class="card"><div class="label-row"><div><p class="eyebrow">REDUCTION FRONTIER</p><h3>Semantic units</h3></div><span id="unit-count" class="small">0 units</span></div><div class="actions" style="margin:9px 0"><button id="pin" class="btn" disabled>Pin / unpin selected</button><button id="probe" class="btn" disabled>Probe selected</button><button id="reduce" class="btn primary">Reduce HTML</button><button id="autopilot" class="btn">Autopilot all axes</button></div><div id="units" class="units" role="listbox" aria-label="Semantic units"></div></div></section>
+          <section class="panel" aria-labelledby="experiment-title"><p class="eyebrow">LIVE EXPERIMENT</p><h2 id="experiment-title">Deterministic oracle</h2><iframe id="preview" sandbox="allow-scripts" title="FAULTLINE isolated experiment"></iframe><div class="card"><div class="row"><div><label for="oracle-kind">Oracle type</label><select id="oracle-kind"><option value="dom_property">DOM property</option><option value="computed_style">Computed style</option><option value="dom_exists">DOM existence</option><option value="runtime_error">Runtime error</option></select></div><div><label for="oracle-selector">Target selector</label><input id="oracle-selector" value="#modal"></div></div><div class="row"><div><label for="oracle-property">Property</label><input id="oracle-property" value="open"></div><div><label for="oracle-equals">Failure value</label><input id="oracle-equals" value="true"></div></div><div class="row"><div><label for="action-kind">Before measurement</label><select id="action-kind"><option value="click">Click element</option><option value="none">No action</option></select></div><div><label for="action-selector">Action selector</label><input id="action-selector" value="#save"></div></div><div class="actions" style="margin-top:10px"><button id="lock" class="btn primary">Lock oracle</button></div></div></section>
+          <aside class="panel" aria-labelledby="evidence-title"><p class="eyebrow">CAUSAL EVIDENCE</p><h2 id="evidence-title">Experiment trace</h2><div id="summary" class="card" aria-live="polite">No experiments yet.</div><div class="actions" style="margin-top:9px"><button id="export" class="btn">Export reproducer</button></div><ol id="trace" class="trace"></ol><div class="card connection"><p class="eyebrow">BROWSER API</p><p class="small">The same deterministic engine remains available through <code>window.faultline</code> and page-scoped WebMCP.</p><pre class="code">await window.faultline.run()
+await window.faultline.reduce({targetAxis:'html'})</pre></div></aside>
+        </div>
+      </section>
+
+      <section data-view="not-found" hidden><div class="empty"><h2>Page not found</h2><a class="btn" href="#/projects">Back to projects</a></div></section>
+    </main>
+  </div>
+</div>
+<script type="module" src="./src/app-shell.js"></script>
 <script type="module" src="./src/runtime.js"></script>
 </body>
 </html>

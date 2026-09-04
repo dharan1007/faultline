@@ -24,10 +24,19 @@
   <label class="sr" for="source">Source editor</label><textarea id="source" spellcheck="false"></textarea>
   <div class="actions" style="margin-top:10px"><button id="apply" class="btn primary">Apply source</button><button id="run" class="btn">Run oracle</button><button id="reset" class="btn">Reset fixture</button></div>
   <div class="card"><div style="display:flex;justify-content:space-between;gap:10px"><div><p class="eyebrow">REDUCTION FRONTIER</p><h2>Semantic units</h2></div><span id="unit-count" class="small">0 units</span></div><div class="actions" style="margin-bottom:10px"><button id="pin" class="btn" disabled>Pin / unpin selected</button><button id="probe" class="btn" disabled>Probe selected</button><button id="reduce" class="btn primary">Reduce HTML</button><button id="autopilot" class="btn">Autopilot all axes</button></div><div id="units" class="units" role="listbox" aria-label="Semantic units"></div></div>
-  <div class="card connection"><p class="eyebrow">CONNECTION SURFACES</p><h2>Browser API and WebMCP</h2><p class="small">The same canonical engine backs the UI, <code>window.faultline</code>, and ten WebMCP tools.</p><pre>await window.faultline.inspect()
-await window.faultline.probe({targetAxis:'html',unitId:'...'})
-await window.faultline.reduce({targetAxis:'html'})
-await window.faultline.autopilot()</pre></div>
+  <div class="card connection"><p class="eyebrow">CONNECTION SURFACES</p><h2>Browser API and WebMCP</h2><p class="small">The same canonical engine backs the UI, <code>window.faultline</code>, and eleven WebMCP tools. For agent-driven work, inspect first to obtain the current revision, then call <code>faultline_apply_source</code> with that <code>expectedRevision</code>; stale writes are rejected instead of silently overwriting newer state.</p><pre>Browser API:
+const state = await window.faultline.inspect()
+await window.faultline.applySource({
+  expectedRevision: state.revision,
+  targetAxis: 'html',
+  source: '&lt;main&gt;...&lt;/main&gt;'
+})
+
+WebMCP agent flow:
+faultline_inspect
+→ faultline_apply_source({expectedRevision,targetAxis,source})
+→ faultline_define_oracle
+→ faultline_run / faultline_probe / faultline_reduce / faultline_autopilot</pre></div>
 </section>
 <section class="panel" aria-labelledby="experiment-title">
   <p class="eyebrow">LIVE EXPERIMENT</p><h1 id="experiment-title">Deterministic oracle</h1>

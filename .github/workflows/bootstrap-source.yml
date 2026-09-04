@@ -1,0 +1,30 @@
+name: Bootstrap exact FAULTLINE source
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.bootstrap/faultline-source.zip'
+permissions:
+  contents: write
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand verified source package
+        run: unzip -o .bootstrap/faultline-source.zip -d .
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify exact package
+        run: npm test && npm run check && npm run build
+      - name: Commit complete source tree
+        run: |
+          rm -rf .bootstrap
+          rm -f .github/workflows/bootstrap-source.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Restore complete verified FAULTLINE source tree'
+          git push

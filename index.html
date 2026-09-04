@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FAULTLINE — Causal Web Failure Reducer</title>
+<meta name="description" content="A WebMCP-native causal experimentation lab that minimizes deterministic browser failures.">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body data-active-view="source">
+<header class="app-header">
+  <div class="brand-block">
+    <div class="brand-line"><strong>FAULTLINE</strong><span class="product-kicker">causal web failure reducer</span></div>
+    <p>Reduce a deterministic browser failure without losing the failure itself.</p>
+  </div>
+  <div class="header-actions">
+    <div class="health-cluster" aria-label="Workspace status">
+      <span id="status" class="status-badge" data-state="READY" aria-live="polite">Ready to establish baseline</span>
+      <span id="persistence-status" class="meta-badge" data-state="idle">Local</span>
+      <span id="webmcp-status" class="meta-badge" data-state="unknown">WebMCP checking</span>
+      <span id="revision" class="meta-badge">r1</span>
+    </div>
+    <button id="evidence-toggle" class="button button-secondary evidence-toggle" type="button" aria-controls="evidence-panel" aria-expanded="false">Evidence</button>
+  </div>
+</header>
+
+<nav id="workspace-tabs" class="workspace-tabs" role="tablist" aria-label="Faultline workspace">
+  <button class="workspace-tab active" type="button" role="tab" data-view="source" aria-selected="true" aria-controls="source-panel">Source</button>
+  <button class="workspace-tab" type="button" role="tab" data-view="experiment" aria-selected="false" aria-controls="experiment-panel">Experiment</button>
+  <button class="workspace-tab" type="button" role="tab" data-view="evidence" aria-selected="false" aria-controls="evidence-panel">Evidence</button>
+</nav>
+
+<main class="workspace-shell">
+  <section id="source-panel" class="workspace-panel source-panel" data-panel="source" aria-label="Source reduction workspace">
+    <div class="panel-header">
+      <div>
+        <p class="eyebrow">SOURCE</p>
+        <h1>Failure case</h1>
+      </div>
+      <div id="axis-tabs" class="axis-tabs" role="tablist" aria-label="Source axis">
+        <button type="button" class="axis-tab active" data-axis="html" role="tab" aria-selected="true">HTML</button>
+        <button type="button" class="axis-tab" data-axis="css" role="tab" aria-selected="false">CSS</button>
+        <button type="button" class="axis-tab" data-axis="js" role="tab" aria-selected="false">JS</button>
+      </div>
+    </div>
+
+    <div class="editor-shell">
+      <div class="editor-toolbar">
+        <label id="source-label" for="source">HTML source</label>
+        <span id="source-dirty" class="editor-state" data-dirty="false">Saved</span>
+      </div>
+      <textarea id="source" aria-labelledby="source-label" spellcheck="false"></textarea>
+      <div class="editor-footer">
+        <span id="source-stats">0 characters</span>
+        <button id="apply" class="button button-primary" type="button" disabled>Apply source</button>
+      </div>
+    </div>
+
+    <section class="units-section" aria-labelledby="units-title">
+      <div class="section-heading-row">
+        <div>
+          <p class="eyebrow">REDUCTION FRONTIER</p>
+          <h2 id="units-title">Semantic units</h2>
+        </div>
+        <span id="unit-count" class="count-badge">0 units</span>
+      </div>
+      <p class="section-help">Select a unit to test whether the failure survives without it. Pin units that must remain invariant.</p>
+      <div class="unit-actions">
+        <button id="pin-unit" class="button button-secondary" type="button" disabled>Pin selected</button>
+        <button id="probe" class="button button-secondary" type="button" disabled>Probe selected</button>
+        <button id="reduce" class="button button-danger" type="button">Reduce HTML</button>
+      </div>
+      <div id="units" class="units" role="listbox" aria-label="Semantic units"></div>
+    </section>
+  </section>
+
+  <section id="experiment-panel" class="workspace-panel experiment-panel" data-panel="experiment" aria-label="Live experiment workspace">
+    <div class="panel-header experiment-header">
+      <div>
+        <p class="eyebrow">LIVE EXPERIMENT</p>
+        <h1>Failure oracle</h1>
+      </div>
+      <div class="experiment-metrics">
+        <span id="meter" class="metric-badge">0% reduced</span>
+        <button id="run" class="button button-primary" type="button">Run oracle</button>
+      </div>
+    </div>
+
+    <div class="preview-card">
+      <div class="preview-toolbar">
+        <span>Isolated browser case</span>
+        <span class="sandbox-badge">network blocked · execution budgeted</span>
+      </div>
+      <iframe id="preview" sandbox="allow-scripts" title="Faultline isolated experiment"></iframe>
+    </div>
+
+    <section class="oracle-card" aria-labelledby="oracle-title">
+      <div class="section-heading-row">
+        <div>
+          <p class="eyebrow">MEASUREMENT</p>
+          <h2 id="oracle-title">Define what “still broken” means</h2>
+        </div>
+        <span class="locked-badge">deterministic</span>
+      </div>
+      <p class="section-help">Faultline accepts or rejects every counterfactual using this exact predicate. No LLM judges the result.</p>
+
+      <div class="oracle-grid">
+        <label class="field full-field">
+          <span>Oracle type</span>
+          <select id="oracle-kind">
+            <option value="dom_property">DOM property</option>
+            <option value="computed_style">Computed style</option>
+            <option value="dom_exists">DOM existence</option>
+            <option value="runtime_error">Runtime error</option>
+          </select>
+        </label>
+
+        <label id="oracle-selector-field" class="field">
+          <span>Target selector</span>
+          <input id="oracle-selector" value="#modal" placeholder="#modal">
+        </label>
+
+        <label id="oracle-property-field" class="field">
+          <span id="oracle-property-label">Property</span>
+          <input id="oracle-property" value="open" placeholder="open">
+        </label>
+
+        <label id="oracle-equals-field" class="field full-field">
+          <span id="oracle-equals-label">Failure value</span>
+          <input id="oracle-equals" value="true" placeholder="true">
+        </label>
+
+        <label class="field">
+          <span>Before measurement</span>
+          <select id="oracle-action-kind">
+            <option value="click">Click an element</option>
+            <option value="none">No action</option>
+          </select>
+        </label>
+
+        <label id="oracle-action-selector-field" class="field">
+          <span>Action selector</span>
+          <input id="oracle-action-selector" value="#save" placeholder="#save">
+        </label>
+
+        <label class="field">
+          <span>Measure after</span>
+          <div class="input-with-suffix"><input id="oracle-delay" inputmode="numeric" value="0" aria-label="Measurement delay in milliseconds"><span>ms</span></div>
+        </label>
+
+        <div class="oracle-submit">
+          <button id="oracle-save" class="button button-secondary" type="button">Lock oracle</button>
+        </div>
+      </div>
+
+      <div id="oracle-summary" class="oracle-summary" aria-live="polite"></div>
+    </section>
+  </section>
+
+  <aside id="evidence-panel" class="evidence-panel" data-panel="evidence" aria-label="Causal evidence">
+    <div class="evidence-header">
+      <div>
+        <p class="eyebrow">CAUSAL EVIDENCE</p>
+        <h2>Experiment trace</h2>
+      </div>
+      <button id="evidence-close" class="icon-button" type="button" aria-label="Close evidence panel">×</button>
+    </div>
+    <div id="summary" class="summary-card"></div>
+    <div class="evidence-actions">
+      <button id="export" class="button button-secondary" type="button">Export reproducer</button>
+    </div>
+    <div id="history-empty" class="empty-state">
+      <strong>No experiments yet</strong>
+      <span>Run the oracle to establish a baseline, then probe or reduce a semantic unit.</span>
+    </div>
+    <ol id="trace" class="trace-list"></ol>
+  </aside>
+</main>
+
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>

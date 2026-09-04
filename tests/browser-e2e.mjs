@@ -30,6 +30,13 @@ try{
   const toolContract=await page.evaluate(()=>window.__webmcpTools.map(t=>({name:t.name,execute:typeof t.execute,handler:'handler' in t})));
   assert.equal(toolContract.length,11);assert.ok(toolContract.every(t=>t.execute==='function'&&!t.handler));
 
+  const guardedToolNames=['faultline_run','faultline_define_oracle','faultline_apply_source','faultline_probe','faultline_reduce','faultline_pin','faultline_restore','faultline_autopilot'];
+  const guardedContracts=await page.evaluate(names=>Object.fromEntries(names.map(name=>{const t=window.__webmcpTools.find(tool=>tool.name===name);return [name,{properties:Object.keys(t?.inputSchema?.properties||{}).sort(),required:[...(t?.inputSchema?.required||[])].sort()}]})),guardedToolNames);
+  for(const name of guardedToolNames){
+    assert.ok(guardedContracts[name].properties.includes('expectedRevision'),`${name} must expose expectedRevision`);
+    assert.ok(guardedContracts[name].required.includes('expectedRevision'),`${name} must require expectedRevision`);
+  }
+
   const sourceToolContract=await page.evaluate(()=>{const t=window.__webmcpTools.find(tool=>tool.name==='faultline_apply_source');return t&&{properties:Object.keys(t.inputSchema?.properties||{}).sort(),required:[...(t.inputSchema?.required||[])].sort(),additionalProperties:t.inputSchema?.additionalProperties};});
   assert.deepEqual(sourceToolContract,{properties:['expectedRevision','source','targetAxis'],required:['expectedRevision','source','targetAxis'],additionalProperties:false});
   const ingestBefore=await page.evaluate(()=>window.faultline.inspect());
@@ -37,8 +44,13 @@ try{
   assert.notEqual(ingested.revision,ingestBefore.revision);assert.ok(ingested.case.js.includes('ingested through WebMCP'));
   const staleRejected=await page.evaluate(async staleRevision=>{const tool=window.__webmcpTools.find(t=>t.name==='faultline_apply_source');try{await tool.execute({expectedRevision:staleRevision,targetAxis:'css',source:'body{color:red}'});return null}catch(e){return String(e?.message||e)}},ingestBefore.revision);
   assert.match(staleRejected,/STALE_REVISION/);
+  const beforeStaleOracle=await page.evaluate(()=>window.faultline.inspect());
+  const staleOracleRejected=await page.evaluate(async({staleRevision,oracle})=>{const tool=window.__webmcpTools.find(t=>t.name==='faultline_define_oracle');try{await tool.execute({expectedRevision:staleRevision,oracle});return null}catch(e){return String(e?.message||e)}},{staleRevision:ingestBefore.revision,oracle:beforeStaleOracle.case.oracle});
+  assert.match(staleOracleRejected,/STALE_REVISION/);
+  assert.equal((await page.evaluate(()=>window.faultline.inspect())).revision,beforeStaleOracle.revision,'stale WebMCP mutation must not change canonical revision');
 
-  const baseline=await page.evaluate(()=>window.faultline.run());assert.equal(baseline.status,'FAIL');
+  const baselineRevision=(await page.evaluate(()=>window.faultline.inspect())).revision;
+  const baseline=await page.evaluate(async expectedRevision=>JSON.parse(await window.__webmcpTools.find(t=>t.name==='faultline_run').execute({expectedRevision})),baselineRevision);assert.equal(baseline.status,'FAIL');
   const before=await page.evaluate(()=>window.faultline.inspect());assert.ok(before.case.html.includes('noise'));
   const noiseId=await page.evaluate(()=>{const u=[...document.querySelectorAll('.unit')].find(x=>x.textContent.includes('Irrelevant debug noise'));return u?.dataset.unitId});assert.ok(noiseId);
   const probe=await page.evaluate(id=>window.faultline.probe({targetAxis:'html',unitId:id}),noiseId);assert.equal(probe.status,'FAIL');assert.equal(probe.mutated,false);
@@ -58,5 +70,5 @@ try{
   assert.equal(requests.slice(requestCountBeforeContainment).some(url=>url.includes('/__faultline_side_effect__')),false,'experiment source escaped the sandbox and reached the network');
 
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);assert.equal(await page.locator('#source').isVisible(),true);assert.equal(await page.locator('#preview').isVisible(),true);assert.equal(errors.length,0,errors.join('\n'));
-  console.log('Browser gate PASS: Chromium loaded UI, registered 11 spec-valid WebMCP tools, documented the source-ingestion connection path, ingested source through WebMCP with stale-revision rejection, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, blocked experiment network side effects, and passed mobile overflow checks.');
+  console.log('Browser gate PASS: Chromium loaded UI, registered 11 spec-valid WebMCP tools with revision guards on every canonical operation, rejected stale source/oracle mutations, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, blocked experiment network side effects, and passed mobile overflow checks.');
 } finally {if(browser)await browser.close();server.kill('SIGTERM');}

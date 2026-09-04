@@ -49,6 +49,15 @@ try{
   assert.match(staleOracleRejected,/STALE_REVISION/);
   assert.equal((await page.evaluate(()=>window.faultline.inspect())).revision,beforeStaleOracle.revision,'stale WebMCP mutation must not change canonical revision');
 
+  const concurrencyBefore=await page.evaluate(()=>window.faultline.inspect());
+  const delayedOracle={...concurrencyBefore.case.oracle,delayMs:120};
+  const delayed=await page.evaluate(({expectedRevision,oracle})=>window.faultline.defineOracle({expectedRevision,oracle}),{expectedRevision:concurrencyBefore.revision,oracle:delayedOracle});
+  const concurrentResults=await page.evaluate(expectedRevision=>Promise.all([window.faultline.run({expectedRevision}),window.faultline.run({expectedRevision})]),delayed.revision);
+  assert.deepEqual(concurrentResults.map(r=>r.status),['FAIL','FAIL'],'concurrent experiments must not overwrite the shared sandbox');
+  assert.equal(concurrentResults.some(r=>r.evidence?.reason==='HOST_TIMEOUT'),false,'concurrent experiments must never induce HOST_TIMEOUT by replacing each other');
+  const concurrencyAfter=await page.evaluate(()=>window.faultline.inspect());
+  await page.evaluate(({expectedRevision,oracle})=>window.faultline.defineOracle({expectedRevision,oracle}),{expectedRevision:concurrencyAfter.revision,oracle:{...concurrencyAfter.case.oracle,delayMs:0}});
+
   const baselineRevision=(await page.evaluate(()=>window.faultline.inspect())).revision;
   const baseline=await page.evaluate(async expectedRevision=>JSON.parse(await window.__webmcpTools.find(t=>t.name==='faultline_run').execute({expectedRevision})),baselineRevision);assert.equal(baseline.status,'FAIL');
   const before=await page.evaluate(()=>window.faultline.inspect());assert.ok(before.case.html.includes('noise'));
@@ -70,5 +79,5 @@ try{
   assert.equal(requests.slice(requestCountBeforeContainment).some(url=>url.includes('/__faultline_side_effect__')),false,'experiment source escaped the sandbox and reached the network');
 
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);assert.equal(await page.locator('#source').isVisible(),true);assert.equal(await page.locator('#preview').isVisible(),true);assert.equal(errors.length,0,errors.join('\n'));
-  console.log('Browser gate PASS: Chromium loaded UI, registered 11 spec-valid WebMCP tools with revision guards on every canonical operation, rejected stale source/oracle mutations, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, blocked experiment network side effects, and passed mobile overflow checks.');
+  console.log('Browser gate PASS: Chromium loaded UI, registered 11 spec-valid WebMCP tools with revision guards on every canonical operation, serialized concurrent sandbox experiments, rejected stale source/oracle mutations, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, blocked experiment network side effects, and passed mobile overflow checks.');
 } finally {if(browser)await browser.close();server.kill('SIGTERM');}

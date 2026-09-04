@@ -45,12 +45,28 @@ try{
   assert.ok(!after.case.html.includes('Irrelevant debug noise'));
   assert.ok(after.revision!==before.revision);
 
+  const persistedRevision=after.revision;
+  const persistedHtml=after.case.html;
+  await page.reload({waitUntil:'networkidle'});
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===10);
+  const reloaded=await page.evaluate(()=>window.faultline.inspect());
+  assert.equal(reloaded.revision,persistedRevision);
+  assert.equal(reloaded.case.html,persistedHtml);
+  assert.ok((await page.evaluate(()=>window.faultline.history())).length>=3);
+
+  const edited=await page.evaluate(()=>window.faultline.applySource({targetAxis:'html',source:window.faultline.inspect().case.html+'<p id="reload-noise">reload noise</p>'}));
+  assert.notEqual(edited.revision,persistedRevision);
+  assert.ok(edited.case.html.includes('reload-noise'));
+  const restored=await page.evaluate(targetRevision=>window.faultline.restore({targetRevision}),persistedRevision);
+  assert.ok(!restored.case.html.includes('reload-noise'));
+  assert.ok(restored.revision!==edited.revision);
+
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
   assert.equal(await page.locator('#source').isVisible(),true);
   assert.equal(await page.locator('#preview').isVisible(),true);
   assert.equal(errors.length,0,errors.join('\n'));
-  console.log('Browser gate PASS: Chromium loaded UI, registered 10 spec-valid WebMCP tools, ran oracle, probed, reduced, and passed mobile overflow checks.');
+  console.log('Browser gate PASS: Chromium loaded UI, registered 10 spec-valid WebMCP tools, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, and passed mobile overflow checks.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

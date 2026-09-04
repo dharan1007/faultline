@@ -2,181 +2,47 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>FAULTLINE — Causal Web Failure Reducer</title>
-<meta name="description" content="A WebMCP-native causal experimentation lab that minimizes deterministic browser failures.">
-<link rel="stylesheet" href="./styles.css">
+<meta name="description" content="Deterministic causal browser debugging and reduction.">
+<meta name="theme-color" content="#07080a">
+<style>
+:root{color-scheme:dark;--bg:#07080a;--panel:#0d1015;--line:#262d38;--muted:#9aa5b3;--text:#f5f7fa;--accent:#ff4f91;--ok:#7bd88f;--bad:#ff7f88}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}header{padding:22px 24px;border-bottom:1px solid var(--line);display:flex;gap:18px;align-items:center;justify-content:space-between;position:sticky;top:0;background:rgba(7,8,10,.96);z-index:5}.brand{display:flex;gap:12px;align-items:baseline}.brand strong{letter-spacing:.14em}.brand span,.muted{color:var(--muted)}.status{display:flex;gap:8px;flex-wrap:wrap}.pill{border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--muted);font-size:12px}.pill.ok{color:var(--ok)}nav{display:none}.grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(280px,.8fr);min-height:calc(100vh - 76px)}.panel{padding:22px;border-right:1px solid var(--line);min-width:0}.panel:last-child{border-right:0}.eyebrow{font-size:11px;letter-spacing:.14em;color:var(--muted);margin:0 0 5px}h1,h2{margin:0 0 14px}h1{font-size:22px}h2{font-size:18px}.tabs,.actions{display:flex;gap:8px;flex-wrap:wrap}.tabs{margin-bottom:12px}.btn,.tab{border:1px solid var(--line);background:#11151b;color:var(--text);border-radius:10px;padding:9px 12px}.tab.active,.btn.primary{border-color:#6d2646;background:#28111d}.btn.primary{color:#ffd9e7}.btn:disabled{opacity:.45;cursor:not-allowed}textarea{width:100%;min-height:330px;resize:vertical;background:#090c10;color:#e8edf4;border:1px solid var(--line);border-radius:12px;padding:14px;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}label{display:block;color:var(--muted);font-size:12px;margin:10px 0 5px}input,select{width:100%;background:#090c10;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 10px}.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:14px}iframe{width:100%;height:360px;background:white;border:1px solid var(--line);border-radius:10px}.trace{list-style:none;padding:0;margin:12px 0}.trace li{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}.trace strong{display:block}.pass{color:var(--ok)}.fail{color:var(--bad)}pre{white-space:pre-wrap;word-break:break-word;background:#090c10;border:1px solid var(--line);border-radius:10px;padding:10px;max-height:220px;overflow:auto}.notice{border:1px solid #3b2c13;background:#171108;color:#ffd68a;border-radius:10px;padding:10px 12px;margin-bottom:12px}.small{font-size:12px;color:var(--muted)}
+@media(max-width:980px){header{position:static}.grid{grid-template-columns:1fr}.panel{border-right:0;border-bottom:1px solid var(--line)}iframe{height:300px}}
+</style>
 </head>
-<body data-active-view="source">
-<header class="app-header">
-  <div class="brand-block">
-    <div class="brand-line"><strong>FAULTLINE</strong><span class="product-kicker">causal web failure reducer</span></div>
-    <p>Reduce a deterministic browser failure without losing the failure itself.</p>
-  </div>
-  <div class="header-actions">
-    <div class="health-cluster" aria-label="Workspace status">
-      <span id="status" class="status-badge" data-state="READY" aria-live="polite">Ready to establish baseline</span>
-      <span id="persistence-status" class="meta-badge" data-state="idle">Local</span>
-      <span id="webmcp-status" class="meta-badge" data-state="unknown">WebMCP checking</span>
-      <span id="revision" class="meta-badge">r1</span>
-    </div>
-    <button id="evidence-toggle" class="button button-secondary evidence-toggle" type="button" aria-controls="evidence-panel" aria-expanded="false">Evidence</button>
-  </div>
-</header>
-
-<nav id="workspace-tabs" class="workspace-tabs" role="tablist" aria-label="Faultline workspace">
-  <button class="workspace-tab active" type="button" role="tab" data-view="source" aria-selected="true" aria-controls="source-panel">Source</button>
-  <button class="workspace-tab" type="button" role="tab" data-view="experiment" aria-selected="false" aria-controls="experiment-panel">Experiment</button>
-  <button class="workspace-tab" type="button" role="tab" data-view="evidence" aria-selected="false" aria-controls="evidence-panel">Evidence</button>
-</nav>
-
-<main class="workspace-shell">
-  <section id="source-panel" class="workspace-panel source-panel" data-panel="source" aria-label="Source reduction workspace">
-    <div class="panel-header">
-      <div>
-        <p class="eyebrow">SOURCE</p>
-        <h1>Failure case</h1>
-      </div>
-      <div id="axis-tabs" class="axis-tabs" role="tablist" aria-label="Source axis">
-        <button type="button" class="axis-tab active" data-axis="html" role="tab" aria-selected="true">HTML</button>
-        <button type="button" class="axis-tab" data-axis="css" role="tab" aria-selected="false">CSS</button>
-        <button type="button" class="axis-tab" data-axis="js" role="tab" aria-selected="false">JS</button>
-      </div>
-    </div>
-
-    <div class="editor-shell">
-      <div class="editor-toolbar">
-        <label id="source-label" for="source">HTML source</label>
-        <span id="source-dirty" class="editor-state" data-dirty="false">Saved</span>
-      </div>
-      <textarea id="source" aria-labelledby="source-label" spellcheck="false"></textarea>
-      <div class="editor-footer">
-        <span id="source-stats">0 characters</span>
-        <button id="apply" class="button button-primary" type="button" disabled>Apply source</button>
-      </div>
-    </div>
-
-    <section class="units-section" aria-labelledby="units-title">
-      <div class="section-heading-row">
-        <div>
-          <p class="eyebrow">REDUCTION FRONTIER</p>
-          <h2 id="units-title">Semantic units</h2>
-        </div>
-        <span id="unit-count" class="count-badge">0 units</span>
-      </div>
-      <p class="section-help">Select a unit to test whether the failure survives without it. Pin units that must remain invariant.</p>
-      <div class="unit-actions">
-        <button id="pin-unit" class="button button-secondary" type="button" disabled>Pin selected</button>
-        <button id="probe" class="button button-secondary" type="button" disabled>Probe selected</button>
-        <button id="reduce" class="button button-danger" type="button">Reduce HTML</button>
-      </div>
-      <div id="units" class="units" role="listbox" aria-label="Semantic units"></div>
-    </section>
-  </section>
-
-  <section id="experiment-panel" class="workspace-panel experiment-panel" data-panel="experiment" aria-label="Live experiment workspace">
-    <div class="panel-header experiment-header">
-      <div>
-        <p class="eyebrow">LIVE EXPERIMENT</p>
-        <h1>Failure oracle</h1>
-      </div>
-      <div class="experiment-metrics">
-        <span id="meter" class="metric-badge">0% reduced</span>
-        <button id="run" class="button button-primary" type="button">Run oracle</button>
-      </div>
-    </div>
-
-    <div class="preview-card">
-      <div class="preview-toolbar">
-        <span>Isolated browser case</span>
-        <span class="sandbox-badge">network blocked · execution budgeted</span>
-      </div>
-      <iframe id="preview" sandbox="allow-scripts" title="Faultline isolated experiment"></iframe>
-    </div>
-
-    <section class="oracle-card" aria-labelledby="oracle-title">
-      <div class="section-heading-row">
-        <div>
-          <p class="eyebrow">MEASUREMENT</p>
-          <h2 id="oracle-title">Define what “still broken” means</h2>
-        </div>
-        <span class="locked-badge">deterministic</span>
-      </div>
-      <p class="section-help">Faultline accepts or rejects every counterfactual using this exact predicate. No LLM judges the result.</p>
-
-      <div class="oracle-grid">
-        <label class="field full-field">
-          <span>Oracle type</span>
-          <select id="oracle-kind">
-            <option value="dom_property">DOM property</option>
-            <option value="computed_style">Computed style</option>
-            <option value="dom_exists">DOM existence</option>
-            <option value="runtime_error">Runtime error</option>
-          </select>
-        </label>
-
-        <label id="oracle-selector-field" class="field">
-          <span>Target selector</span>
-          <input id="oracle-selector" value="#modal" placeholder="#modal">
-        </label>
-
-        <label id="oracle-property-field" class="field">
-          <span id="oracle-property-label">Property</span>
-          <input id="oracle-property" value="open" placeholder="open">
-        </label>
-
-        <label id="oracle-equals-field" class="field full-field">
-          <span id="oracle-equals-label">Failure value</span>
-          <input id="oracle-equals" value="true" placeholder="true">
-        </label>
-
-        <label class="field">
-          <span>Before measurement</span>
-          <select id="oracle-action-kind">
-            <option value="click">Click an element</option>
-            <option value="none">No action</option>
-          </select>
-        </label>
-
-        <label id="oracle-action-selector-field" class="field">
-          <span>Action selector</span>
-          <input id="oracle-action-selector" value="#save" placeholder="#save">
-        </label>
-
-        <label class="field">
-          <span>Measure after</span>
-          <div class="input-with-suffix"><input id="oracle-delay" inputmode="numeric" value="0" aria-label="Measurement delay in milliseconds"><span>ms</span></div>
-        </label>
-
-        <div class="oracle-submit">
-          <button id="oracle-save" class="button button-secondary" type="button">Lock oracle</button>
-        </div>
-      </div>
-
-      <div id="oracle-summary" class="oracle-summary" aria-live="polite"></div>
-    </section>
-  </section>
-
-  <aside id="evidence-panel" class="evidence-panel" data-panel="evidence" aria-label="Causal evidence">
-    <div class="evidence-header">
-      <div>
-        <p class="eyebrow">CAUSAL EVIDENCE</p>
-        <h2>Experiment trace</h2>
-      </div>
-      <button id="evidence-close" class="icon-button" type="button" aria-label="Close evidence panel">×</button>
-    </div>
-    <div id="summary" class="summary-card"></div>
-    <div class="evidence-actions">
-      <button id="export" class="button button-secondary" type="button">Export reproducer</button>
-    </div>
-    <div id="history-empty" class="empty-state">
-      <strong>No experiments yet</strong>
-      <span>Run the oracle to establish a baseline, then probe or reduce a semantic unit.</span>
-    </div>
-    <ol id="trace" class="trace-list"></ol>
-  </aside>
+<body>
+<header><div><div class="brand"><strong>FAULTLINE</strong><span>causal browser failure reducer</span></div><div class="small">Direct static production runtime — no decompression bootstrap, no runtime CDN dependency.</div></div><div class="status"><span id="health" class="pill ok">READY</span><span id="webmcp" class="pill">WebMCP checking</span><span id="revision" class="pill">r1</span></div></header>
+<main class="grid">
+<section class="panel"><p class="eyebrow">SOURCE</p><h1>Failure case</h1><div class="notice">Paste or edit a reproducible browser failure. FAULTLINE runs it inside a sandboxed iframe and evaluates the locked oracle deterministically.</div><div class="tabs"><button class="tab active" data-axis="html">HTML</button><button class="tab" data-axis="css">CSS</button><button class="tab" data-axis="js">JS</button></div><textarea id="source" spellcheck="false" aria-label="Source editor"></textarea><div class="actions" style="margin-top:10px"><button id="apply" class="btn primary">Apply source</button><button id="run" class="btn">Run oracle</button><button id="reset" class="btn">Reset fixture</button></div><div class="card"><p class="eyebrow">CONNECTION SURFACES</p><h2>Use FAULTLINE programmatically</h2><div class="small">Top-level browser API is exposed as <code>window.faultline</code>. When <code>document.modelContext</code> exists, compatible WebMCP tools are registered in-page.</div><pre>await window.faultline.inspect()
+await window.faultline.run()
+await window.faultline.defineOracle({ kind:'dom_property', selector:'#modal', property:'open', equals:true, action:{kind:'click',selector:'#save'} })
+await window.faultline.exportCase()</pre></div></section>
+<section class="panel"><p class="eyebrow">LIVE EXPERIMENT</p><h1>Deterministic oracle</h1><iframe id="preview" sandbox="allow-scripts" title="FAULTLINE isolated experiment"></iframe><div class="card"><div class="row2"><div><label for="oracle-kind">Oracle type</label><select id="oracle-kind"><option value="dom_property">DOM property</option><option value="computed_style">Computed style</option><option value="dom_exists">DOM existence</option><option value="runtime_error">Runtime error</option></select></div><div><label for="oracle-selector">Target selector</label><input id="oracle-selector" value="#modal"></div></div><div class="row2"><div><label for="oracle-property">Property</label><input id="oracle-property" value="open"></div><div><label for="oracle-equals">Failure value</label><input id="oracle-equals" value="true"></div></div><div class="row2"><div><label for="action-kind">Before measurement</label><select id="action-kind"><option value="click">Click element</option><option value="none">No action</option></select></div><div><label for="action-selector">Action selector</label><input id="action-selector" value="#save"></div></div><div class="actions" style="margin-top:12px"><button id="lock" class="btn primary">Lock oracle</button></div><div id="oracle-summary" class="small" style="margin-top:10px"></div></div></section>
+<aside class="panel"><p class="eyebrow">CAUSAL EVIDENCE</p><h1>Experiment trace</h1><div id="summary" class="card">No experiments yet.</div><div class="actions" style="margin-top:10px"><button id="export" class="btn">Export reproducer</button><button id="clear" class="btn">Clear trace</button></div><ol id="trace" class="trace"></ol></aside>
 </main>
-
-<script type="module" src="./src/app.js"></script>
+<script>
+(()=>{
+'use strict';
+const $=id=>document.getElementById(id);const clone=v=>JSON.parse(JSON.stringify(v));
+const fixture={html:'<dialog id="modal" open><button id="save">Save</button></dialog>',css:'#modal{display:block;position:fixed;z-index:10} button{padding:8px}',js:"document.querySelector('#save').addEventListener('click',()=>{ document.querySelector('#modal').open = true; });",oracle:{kind:'dom_property',selector:'#modal',property:'open',equals:true,action:{kind:'click',selector:'#save'},delayMs:0}};
+let state={case:clone(fixture),revision:1,axis:'html',ledger:[]};
+const rev=()=>`r${state.revision}`;const expected=v=>{const s=String(v);if(s==='true')return true;if(s==='false')return false;if(s==='null')return null;if(s==='undefined')return undefined;if(s!==''&&!Number.isNaN(Number(s)))return Number(s);return v};
+function persist(){try{localStorage.setItem('faultline-state-v1',JSON.stringify(state))}catch{}}
+function restore(){try{const s=JSON.parse(localStorage.getItem('faultline-state-v1'));if(s&&s.case&&s.revision)state=s}catch{}}
+function render(){document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.axis===state.axis));$('source').value=state.case[state.axis];$('revision').textContent=rev();$('oracle-kind').value=state.case.oracle.kind;$('oracle-selector').value=state.case.oracle.selector||'';$('oracle-property').value=state.case.oracle.property||'';$('oracle-equals').value=String(state.case.oracle.equals??'');$('action-kind').value=state.case.oracle.action?.kind||'none';$('action-selector').value=state.case.oracle.action?.selector||'';$('oracle-summary').textContent=`${state.case.oracle.kind} on ${state.case.oracle.selector||'(runtime)'}${state.case.oracle.property?'.'+state.case.oracle.property:''} = ${String(state.case.oracle.equals)}`;const t=$('trace');t.innerHTML='';[...state.ledger].reverse().forEach(e=>{const li=document.createElement('li');li.innerHTML=`<strong class="${e.status==='FAIL'?'fail':'pass'}">${e.kind.toUpperCase()} · ${e.status}</strong><span class="small">${e.revision} · ${e.at}</span><div class="small">${escapeHtml(JSON.stringify(e.evidence||{}))}</div>`;t.appendChild(li)});$('summary').textContent=state.ledger.length?`${state.ledger.length} experiment${state.ledger.length===1?'':'s'} recorded · latest ${state.ledger.at(-1).status}`:'No experiments yet.';persist()}
+function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+function buildDoc(c,runId){const o=JSON.stringify(c.oracle);const safeJs=String(c.js).replace(/<\/script/gi,'<\\/script');return `<!doctype html><html><head><meta charset="utf-8"><style>${c.css}</style></head><body>${c.html}<script>let __err=null;addEventListener('error',e=>{__err=String(e.message||e.error||'runtime error')});try{${safeJs}}catch(e){__err=String(e&&e.message||e)};const o=${o};const eq=(a,b)=>String(a)===String(b);setTimeout(()=>{try{if(o.action&&o.action.kind==='click'){const a=document.querySelector(o.action.selector);if(a)a.click()}setTimeout(()=>{let actual,status='PASS',evidence={};try{if(o.kind==='runtime_error'){actual=__err;status=__err?'FAIL':'PASS';evidence={runtimeError:__err}}else{const el=document.querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='computed_style')actual=el?getComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined;status=eq(actual,o.equals)?'FAIL':'PASS';evidence={actual,expected:o.equals,selector:o.selector,property:o.property}}}catch(e){status='UNRESOLVED';evidence={reason:String(e&&e.message||e)}}parent.postMessage({type:'faultline-result',runId:${JSON.stringify(runId)},status,evidence},'*')},Number(o.delayMs)||0)}catch(e){parent.postMessage({type:'faultline-result',runId:${JSON.stringify(runId)},status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}},'*')}},0)<\/script></body></html>`}
+function runCase(c=state.case){return new Promise(resolve=>{const runId=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random());let done=false;const timer=setTimeout(()=>finish({status:'UNRESOLVED',evidence:{reason:'HOST_TIMEOUT'}}),1800);function finish(v){if(done)return;done=true;clearTimeout(timer);removeEventListener('message',on);resolve(v)}function on(e){if(e.data?.type==='faultline-result'&&e.data.runId===runId)finish({status:e.data.status,evidence:e.data.evidence||{}})}addEventListener('message',on);$('preview').srcdoc=buildDoc(c,runId)})}
+async function run(kind='run'){const r=await runCase();const entry={kind,status:r.status,evidence:r.evidence,revision:rev(),at:new Date().toISOString()};state.ledger.push(entry);$('health').textContent=r.status;render();return r}
+function commit(){state.case[state.axis]=$('source').value;state.revision++;render();return inspect()}
+function inspect(){return {revision:rev(),case:clone(state.case),history:clone(state.ledger),webmcp:!!document.modelContext}}
+function defineOracle(o){state.case.oracle={kind:o.kind||'dom_property',selector:o.selector||'',property:o.property||'',equals:o.equals,action:o.action||{kind:'none'},delayMs:Number(o.delayMs)||0};state.revision++;render();return inspect()}
+function exportCase(){const c=state.case;return `<!doctype html><html><head><meta charset="utf-8"><style>${c.css}</style></head><body>${c.html}<script>${String(c.js).replace(/<\/script/gi,'<\\/script')}<\/script></body></html>`}
+window.faultline={inspect,run:()=>run('api-run'),defineOracle,exportCase,reset:()=>{state={case:clone(fixture),revision:1,axis:'html',ledger:[]};render();return inspect()}};
+function registerWebMCP(){const mc=document.modelContext;if(!mc){$('webmcp').textContent='WebMCP unavailable';return}try{const defs=[['faultline_inspect','Inspect the current FAULTLINE case',{},()=>inspect()],['faultline_run','Run the deterministic failure oracle',{},()=>run('webmcp-run')],['faultline_export','Export the current reproducer',{},()=>({html:exportCase()})]];for(const [name,description,inputSchema,handler] of defs){if(typeof mc.registerTool==='function')mc.registerTool({name,description,inputSchema:{type:'object',properties:inputSchema,additionalProperties:false}},handler);else if(typeof mc.addTool==='function')mc.addTool({name,description,inputSchema:{type:'object',properties:inputSchema,additionalProperties:false},handler})}$('webmcp').textContent='WebMCP ready';$('webmcp').classList.add('ok')}catch(e){$('webmcp').textContent='WebMCP error'}}
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{state.case[state.axis]=$('source').value;state.axis=b.dataset.axis;render()});$('apply').onclick=commit;$('run').onclick=()=>run('run');$('reset').onclick=()=>window.faultline.reset();$('lock').onclick=()=>defineOracle({kind:$('oracle-kind').value,selector:$('oracle-selector').value,property:$('oracle-property').value,equals:expected($('oracle-equals').value),action:{kind:$('action-kind').value,selector:$('action-selector').value},delayMs:0});$('export').onclick=()=>{const blob=new Blob([exportCase()],{type:'text/html'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='faultline-reproducer.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};$('clear').onclick=()=>{state.ledger=[];render()};restore();render();registerWebMCP();$('preview').srcdoc=buildDoc(state.case,'initial-preview');
+})();
+</script>
 </body>
 </html>

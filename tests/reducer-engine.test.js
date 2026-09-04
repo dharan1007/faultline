@@ -30,3 +30,20 @@ test('revision store rejects stale mutations and can restore snapshots', () => {
   assert.equal(restored.value.html, 'A');
   assert.equal(restored.revision, 'r3');
 });
+
+test('revision store dump and hydrate preserve canonical revision, snapshots and history', () => {
+  const original = createRevisionStore({html:'A',css:'',js:''});
+  const r1 = original.inspect().revision;
+  const r2 = original.commit({html:'B',css:'',js:''},{kind:'edit'},r1).revision;
+  const persisted = original.dump();
+
+  const hydrated = createRevisionStore({html:'ignored',css:'',js:''}, persisted);
+  assert.equal(hydrated.inspect().revision, r2);
+  assert.equal(hydrated.inspect().value.html, 'B');
+  assert.equal(hydrated.inspect().history.length, 1);
+  assert.equal(hydrated.snapshot(r1).html, 'A');
+
+  const restored = hydrated.restore(r1, r2);
+  assert.equal(restored.revision, 'r3');
+  assert.equal(restored.value.html, 'A');
+});

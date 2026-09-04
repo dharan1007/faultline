@@ -1,5 +1,6 @@
 const STATIC = new Map([
   ['/projects','projects'],
+  ['/investigations','investigations'],
   ['/connect','connect'],
   ['/runs','runs'],
   ['/evidence','evidence'],
@@ -25,7 +26,7 @@ export function parseRoute(hash){
 }
 
 export function hrefFor(name,params={}){
-  const byName={projects:'/projects',connect:'/connect',runs:'/runs',evidence:'/evidence',integrations:'/integrations',settings:'/settings',minimal:'/minimal'};
+  const byName={projects:'/projects',investigations:'/investigations',connect:'/connect',runs:'/runs',evidence:'/evidence',integrations:'/integrations',settings:'/settings',minimal:'/minimal'};
   if(byName[name]) return `#${byName[name]}`;
   if(name==='project'&&params.projectId!=null) return `#/project/${encodeURIComponent(String(params.projectId))}`;
   if(name==='investigation'&&params.investigationId!=null) return `#/investigation/${encodeURIComponent(String(params.investigationId))}`;

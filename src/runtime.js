@@ -16,6 +16,7 @@ let axis = 'html';
 let pins = new Set();
 let selectedUnitId = null;
 let experimentLedger = [];
+let experimentQueue = Promise.resolve();
 const revisions = new Map([['r1',{value:clone(fixture),pins:[]}]]);
 
 function value(){ return store.inspect().value; }
@@ -80,7 +81,7 @@ setTimeout(()=>{try{
 <\/script></body></html>`;
 }
 
-function runCase(c=value()){
+function executeCase(c){
   return new Promise(resolve=>{
     const runId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
     let done=false;
@@ -90,6 +91,12 @@ function runCase(c=value()){
     addEventListener('message',onMessage);
     $('preview').srcdoc=buildSandboxDocument(c,runId);
   });
+}
+function runCase(c=value()){
+  const snapshot=clone(c);
+  const task=experimentQueue.then(()=>executeCase(snapshot));
+  experimentQueue=task.then(()=>undefined,()=>undefined);
+  return task;
 }
 
 function record(kind,result,extra={}){ const entry={kind,status:result.status,evidence:result.evidence||{},revision:revision(),at:new Date().toISOString(),...extra};experimentLedger.push(entry);persist();renderTrace();return entry; }

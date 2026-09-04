@@ -26,11 +26,29 @@ try{
   const errors=[];page.on('pageerror',e=>errors.push(String(e)));
   const response=await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
   assert.equal(response.status(),200);
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===10);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===11);
   assert.deepEqual(await page.evaluate(()=>Object.keys(window.faultline).sort()),['applySource','autopilot','defineOracle','exportCase','history','inspect','manifest','pin','probe','reduce','restore','run'].sort());
-  assert.equal(await page.locator('#webmcp').textContent(),'WebMCP ready · 10 tools');
+  assert.equal(await page.locator('#webmcp').textContent(),'WebMCP ready · 11 tools');
   const toolContract=await page.evaluate(()=>window.__webmcpTools.map(t=>({name:t.name,execute:typeof t.execute,handler:'handler' in t})));
-  assert.equal(toolContract.length,10);assert.ok(toolContract.every(t=>t.execute==='function'&&!t.handler));
+  assert.equal(toolContract.length,11);assert.ok(toolContract.every(t=>t.execute==='function'&&!t.handler));
+
+  const sourceToolContract=await page.evaluate(()=>{
+    const t=window.__webmcpTools.find(tool=>tool.name==='faultline_apply_source');
+    return t&&{properties:Object.keys(t.inputSchema?.properties||{}).sort(),required:[...(t.inputSchema?.required||[])].sort(),additionalProperties:t.inputSchema?.additionalProperties};
+  });
+  assert.deepEqual(sourceToolContract,{properties:['expectedRevision','source','targetAxis'],required:['expectedRevision','source','targetAxis'],additionalProperties:false});
+  const ingestBefore=await page.evaluate(()=>window.faultline.inspect());
+  const ingested=await page.evaluate(async({expectedRevision,source})=>{
+    const tool=window.__webmcpTools.find(t=>t.name==='faultline_apply_source');
+    return JSON.parse(await tool.execute({expectedRevision,targetAxis:'js',source}));
+  },{expectedRevision:ingestBefore.revision,source:ingestBefore.case.js+'\n/* ingested through WebMCP */'});
+  assert.notEqual(ingested.revision,ingestBefore.revision);
+  assert.ok(ingested.case.js.includes('ingested through WebMCP'));
+  const staleRejected=await page.evaluate(async staleRevision=>{
+    const tool=window.__webmcpTools.find(t=>t.name==='faultline_apply_source');
+    try{await tool.execute({expectedRevision:staleRevision,targetAxis:'css',source:'body{color:red}'});return null}catch(e){return String(e?.message||e)}
+  },ingestBefore.revision);
+  assert.match(staleRejected,/STALE_REVISION/);
 
   const baseline=await page.evaluate(()=>window.faultline.run());
   assert.equal(baseline.status,'FAIL');
@@ -50,7 +68,7 @@ try{
   const persistedRevision=after.revision;
   const persistedHtml=after.case.html;
   await page.reload({waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===10);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===11);
   const reloaded=await page.evaluate(()=>window.faultline.inspect());
   assert.equal(reloaded.revision,persistedRevision);
   assert.equal(reloaded.case.html,persistedHtml);
@@ -75,7 +93,7 @@ try{
   assert.equal(await page.locator('#source').isVisible(),true);
   assert.equal(await page.locator('#preview').isVisible(),true);
   assert.equal(errors.length,0,errors.join('\n'));
-  console.log('Browser gate PASS: Chromium loaded UI, registered 10 spec-valid WebMCP tools, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, blocked experiment network side effects, and passed mobile overflow checks.');
+  console.log('Browser gate PASS: Chromium loaded UI, registered 11 spec-valid WebMCP tools, ingested source through WebMCP with stale-revision rejection, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, blocked experiment network side effects, and passed mobile overflow checks.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

@@ -57,15 +57,32 @@ export async function ddminReduce(items, evaluate, { protectedItems=[], maxTrial
   return { items:items.filter(x=>keptSet.has(x)), trials, trialCount:count };
 }
 
-export function createRevisionStore(initialValue) {
-  let revision = 1;
-  let value = clone(initialValue);
-  const snapshots = new Map([['r1', clone(value)]]);
-  const ledger = [];
+function normalizePersistedState(persistedState) {
+  if (!persistedState || typeof persistedState !== 'object') return null;
+  const revision = Number(persistedState.revision);
+  if (!Number.isInteger(revision) || revision < 1 || persistedState.value === undefined) throw new Error('INVALID_PERSISTED_STATE');
+  if (!Array.isArray(persistedState.snapshots) || !Array.isArray(persistedState.ledger)) throw new Error('INVALID_PERSISTED_STATE');
+  const currentRevision = `r${revision}`;
+  const snapshots = new Map();
+  for (const entry of persistedState.snapshots) {
+    if (!Array.isArray(entry) || entry.length !== 2 || !/^r[1-9]\d*$/.test(String(entry[0]))) throw new Error('INVALID_PERSISTED_STATE');
+    snapshots.set(String(entry[0]), clone(entry[1]));
+  }
+  if (!snapshots.has(currentRevision)) snapshots.set(currentRevision, clone(persistedState.value));
+  return { revision, value:clone(persistedState.value), snapshots, ledger:clone(persistedState.ledger) };
+}
+
+export function createRevisionStore(initialValue, persistedState=null) {
+  const hydrated = normalizePersistedState(persistedState);
+  let revision = hydrated?.revision ?? 1;
+  let value = hydrated?.value ?? clone(initialValue);
+  const snapshots = hydrated?.snapshots ?? new Map([['r1', clone(value)]]);
+  const ledger = hydrated?.ledger ?? [];
   const current = () => `r${revision}`;
   const assertRevision = expected => { if (expected !== current()) throw new Error(`STALE_REVISION expected=${expected} current=${current()}`); };
   const inspect = () => ({ revision:current(), value:clone(value), history:clone(ledger) });
   const commit = (nextValue,event={},expectedRevision=current()) => { assertRevision(expectedRevision); value=clone(nextValue); revision++; snapshots.set(current(),clone(value)); ledger.push({...event,revision:current(),at:new Date().toISOString()}); return inspect(); };
   const restore = (targetRevision,expectedRevision=current()) => { assertRevision(expectedRevision); if(!snapshots.has(targetRevision)) throw new Error('REVISION_NOT_FOUND'); return commit(snapshots.get(targetRevision),{kind:'restore',from:targetRevision},expectedRevision); };
-  return { inspect, commit, restore, assertRevision, snapshot:rev=>clone(snapshots.get(rev)) };
+  const dump = () => ({ version:1, revision, value:clone(value), snapshots:[...snapshots.entries()].map(([rev,snapshot])=>[rev,clone(snapshot)]), ledger:clone(ledger) });
+  return { inspect, commit, restore, assertRevision, snapshot:rev=>snapshots.has(rev)?clone(snapshots.get(rev)):undefined, dump };
 }

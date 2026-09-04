@@ -25,6 +25,8 @@ function normalizeExpected(v){ const s=String(v); if(s==='true')return true;if(s
 function unitsFor(targetAxis=axis, source=value()[targetAxis]){ return semanticUnits(targetAxis,source); }
 function pinKey(targetAxis,unitId){ return `${targetAxis}|${unitId}`; }
 function validRevisionEntry(entry){ return Array.isArray(entry)&&entry.length===2&&/^r[1-9]\d*$/.test(String(entry[0]))&&entry[1]?.value; }
+function abortError(){ return new DOMException('WebMCP execution aborted','AbortError'); }
+function throwIfAborted(signal){ if(signal?.aborted)throw abortError(); }
 function persist(){
   try{
     localStorage.setItem(STORAGE_KEY,JSON.stringify({version:3,store:store.dump(),axis,pins:[...pins],experimentLedger,revisions:[...revisions.entries()].map(([rev,snapshot])=>[rev,clone(snapshot)])}));
@@ -81,47 +83,53 @@ setTimeout(()=>{try{
 <\/script></body></html>`;
 }
 
-function executeCase(c){
-  return new Promise(resolve=>{
+function executeCase(c,{signal}={}){
+  return new Promise((resolve,reject)=>{
+    if(signal?.aborted){reject(abortError());return;}
     const runId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
     let done=false;
     const timer=setTimeout(()=>finish({status:'UNRESOLVED',evidence:{reason:'HOST_TIMEOUT'}}),2200);
     const onMessage=e=>{ if(e.data?.type==='faultline:result'&&e.data.runId===runId) finish({status:e.data.status,evidence:e.data.evidence||{}}); };
-    function finish(result){ if(done)return;done=true;clearTimeout(timer);removeEventListener('message',onMessage);resolve(result); }
+    const onAbort=()=>cancel();
+    function cleanup(){clearTimeout(timer);removeEventListener('message',onMessage);signal?.removeEventListener('abort',onAbort);}
+    function finish(result){ if(done)return;done=true;cleanup();resolve(result); }
+    function cancel(){ if(done)return;done=true;cleanup();$('preview').srcdoc='<!doctype html><title>Cancelled</title>';reject(abortError()); }
     addEventListener('message',onMessage);
+    signal?.addEventListener('abort',onAbort,{once:true});
     $('preview').srcdoc=buildSandboxDocument(c,runId);
   });
 }
-function runCase(c=value()){
+function runCase(c=value(),{signal}={}){
   const snapshot=clone(c);
-  const task=experimentQueue.then(()=>executeCase(snapshot));
+  const task=experimentQueue.then(()=>{throwIfAborted(signal);return executeCase(snapshot,{signal});});
   experimentQueue=task.then(()=>undefined,()=>undefined);
   return task;
 }
 
 function record(kind,result,extra={}){ const entry={kind,status:result.status,evidence:result.evidence||{},revision:revision(),at:new Date().toISOString(),...extra};experimentLedger.push(entry);persist();renderTrace();return entry; }
-async function run({expectedRevision}={}){ if(expectedRevision)store.assertRevision(expectedRevision);const r=await runCase();record('run',r);renderHealth(r.status);return r; }
+async function run({expectedRevision}={}, {signal}={}){ if(expectedRevision)store.assertRevision(expectedRevision);const r=await runCase(value(),{signal});throwIfAborted(signal);record('run',r);renderHealth(r.status);return r; }
 function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.value,pins:[...pins],unitCounts:{html:unitsFor('html',s.value.html).length,css:unitsFor('css',s.value.css).length,js:unitsFor('js',s.value.js).length},latest:experimentLedger.at(-1)||null,webmcp:!!document.modelContext}; }
 function commitCase(next,event,expectedRevision=revision()){ const result=store.commit(next,event,expectedRevision); revisions.set(result.revision,{value:clone(result.value),pins:[...pins]}); persist();render();return inspect(); }
 function defineOracle({expectedRevision=revision(),oracle}){ return commitCase({...value(),oracle:clone(oracle)},{kind:'define_oracle'},expectedRevision); }
 function applySource({expectedRevision=revision(),targetAxis=axis,source}){ if(!['html','css','js'].includes(targetAxis))throw new Error('INVALID_AXIS'); return commitCase({...value(),[targetAxis]:String(source)},{kind:'source_edit',axis:targetAxis},expectedRevision); }
-async function probe({expectedRevision=revision(),targetAxis=axis,unitId}){ store.assertRevision(expectedRevision);const source=value()[targetAxis];const unit=unitsFor(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(pins.has(pinKey(targetAxis,unitId)))throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const result=await runCase(candidate);record('probe',result,{axis:targetAxis,unitId,mutated:false});return {...result,mutated:false,canonicalRevision:revision()}; }
+async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){ store.assertRevision(expectedRevision);const source=value()[targetAxis];const unit=unitsFor(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(pins.has(pinKey(targetAxis,unitId)))throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const result=await runCase(candidate,{signal});throwIfAborted(signal);record('probe',result,{axis:targetAxis,unitId,mutated:false});return {...result,mutated:false,canonicalRevision:revision()}; }
 function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);pinned?pins.add(key):pins.delete(key);experimentLedger.push({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:revision(),at:new Date().toISOString()});revisions.set(revision(),{value:clone(value()),pins:[...pins]});persist();render();return inspect(); }
-async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}={}){
-  store.assertRevision(expectedRevision);
+async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}={}, {signal}={}){
+  store.assertRevision(expectedRevision);throwIfAborted(signal);
   const source=value()[targetAxis], all=unitsFor(targetAxis,source);
   if(!all.length) return {status:'NO_UNITS',before:source.length,after:source.length,reduction:0,trials:0,revision:revision()};
   const protectedItems=all.filter(u=>pins.has(pinKey(targetAxis,u.id)));
-  const reduced=await ddminReduce(all,async kept=>{const keptIds=new Set(kept.map(u=>u.id));const removed=all.filter(u=>!keptIds.has(u.id));return (await runCase({...value(),[targetAxis]:removeUnits(source,removed)})).status;},{protectedItems,maxTrials});
-  const keptIds=new Set(reduced.items.map(u=>u.id));const removed=all.filter(u=>!keptIds.has(u.id));const nextSource=removeUnits(source,removed);const final=await runCase({...value(),[targetAxis]:nextSource});
-  if(final.status!=='FAIL')throw new Error('REDUCTION_LOST_FAILURE');
+  const reduced=await ddminReduce(all,async kept=>{throwIfAborted(signal);const keptIds=new Set(kept.map(u=>u.id));const removed=all.filter(u=>!keptIds.has(u.id));return (await runCase({...value(),[targetAxis]:removeUnits(source,removed)},{signal})).status;},{protectedItems,maxTrials});
+  throwIfAborted(signal);
+  const keptIds=new Set(reduced.items.map(u=>u.id));const removed=all.filter(u=>!keptIds.has(u.id));const nextSource=removeUnits(source,removed);const final=await runCase({...value(),[targetAxis]:nextSource},{signal});
+  throwIfAborted(signal);if(final.status!=='FAIL')throw new Error('REDUCTION_LOST_FAILURE');
   const before=source.length,after=nextSource.length;commitCase({...value(),[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reduced.trialCount,removed:removed.length},expectedRevision);record('reduce',final,{axis:targetAxis,trials:reduced.trialCount,removed:removed.length,reduction:before?1-after/before:0});
   return {status:final.status,before,after,reduction:before?1-after/before:0,trials:reduced.trialCount,removed:removed.length,revision:revision()};
 }
 function history({limit=100}={}){ return clone(experimentLedger.slice(-Math.max(1,Math.min(200,Number(limit)||100)))); }
 function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');pins=new Set(snap.pins||[]);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persist();render();return inspect(); }
 function exportCase(){const c=value();return `<!doctype html><html><head><meta charset="utf-8"><style>${c.css}</style></head><body>${c.html}<script>${String(c.js).replace(/<\/script/gi,'<\\/script')}<\/script></body></html>`;}
-async function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}){store.assertRevision(expectedRevision);const baseline=await run({expectedRevision});if(baseline.status!=='FAIL')throw new Error('BASELINE_NOT_FAILING');const results=[];for(const targetAxis of axes){const beforeRevision=revision();const r=await reduce({expectedRevision:beforeRevision,targetAxis,maxTrials:maxTrialsPerAxis});results.push({axis:targetAxis,...r});}return {status:'COMPLETE',revision:revision(),results};}
+async function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){store.assertRevision(expectedRevision);throwIfAborted(signal);const baseline=await run({expectedRevision},{signal});if(baseline.status!=='FAIL')throw new Error('BASELINE_NOT_FAILING');const results=[];for(const targetAxis of axes){throwIfAborted(signal);const beforeRevision=revision();const r=await reduce({expectedRevision:beforeRevision,targetAxis,maxTrials:maxTrialsPerAxis},{signal});results.push({axis:targetAxis,...r});}return {status:'COMPLETE',revision:revision(),results};}
 
 function renderHealth(status){$('health').textContent=status;$('health').dataset.state=status;}
 function renderTrace(){const list=$('trace');list.innerHTML='';for(const e of [...experimentLedger].reverse().slice(0,50)){const li=document.createElement('li');li.innerHTML=`<strong>${e.kind.toUpperCase()} · ${e.status}</strong><span>${e.revision} · ${new Date(e.at).toLocaleTimeString()}</span><code>${escapeHtml(JSON.stringify(e.evidence||{}))}</code>`;list.appendChild(li)}$('summary').textContent=experimentLedger.length?`${experimentLedger.length} evidence events · latest ${experimentLedger.at(-1).status}`:'No experiments yet.';}
@@ -132,18 +140,18 @@ function render(){const s=inspect();$('revision').textContent=s.revision;documen
 const REVISION_PROPERTY={expectedRevision:{type:'string',pattern:'^r[1-9]\\d*$'}};
 const TOOL_DEFS=[
  ['faultline_inspect','Inspect the canonical failure case, revision, pins and semantic-unit counts.',{},async()=>inspect(),true],
- ['faultline_run','Execute the locked deterministic failure oracle against the inspected canonical revision.',{...REVISION_PROPERTY},async input=>run(input),false,['expectedRevision']],
+ ['faultline_run','Execute the locked deterministic failure oracle against the inspected canonical revision.',{...REVISION_PROPERTY},async(input,options)=>run(input,options),false,['expectedRevision']],
  ['faultline_define_oracle','Replace the deterministic failure oracle using an optimistic revision guard.',{...REVISION_PROPERTY,oracle:{type:'object'}},async input=>defineOracle(input),false,['expectedRevision','oracle']],
  ['faultline_apply_source','Replace one canonical HTML, CSS, or JavaScript source axis using an optimistic revision guard.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},source:{type:'string'}},async input=>applySource(input),false,['expectedRevision','targetAxis','source']],
- ['faultline_probe','Test removing one semantic unit from the inspected canonical revision without mutating canonical state.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'}},async input=>probe(input),true,['expectedRevision']],
- ['faultline_reduce','Delta-debug one source axis while preserving the failing oracle and rejecting stale revisions.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},maxTrials:{type:'integer',minimum:1,maximum:200}},async input=>reduce(input),false,['expectedRevision']],
+ ['faultline_probe','Test removing one semantic unit from the inspected canonical revision without mutating canonical state.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'}},async(input,options)=>probe(input,options),true,['expectedRevision']],
+ ['faultline_reduce','Delta-debug one source axis while preserving the failing oracle and rejecting stale revisions.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},maxTrials:{type:'integer',minimum:1,maximum:200}},async(input,options)=>reduce(input,options),false,['expectedRevision']],
  ['faultline_pin','Pin or unpin a semantic unit so reduction cannot remove it, guarded by canonical revision.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'},pinned:{type:'boolean'}},async input=>pin(input),false,['expectedRevision']],
  ['faultline_history','Read recent deterministic experiment evidence.',{limit:{type:'integer',minimum:1,maximum:200}},async input=>history(input),true],
  ['faultline_restore','Restore a prior canonical revision only if the inspected current revision is still current.',{...REVISION_PROPERTY,targetRevision:{type:'string'}},async input=>restore(input),false,['expectedRevision','targetRevision']],
  ['faultline_export','Export the current case as a standalone HTML reproducer.',{},async()=>({html:exportCase()}),true],
- ['faultline_autopilot','Run baseline verification and reduce HTML, CSS and JS sequentially from one inspected revision.',{...REVISION_PROPERTY,maxTrialsPerAxis:{type:'integer',minimum:1,maximum:200}},async input=>autopilot(input),false,['expectedRevision']]
+ ['faultline_autopilot','Run baseline verification and reduce HTML, CSS and JS sequentially from one inspected revision.',{...REVISION_PROPERTY,maxTrialsPerAxis:{type:'integer',minimum:1,maximum:200}},async(input,options)=>autopilot(input,options),false,['expectedRevision']]
 ];
-function registerWebMCP(){const mc=document.modelContext;if(!mc?.registerTool){$('webmcp').textContent='WebMCP unavailable';return;}const controllers=[];Promise.all(TOOL_DEFS.map(async([name,description,properties,execute,readOnly,required=[]])=>{const controller=new AbortController();controllers.push(controller);await mc.registerTool({name,title:name.replace('faultline_','FAULTLINE · '),description,inputSchema:{type:'object',properties,required,additionalProperties:false},execute:async input=>JSON.stringify(await execute(input||{})),annotations:{readOnlyHint:readOnly,untrustedContentHint:false}},{signal:controller.signal});})).then(()=>{$('webmcp').textContent=`WebMCP ready · ${TOOL_DEFS.length} tools`;$('webmcp').dataset.state='ready';}).catch(e=>{$('webmcp').textContent='WebMCP registration error';$('webmcp').title=String(e?.message||e);});window.addEventListener('pagehide',()=>controllers.forEach(c=>c.abort()),{once:true});}
+function registerWebMCP(){const mc=document.modelContext;if(!mc?.registerTool){$('webmcp').textContent='WebMCP unavailable';return;}const controllers=[];Promise.all(TOOL_DEFS.map(async([name,description,properties,execute,readOnly,required=[]])=>{const controller=new AbortController();controllers.push(controller);await mc.registerTool({name,title:name.replace('faultline_','FAULTLINE · '),description,inputSchema:{type:'object',properties,required,additionalProperties:false},execute:async(input,options)=>JSON.stringify(await execute(input||{},options||{})),annotations:{readOnlyHint:readOnly,untrustedContentHint:false}},{signal:controller.signal});})).then(()=>{$('webmcp').textContent=`WebMCP ready · ${TOOL_DEFS.length} tools`;$('webmcp').dataset.state='ready';}).catch(e=>{$('webmcp').textContent='WebMCP registration error';$('webmcp').title=String(e?.message||e);});window.addEventListener('pagehide',()=>controllers.forEach(c=>c.abort()),{once:true});}
 
 window.faultline={inspect,run,defineOracle,applySource,probe,reduce,pin,history,restore,exportCase,autopilot,manifest:()=>TOOL_DEFS.map(([name,description,properties,,readOnly,required=[]])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},readOnly}))};
 

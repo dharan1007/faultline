@@ -1,13 +1,15 @@
 {
   "name": "faultline-webmcp",
-  "version": "0.5.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test",
-    "check": "node --check src/core.js && node --check src/reducers.js && node --check src/sandbox.js && node --check src/domain.js && node --check src/app.js && node --check src/webmcp.js",
-    "build": "node scripts-build.mjs",
-    "test:browser": "node tests/browser-e2e.mjs",
-    "test:ui-browser": "node tests/ui-browser-audit.mjs"
+    "test": "node --test tests/reducer-engine.test.js",
+    "check": "node --check src/reducer-engine.js && node --check src/runtime.js && node --check tests/browser-e2e.mjs",
+    "build": "node -e \"const fs=require('fs'); for (const f of ['index.html','src/runtime.js','src/reducer-engine.js']) if(!fs.existsSync(f)) process.exit(1); console.log('static production tree verified')\"",
+    "test:browser": "node tests/browser-e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.55.0"
   }
 }

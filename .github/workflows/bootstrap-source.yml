@@ -11,9 +11,10 @@ permissions:
 jobs:
   restore:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Validate or repair verified source package
+      - name: Validate or recover verified source package
         shell: bash
         run: |
           set -euo pipefail
@@ -23,18 +24,129 @@ jobs:
           file "$archive"
           if unzip -t "$archive" >/tmp/faultline-zip-test.log 2>&1; then
             echo "Archive integrity: valid"
-            cp "$archive" /tmp/faultline-source.zip
+            unzip -oq "$archive" -d .
           else
-            echo "Archive integrity check failed; attempting central-directory recovery"
+            echo "Central directory is unavailable; recovering validated local entries"
             cat /tmp/faultline-zip-test.log
-            zip -FF "$archive" --out /tmp/faultline-source.zip
-            unzip -t /tmp/faultline-source.zip
+            python3 - <<'PY'
+          from __future__ import annotations
+          import binascii, pathlib, struct, zlib
+
+          archive = pathlib.Path('.bootstrap/faultline-source.zip')
+          raw = archive.read_bytes()
+          pos = 0
+          extracted = 0
+          LOCAL = 0x04034B50
+          CENTRAL = 0x02014B50
+          EOCD = 0x06054B50
+
+          def safe_target(name: str) -> pathlib.Path:
+              p = pathlib.PurePosixPath(name)
+              if p.is_absolute() or '..' in p.parts:
+                  raise RuntimeError(f'unsafe archive path: {name!r}')
+              return pathlib.Path(*p.parts)
+
+          while pos + 4 <= len(raw):
+              sig = struct.unpack_from('<I', raw, pos)[0]
+              if sig in (CENTRAL, EOCD):
+                  break
+              if sig != LOCAL:
+                  tail = raw[pos:pos+16].hex()
+                  raise RuntimeError(f'unexpected ZIP bytes at offset {pos}: {tail}')
+              if pos + 30 > len(raw):
+                  raise RuntimeError(f'truncated local header at offset {pos}')
+
+              (sig, version, flags, method, mtime, mdate, crc_header,
+               csize_header, usize_header, name_len, extra_len) = struct.unpack_from('<IHHHHHIIIHH', raw, pos)
+              header_end = pos + 30
+              meta_end = header_end + name_len + extra_len
+              if meta_end > len(raw):
+                  raise RuntimeError(f'truncated name/extra at offset {pos}')
+              name_bytes = raw[header_end:header_end + name_len]
+              try:
+                  name = name_bytes.decode('utf-8' if flags & 0x800 else 'cp437')
+              except UnicodeDecodeError as exc:
+                  raise RuntimeError(f'cannot decode filename at offset {pos}') from exc
+              target = safe_target(name)
+              data_start = meta_end
+
+              if flags & 0x1:
+                  raise RuntimeError(f'encrypted ZIP entry is unsupported: {name}')
+
+              descriptor_mode = bool(flags & 0x08)
+              compressed = b''
+              payload = b''
+              consumed = 0
+
+              if method == 8 and descriptor_mode and csize_header == 0:
+                  dec = zlib.decompressobj(-15)
+                  payload = dec.decompress(raw[data_start:]) + dec.flush()
+                  if not dec.eof:
+                      raise RuntimeError(f'truncated deflate stream: {name}')
+                  consumed = len(raw[data_start:]) - len(dec.unused_data)
+                  compressed = raw[data_start:data_start + consumed]
+              else:
+                  csize = csize_header
+                  if descriptor_mode and csize == 0 and method == 0:
+                      raise RuntimeError(f'stored entry with unknown descriptor size cannot be recovered safely: {name}')
+                  data_end = data_start + csize
+                  if data_end > len(raw):
+                      raise RuntimeError(f'truncated payload: {name}')
+                  compressed = raw[data_start:data_end]
+                  consumed = csize
+                  if method == 0:
+                      payload = compressed
+                  elif method == 8:
+                      try:
+                          payload = zlib.decompress(compressed, -15)
+                      except zlib.error as exc:
+                          raise RuntimeError(f'invalid deflate stream: {name}: {exc}') from exc
+                  else:
+                      raise RuntimeError(f'unsupported compression method {method}: {name}')
+
+              next_pos = data_start + consumed
+              crc_expected = crc_header
+              csize_expected = csize_header
+              usize_expected = usize_header
+              if descriptor_mode:
+                  if next_pos + 4 > len(raw):
+                      raise RuntimeError(f'missing data descriptor: {name}')
+                  descriptor_sig = struct.unpack_from('<I', raw, next_pos)[0]
+                  if descriptor_sig == 0x08074B50:
+                      next_pos += 4
+                  if next_pos + 12 > len(raw):
+                      raise RuntimeError(f'truncated data descriptor: {name}')
+                  crc_expected, csize_expected, usize_expected = struct.unpack_from('<III', raw, next_pos)
+                  next_pos += 12
+
+              crc_actual = binascii.crc32(payload) & 0xffffffff
+              if crc_expected and crc_actual != crc_expected:
+                  raise RuntimeError(f'CRC mismatch for {name}: expected {crc_expected:08x}, got {crc_actual:08x}')
+              if csize_expected and len(compressed) != csize_expected:
+                  raise RuntimeError(f'compressed-size mismatch for {name}: expected {csize_expected}, got {len(compressed)}')
+              if usize_expected and len(payload) != usize_expected:
+                  raise RuntimeError(f'uncompressed-size mismatch for {name}: expected {usize_expected}, got {len(payload)}')
+
+              if name.endswith('/'):
+                  target.mkdir(parents=True, exist_ok=True)
+              else:
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(payload)
+              extracted += 1
+              print(f'recovered {name} ({len(payload)} bytes)')
+              pos = next_pos
+
+          if extracted == 0:
+              raise RuntimeError('no recoverable ZIP entries found')
+          print(f'Recovered and CRC-validated {extracted} local ZIP entries')
+          PY
           fi
-      - name: Expand verified source package
-        run: unzip -o /tmp/faultline-source.zip -d .
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+      - name: Install exact dependencies
+        run: npm ci
       - name: Verify exact package
         run: npm test && npm run check && npm run build
       - name: Commit complete source tree

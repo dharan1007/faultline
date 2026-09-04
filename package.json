@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check src/reducer-engine.js && node --check src/runtime.js && node --check tests/browser-e2e.mjs",
-    "build": "node -e \"const fs=require('fs'); for (const f of ['index.html','src/runtime.js','src/reducer-engine.js']) if(!fs.existsSync(f)) process.exit(1); console.log('static production tree verified')\"",
+    "check": "node --check src/reducer-engine.js && node --check src/runtime.js && node --check src/platform-domain.js && node --check src/project-detector.js && node --check src/workspace-store.js && node --check src/router.js && node --check src/app-shell.js && node --check server/capability.js && node --check server/http.js && node --check server/api-handlers.js && node --check tests/browser-e2e.mjs",
+    "build": "node -e \"const fs=require('fs'); for (const f of ['index.html','styles/app.css','src/runtime.js','src/reducer-engine.js','src/platform-domain.js','src/project-detector.js','src/workspace-store.js','src/router.js','src/app-shell.js','server/capability.js','server/http.js','server/api-handlers.js']) if(!fs.existsSync(f)) { console.error('missing '+f); process.exit(1); } console.log('connected production tree verified')\"",
     "test:browser": "node tests/browser-e2e.mjs"
   },
   "devDependencies": {

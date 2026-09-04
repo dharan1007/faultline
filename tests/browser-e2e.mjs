@@ -24,51 +24,50 @@ try{
   assert.equal(response.status(),200);
   await page.waitForFunction(()=>window.faultlinePlatform?.ready===true);
 
-  // The product opens as a project/investigation platform, not a source editor.
   assert.equal(await page.locator('[data-view="projects"]').isVisible(),true);
   assert.equal(await page.locator('#source').isVisible().catch(()=>false),false);
   for(const label of ['Projects','Investigations','Runs','Evidence','Integrations']){
-    assert.equal(await page.getByRole('link',{name:label,exact:true}).isVisible(),true,`${label} nav missing`);
+    assert.equal(await page.getByRole('link',{name:new RegExp(`${label}$`)}).isVisible(),true,`${label} nav missing`);
   }
-  assert.equal(await page.getByRole('button',{name:'New investigation'}).isVisible(),true);
+  assert.equal(await page.getByRole('button',{name:'New investigation'}).first().isVisible(),true);
 
-  // Connect a real live URL without touching HTML/CSS/JS.
-  await page.getByRole('link',{name:'Connect project'}).click();
+  await page.locator('[data-view="projects"]').getByRole('link',{name:'Connect project'}).first().click();
   await page.waitForURL(/#\/connect$/);
-  assert.equal(await page.locator('[data-view="connect"]').isVisible(),true);
-  await page.getByLabel('Live or staging URL').fill('https://example.com/checkout');
-  await page.getByLabel('Project name').fill('Checkout');
-  await page.getByRole('button',{name:'Verify project'}).click();
+  const connect=page.locator('[data-view="connect"]');
+  assert.equal(await connect.isVisible(),true);
+  await connect.getByLabel('Live or staging URL').fill('https://example.com/checkout');
+  await connect.getByLabel('Project name').fill('Checkout');
+  await connect.getByRole('button',{name:'Verify project'}).click();
   await page.waitForURL(/#\/project\//);
-  assert.equal(await page.getByText('Live URL', {exact:true}).isVisible(),true);
-  assert.equal(await page.getByText('READY', {exact:true}).first().isVisible(),true);
-  assert.equal(await page.getByRole('button',{name:'Start investigation'}).isVisible(),true);
+  const project=page.locator('[data-view="project"]');
+  assert.equal(await project.getByText('Live URL',{exact:true}).isVisible(),true);
+  assert.equal(await project.getByText('READY',{exact:true}).isVisible(),true);
+  assert.equal(await project.getByRole('button',{name:'Start investigation'}).isVisible(),true);
 
-  // The investigation is guided through user-facing stages.
-  await page.getByRole('button',{name:'Start investigation'}).click();
+  await project.getByRole('button',{name:'Start investigation'}).click();
   await page.waitForURL(/#\/investigation\//);
-  assert.equal(await page.locator('[data-view="investigation"]').isVisible(),true);
-  for(const stage of ['Reproduce','Observe','Isolate','Verify','Handoff']) assert.equal(await page.getByText(stage,{exact:true}).first().isVisible(),true);
-  await page.getByLabel('What is failing?').fill('Cart total becomes zero after removing the second product');
-  await page.getByLabel('Route').fill('/checkout');
-  await page.getByLabel('Expected behavior').fill('Cart total remains correct');
-  await page.getByLabel('Observed behavior').fill('Cart total becomes zero');
-  await page.getByRole('button',{name:'Save reproduction'}).click();
-  assert.equal(await page.getByText('Reproduction definition saved',{exact:true}).isVisible(),true);
-  assert.equal(await page.getByRole('button',{name:'Continue to observe'}).isEnabled(),true);
-  await page.getByRole('button',{name:'Continue to observe'}).click();
-  assert.equal(await page.getByText('Observation workspace',{exact:true}).isVisible(),true);
+  const investigation=page.locator('[data-view="investigation"]');
+  assert.equal(await investigation.isVisible(),true);
+  for(const stage of ['Reproduce','Observe','Isolate','Verify','Handoff']) assert.equal(await investigation.getByText(stage,{exact:true}).first().isVisible(),true);
+  await investigation.getByLabel('What is failing?').fill('Cart total becomes zero after removing the second product');
+  await investigation.getByLabel('Route').fill('/checkout');
+  await investigation.getByLabel('Expected behavior').fill('Cart total remains correct');
+  await investigation.getByLabel('Observed behavior').fill('Cart total becomes zero');
+  await investigation.getByRole('button',{name:'Save reproduction'}).click();
+  assert.equal(await investigation.getByText('Reproduction definition saved',{exact:true}).isVisible(),true);
+  assert.equal(await investigation.getByRole('button',{name:'Continue to observe'}).isEnabled(),true);
+  await investigation.getByRole('button',{name:'Continue to observe'}).click();
+  assert.equal(await investigation.getByText('Observation workspace',{exact:true}).isVisible(),true);
 
-  // Integration surfaces have a dedicated page and explain remote vs page-scoped MCP.
-  await page.getByRole('link',{name:'Integrations',exact:true}).click();
+  await page.getByRole('link',{name:/Integrations$/}).click();
   await page.waitForURL(/#\/integrations$/);
-  assert.equal(await page.getByText('Remote MCP',{exact:true}).isVisible(),true);
-  assert.equal(await page.getByText('WebMCP',{exact:true}).isVisible(),true);
-  assert.equal(await page.getByText('/mcp',{exact:true}).isVisible(),true);
-  assert.equal(await page.getByText('/api/v1',{exact:true}).isVisible(),true);
+  const integrations=page.locator('[data-view="integrations"]');
+  assert.equal(await integrations.getByText('Remote MCP',{exact:true}).isVisible(),true);
+  assert.equal(await integrations.getByText('WebMCP',{exact:true}).isVisible(),true);
+  assert.equal(await integrations.getByText('/mcp',{exact:true}).isVisible(),true);
+  assert.equal(await integrations.getByText('/api/v1',{exact:true}).isVisible(),true);
 
-  // Advanced Minimal Reproducer preserves the verified deterministic engine.
-  await page.getByRole('link',{name:'Minimal reproducer',exact:true}).click();
+  await page.getByRole('link',{name:/Minimal reproducer$/}).click();
   await page.waitForURL(/#\/minimal$/);
   await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===10);
   assert.equal(await page.locator('#source').isVisible(),true);
@@ -88,7 +87,6 @@ try{
   const after=await page.evaluate(()=>window.faultline.inspect());
   assert.ok(after.case.html.includes('modal')); assert.ok(!after.case.html.includes('Irrelevant debug noise')); assert.notEqual(after.revision,before.revision);
 
-  // Mobile application shell remains navigable and free of horizontal overflow.
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
   assert.equal(await page.locator('#mobile-nav-toggle').isVisible(),true);

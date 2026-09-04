@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.bootstrap/faultline-source.zip'
+      - '.github/workflows/bootstrap-source.yml'
 permissions:
   contents: write
 jobs:
@@ -12,8 +13,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate or repair verified source package
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=.bootstrap/faultline-source.zip
+          test -s "$archive"
+          echo "Archive bytes: $(wc -c < "$archive")"
+          file "$archive"
+          if unzip -t "$archive" >/tmp/faultline-zip-test.log 2>&1; then
+            echo "Archive integrity: valid"
+            cp "$archive" /tmp/faultline-source.zip
+          else
+            echo "Archive integrity check failed; attempting central-directory recovery"
+            cat /tmp/faultline-zip-test.log
+            zip -FF "$archive" --out /tmp/faultline-source.zip
+            unzip -t /tmp/faultline-source.zip
+          fi
       - name: Expand verified source package
-        run: unzip -o .bootstrap/faultline-source.zip -d .
+        run: unzip -o /tmp/faultline-source.zip -d .
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -26,5 +44,9 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
+          if git diff --cached --quiet; then
+            echo 'Source tree already matches verified package.'
+            exit 0
+          fi
           git commit -m 'Restore complete verified FAULTLINE source tree'
           git push

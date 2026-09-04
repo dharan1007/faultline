@@ -45,7 +45,8 @@ function detectFramework(packageJson,files){
 function packageCommand(pm,script,{serve=false}={}){
   if(!script) return null;
   let argv;
-  if(pm==='npm') argv=script==='start'?['npm','start']:script==='test'?['npm','test']:['npm','run',script];
+  if(script==='test') argv=[pm,'test'];
+  else if(pm==='npm') argv=script==='start'?['npm','start']:['npm','run',script];
   else if(pm==='yarn') argv=['yarn',script];
   else argv=[pm,'run',script];
   if(serve) argv.push('--','--hostname','0.0.0.0');

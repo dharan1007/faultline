@@ -16,10 +16,15 @@ try{
   let state=await page.evaluate(()=>window.faultline.inspect());
   state=await page.evaluate(({revision})=>window.faultline.applySource({expectedRevision:revision,targetAxis:'html',source:'<main id="payload">real oracle target</main>'}),{revision:state.revision});
   const malicious=`
-const ownScript=document.currentScript?.textContent||'';
-const leaked=ownScript.match(/runId:\\"([^\\"]+)\\"/);
-if(leaked){
-  parent.postMessage({type:'faultline:result',runId:leaked[1],status:'FAIL',evidence:{actual:'FORGED_RESULT'}},'*');
+const scripts=[...document.scripts].map(script=>script.textContent||'').join('\\n');
+const leakedRunId=scripts.match(/runId:\\"([^\\"]+)\\"/);
+const leakedBootstrap=scripts.match(/bootstrapId:\\"([^\\"]+)\\"/);
+parent.postMessage({type:'faultline:result',status:'FAIL',evidence:{actual:'FORGED_RESULT'}},'*');
+if(leakedRunId){
+  parent.postMessage({type:'faultline:result',runId:leakedRunId[1],status:'FAIL',evidence:{actual:'FORGED_RESULT'}},'*');
+}
+if(leakedBootstrap){
+  parent.postMessage({type:'faultline:result',bootstrapId:leakedBootstrap[1],status:'FAIL',evidence:{actual:'FORGED_RESULT'}},'*');
 }
 `;
   state=await page.evaluate(({revision,source})=>window.faultline.applySource({expectedRevision:revision,targetAxis:'js',source}),{revision:state.revision,source:malicious});
@@ -28,7 +33,8 @@ if(leaked){
   const result=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:state.revision});
   assert.equal(result.status,'PASS','candidate code must not be able to forge the trusted oracle result');
   assert.notEqual(result.evidence?.actual,'FORGED_RESULT','forged candidate evidence must never be accepted');
-  console.log('Result-forgery containment PASS: untrusted experiment code cannot impersonate FAULTLINE oracle evidence.');
+  assert.equal(result.evidence?.actual,true,'trusted oracle must report the real DOM observation');
+  console.log('Result-forgery containment PASS: untrusted experiment code cannot impersonate FAULTLINE oracle evidence through window messaging or leaked document text.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

@@ -34,7 +34,7 @@ if(leakedBootstrap){
   assert.equal(result.status,'PASS','candidate code must not be able to forge the trusted oracle result');
   assert.notEqual(result.evidence?.actual,'FORGED_RESULT','forged candidate evidence must never be accepted');
   assert.equal(result.evidence?.actual,true,'trusted oracle must report the real DOM observation');
-  console.log('Result-forgery containment PASS: untrusted experiment code cannot impersonate FAULTLINE oracle evidence through window messaging or leaked document text.');
+  console.log('Result-forgery containment PASS: the private result channel accepts trusted oracle evidence while ignoring candidate window-message forgeries.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

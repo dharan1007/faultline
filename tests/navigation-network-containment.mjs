@@ -25,10 +25,17 @@ try{
   state=await page.evaluate(({revision,source})=>window.faultline.applySource({expectedRevision:revision,targetAxis:'js',source}),{revision:state.revision,source:navigationSource});
   state=await page.evaluate(({revision})=>window.faultline.defineOracle({expectedRevision:revision,oracle:{kind:'dom_exists',selector:'#payload',equals:true,action:{kind:'none'},delayMs:0}}),{revision:state.revision});
 
-  await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:state.revision});
+  const rejected=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:state.revision});
+  assert.equal(rejected.status,'UNRESOLVED','navigation-capable source must be rejected before sandbox execution');
+  assert.equal(rejected.evidence?.reason,'UNSAFE_NAVIGATION','navigation rejection must be explicit and machine-readable');
   await page.waitForTimeout(150);
   assert.equal(sinkHits,0,'sandboxed experiment navigation must not reach the network');
-  console.log('Navigation containment gate PASS: experiment-driven frame navigation cannot reach an external origin.');
+
+  state=await page.evaluate(({revision})=>window.faultline.applySource({expectedRevision:revision,targetAxis:'js',source:"document.querySelector('#payload').dataset.note='location.href is documentation text';"}),{revision:state.revision});
+  const benign=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:state.revision});
+  assert.equal(benign.status,'FAIL','navigation words inside string literals must not be rejected');
+  assert.equal(sinkHits,0);
+  console.log('Navigation containment gate PASS: executable navigation is rejected before iframe execution while benign navigation text remains runnable.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

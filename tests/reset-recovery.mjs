@@ -16,7 +16,7 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length>=12);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.some(tool=>tool.name==='faultline_reset_case'));
 
   const fixture=await page.evaluate(()=>window.faultline.inspect().case);
   assert.equal(await page.evaluate(()=>typeof window.faultline.resetCase),'function','browser API must expose guarded recoverable fixture reset');
@@ -53,7 +53,6 @@ try{
   const uiReset=await page.evaluate(()=>window.faultline.inspect());
   assert.deepEqual(uiReset.case,fixture,'human Reset fixture action must use the canonical recoverable reset path');
 
-  await page.waitForFunction(()=>window.__webmcpTools?.length===13);
   const tool=await page.evaluate(()=>{
     const entry=window.__webmcpTools.find(item=>item.name==='faultline_reset_case');
     return entry&&{name:entry.name,inputSchema:entry.inputSchema,annotations:entry.annotations};

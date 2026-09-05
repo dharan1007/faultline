@@ -48,12 +48,14 @@ function containsExecutableIdentifier(source,target){
   return scanCode(false);
 }
 
-function computedGlobalRoot(source){
+function computedGlobalRisk(source){
   const text=String(source??'');
-  const risky=new Set(['window','self','globalThis','document','parent','top','frames','this']);
+  const roots=new Set(['window','self','globalThis','document','parent','top','frames','this']);
+  const navigationProperties=new Set(['location','document','defaultView','parent','top','frames','self','window','globalThis','history']);
   const isStart=c=>/[A-Za-z_$]/.test(c||'');
   const isPart=c=>/[\w$]/.test(c||'');
   let i=0;
+
   const skipQuoted=quote=>{
     i++;
     while(i<text.length){
@@ -70,6 +72,26 @@ function computedGlobalRoot(source){
       break;
     }
   };
+  const parseStaticProperty=()=>{
+    const bracketStart=i;
+    i++;
+    skipTrivia();
+    const quote=text[i];
+    if(quote!=="'"&&quote!=='"'){i=bracketStart;return null;}
+    i++;
+    let property='';
+    while(i<text.length){
+      const c=text[i];
+      if(c==='\\'){i=bracketStart;return null;}
+      if(c===quote){i++;break;}
+      property+=c;i++;
+    }
+    skipTrivia();
+    if(text[i]!==']'){i=bracketStart;return null;}
+    i++;
+    return property;
+  };
+
   while(i<text.length){
     const c=text[i],next=text[i+1];
     if(c==="'"||c==='"'){skipQuoted(c);continue;}
@@ -87,10 +109,14 @@ function computedGlobalRoot(source){
     if(isStart(c)){
       const start=i++;
       while(i<text.length&&isPart(text[i]))i++;
-      const token=text.slice(start,i);
-      if(risky.has(token)){
+      const root=text.slice(start,i);
+      if(roots.has(root)){
         skipTrivia();
-        if(text[i]==='[')return token;
+        if(text[i]==='['){
+          const property=parseStaticProperty();
+          if(property===null)return {root,property:null};
+          if(navigationProperties.has(property))return {root,property};
+        }
       }
       continue;
     }
@@ -102,8 +128,8 @@ function computedGlobalRoot(source){
 export function navigationRisk(candidate){
   const js=String(candidate?.js??'');
   if(containsExecutableIdentifier(js,'location'))return {axis:'js',capability:'location'};
-  const root=computedGlobalRoot(js);
-  if(root)return {axis:'js',capability:'computed-global',root};
+  const computed=computedGlobalRisk(js);
+  if(computed)return {axis:'js',capability:'computed-global',...computed};
   const html=String(candidate?.html??'');
   if(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(?:["']?refresh["']?\b))[^>]*>/i.test(html))return {axis:'html',capability:'meta-refresh'};
   return null;

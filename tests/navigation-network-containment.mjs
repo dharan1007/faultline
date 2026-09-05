@@ -21,7 +21,8 @@ try{
 
   let state=await page.evaluate(()=>window.faultline.inspect());
   state=await page.evaluate(({revision})=>window.faultline.applySource({expectedRevision:revision,targetAxis:'html',source:'<main id="payload">contained</main>'}),{revision:state.revision});
-  state=await page.evaluate(({revision})=>window.faultline.applySource({expectedRevision:revision,targetAxis:'js',source:`location.href='http://127.0.0.1:${sinkPort}/escaped'`}),{revision:state.revision});
+  const navigationSource=`location.href='http://127.0.0.1:${sinkPort}/escaped'`;
+  state=await page.evaluate(({revision,source})=>window.faultline.applySource({expectedRevision:revision,targetAxis:'js',source}),{revision:state.revision,source:navigationSource});
   state=await page.evaluate(({revision})=>window.faultline.defineOracle({expectedRevision:revision,oracle:{kind:'dom_exists',selector:'#payload',equals:true,action:{kind:'none'},delayMs:0}}),{revision:state.revision});
 
   await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:state.revision});

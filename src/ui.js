@@ -74,7 +74,38 @@ function installCaseImport(){
   actionBar.insertAdjacentElement('afterend',details);
 }
 
+function installCaseJsonExport(){
+  const reproducerButton=document.getElementById('export');
+  if(!reproducerButton||document.getElementById('export-case-json'))return;
+
+  const button=document.createElement('button');
+  button.id='export-case-json';
+  button.className='btn';
+  button.type='button';
+  button.textContent='Export case JSON';
+  button.addEventListener('click',()=>{
+    try{
+      const state=window.faultline.inspect();
+      const blob=new Blob([`${JSON.stringify(state.case,null,2)}\n`],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement('a');
+      link.href=url;
+      link.download=`faultline-case-${state.revision}.json`;
+      link.hidden=true;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),0);
+    }catch(error){
+      reportActionError(error);
+    }
+  });
+
+  reproducerButton.insertAdjacentElement('beforebegin',button);
+}
+
 installCaseImport();
+installCaseJsonExport();
 
 function syncAxisTabStops(activeTab=axisTabs.find(tab=>tab.getAttribute('aria-selected')==='true')){
   for(const tab of axisTabs)tab.tabIndex=tab===activeTab?0:-1;

@@ -16,11 +16,12 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===11);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===12);
 
   const annotations=await page.evaluate(()=>Object.fromEntries(window.__webmcpTools.map(tool=>[tool.name,tool.annotations])));
   const candidateContentTools=[
     'faultline_inspect',
+    'faultline_load_case',
     'faultline_run',
     'faultline_define_oracle',
     'faultline_apply_source',

@@ -48,8 +48,62 @@ function containsExecutableIdentifier(source,target){
   return scanCode(false);
 }
 
+function computedGlobalRoot(source){
+  const text=String(source??'');
+  const risky=new Set(['window','self','globalThis','document','parent','top','frames','this']);
+  const isStart=c=>/[A-Za-z_$]/.test(c||'');
+  const isPart=c=>/[\w$]/.test(c||'');
+  let i=0;
+  const skipQuoted=quote=>{
+    i++;
+    while(i<text.length){
+      if(text[i]==='\\'){i+=2;continue;}
+      if(text[i]===quote){i++;return;}
+      i++;
+    }
+  };
+  const skipTrivia=()=>{
+    while(i<text.length){
+      if(/\s/.test(text[i])){i++;continue;}
+      if(text[i]==='/'&&text[i+1]==='/'){i+=2;while(i<text.length&&text[i]!=='\n')i++;continue;}
+      if(text[i]==='/'&&text[i+1]==='*'){i+=2;while(i<text.length&&!(text[i]==='*'&&text[i+1]==='/'))i++;i=Math.min(text.length,i+2);continue;}
+      break;
+    }
+  };
+  while(i<text.length){
+    const c=text[i],next=text[i+1];
+    if(c==="'"||c==='"'){skipQuoted(c);continue;}
+    if(c==='/'&&next==='/'){i+=2;while(i<text.length&&text[i]!=='\n')i++;continue;}
+    if(c==='/'&&next==='*'){i+=2;while(i<text.length&&!(text[i]==='*'&&text[i+1]==='/'))i++;i=Math.min(text.length,i+2);continue;}
+    if(c==='`'){
+      i++;
+      while(i<text.length){
+        if(text[i]==='\\'){i+=2;continue;}
+        if(text[i]==='`'){i++;break;}
+        i++;
+      }
+      continue;
+    }
+    if(isStart(c)){
+      const start=i++;
+      while(i<text.length&&isPart(text[i]))i++;
+      const token=text.slice(start,i);
+      if(risky.has(token)){
+        skipTrivia();
+        if(text[i]==='[')return token;
+      }
+      continue;
+    }
+    i++;
+  }
+  return null;
+}
+
 export function navigationRisk(candidate){
-  if(containsExecutableIdentifier(candidate?.js,'location'))return {axis:'js',capability:'location'};
+  const js=String(candidate?.js??'');
+  if(containsExecutableIdentifier(js,'location'))return {axis:'js',capability:'location'};
+  const root=computedGlobalRoot(js);
+  if(root)return {axis:'js',capability:'computed-global',root};
   const html=String(candidate?.html??'');
   if(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(?:["']?refresh["']?\b))[^>]*>/i.test(html))return {axis:'html',capability:'meta-refresh'};
   return null;

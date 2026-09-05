@@ -2,6 +2,14 @@ import './runtime.js';
 
 const actionIds=['apply','run','probe','pin','reduce','autopilot','lock'];
 const axisTabs=[...document.querySelectorAll('[role="tab"][data-axis]')];
+const integrationNote=document.querySelector('#integration-workspace .integration-column:nth-child(2) .integration-note');
+
+if(integrationNote&&!integrationNote.textContent.includes('faultline_apply_source')){
+  const separator=document.createTextNode(' Single-axis agent writes use ');
+  const tool=document.createElement('code');
+  tool.textContent='faultline_apply_source';
+  integrationNote.append(separator,tool,document.createTextNode('.'));
+}
 
 function reportActionError(error){
   const message=String(error?.message||error||'UNKNOWN_ERROR');

@@ -3,12 +3,18 @@ import './runtime.js';
 const actionIds=['apply','run','probe','pin','reduce','autopilot','lock','reset'];
 const axisTabs=[...document.querySelectorAll('[role="tab"][data-axis]')];
 const integrationNote=document.querySelector('#integration-workspace .integration-column:nth-child(2) .integration-note');
+const integrationBadge=document.querySelector('#integration-workspace>summary .tool-badge');
+const toolCount=window.faultline.manifest().length;
 
-if(integrationNote&&!integrationNote.textContent.includes('faultline_apply_source')){
-  const separator=document.createTextNode(' Single-axis agent writes use ');
-  const tool=document.createElement('code');
-  tool.textContent='faultline_apply_source';
-  integrationNote.append(separator,tool,document.createTextNode('.'));
+if(integrationBadge)integrationBadge.textContent=`${toolCount} WebMCP tools`;
+if(integrationNote){
+  integrationNote.textContent=integrationNote.textContent.replace(/\b(?:twelve|\d+) WebMCP tools\b/i,toolCount===13?'thirteen WebMCP tools':`${toolCount} WebMCP tools`);
+  if(!integrationNote.textContent.includes('faultline_apply_source')){
+    const separator=document.createTextNode(' Single-axis agent writes use ');
+    const tool=document.createElement('code');
+    tool.textContent='faultline_apply_source';
+    integrationNote.append(separator,tool,document.createTextNode('.'));
+  }
 }
 
 function reportActionError(error){

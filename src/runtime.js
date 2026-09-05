@@ -130,7 +130,7 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false}={}){
    sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected,kind:o.kind,selector:o.selector,property:o.property}})
   }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},Number(o.delayMs)||0)
  }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},0);
- const start=()=>{executeCandidate();if(send)measure(send)};
+ const start=()=>{${previewOnly?'':'executeCandidate();'}if(send)measure(send)};
  if(resultChannel)parent.postMessage({type:'faultline:ready',bootstrapId:${JSON.stringify(bootstrapId)}},'*',[resultChannel.port2]);
  if(document.readyState==='loading')addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();

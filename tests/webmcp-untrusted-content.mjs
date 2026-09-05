@@ -16,11 +16,12 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===13);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===14);
 
   const annotations=await page.evaluate(()=>Object.fromEntries(window.__webmcpTools.map(tool=>[tool.name,tool.annotations])));
   const candidateContentTools=[
     'faultline_inspect',
+    'faultline_units',
     'faultline_load_case',
     'faultline_run',
     'faultline_define_oracle',
@@ -42,7 +43,7 @@ try{
   for(const entry of manifest){
     assert.deepEqual(entry.annotations,annotations[entry.name],`${entry.name} manifest annotations must match the registered WebMCP contract`);
   }
-  console.log('WebMCP trust annotation PASS: candidate-controlled tool outputs are marked untrusted while bounded structural outputs remain trusted.');
+  console.log('WebMCP trust annotation PASS: candidate-controlled tool outputs, including semantic unit text, are marked untrusted while bounded structural outputs remain trusted.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

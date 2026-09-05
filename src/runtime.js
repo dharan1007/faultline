@@ -28,10 +28,25 @@ function pinKey(targetAxis,unitId){ return `${targetAxis}|${unitId}`; }
 function validRevisionEntry(entry){ return Array.isArray(entry)&&entry.length===2&&/^r[1-9]\d*$/.test(String(entry[0]))&&entry[1]?.value; }
 function abortError(){ return new DOMException('WebMCP execution aborted','AbortError'); }
 function throwIfAborted(signal){ if(signal?.aborted)throw abortError(); }
-function persist(){
-  try{
-    localStorage.setItem(STORAGE_KEY,JSON.stringify({version:3,store:store.dump(),axis,pins:[...pins],experimentLedger,revisions:[...revisions.entries()].map(([rev,snapshot])=>[rev,clone(snapshot)])}));
-  }catch{}
+function persistencePayload(){ return {version:3,store:store.dump(),axis,pins:[...pins],experimentLedger,revisions:[...revisions.entries()].map(([rev,snapshot])=>[rev,clone(snapshot)])}; }
+function snapshotCanonical(){ return clone(persistencePayload()); }
+function restoreCanonical(snapshot){
+  store=createRevisionStore(fixture,snapshot.store);
+  axis=['html','css','js'].includes(snapshot.axis)?snapshot.axis:'html';
+  pins=new Set(Array.isArray(snapshot.pins)?snapshot.pins:[]);
+  experimentLedger=Array.isArray(snapshot.experimentLedger)?clone(snapshot.experimentLedger):[];
+  revisions.clear();
+  for(const entry of Array.isArray(snapshot.revisions)?snapshot.revisions:[]) if(validRevisionEntry(entry)) revisions.set(String(entry[0]),clone(entry[1]));
+  if(!revisions.has(revision())) revisions.set(revision(),{value:clone(value()),pins:[...pins]});
+}
+function writePersistence(){ localStorage.setItem(STORAGE_KEY,JSON.stringify(persistencePayload())); }
+function persistBestEffort(){ try{writePersistence();return true}catch{return false} }
+function persistMutation(before){
+  try{writePersistence();}
+  catch{
+    restoreCanonical(before);
+    throw new Error('PERSISTENCE_FAILED');
+  }
 }
 function restoreLocal(){
   try{
@@ -59,7 +74,7 @@ function restoreLocal(){
     experimentLedger=Array.isArray(legacy.experimentLedger)?legacy.experimentLedger:[];
     revisions.clear();
     revisions.set(currentRevision,{value:clone(value()),pins:[...pins]});
-    persist();
+    persistBestEffort();
     localStorage.removeItem(LEGACY_STORAGE_KEY);
   }catch{}
 }
@@ -143,14 +158,14 @@ function runCase(c=value(),{signal}={}){
   return task;
 }
 
-function record(kind,result,extra={}){ const entry={kind,status:result.status,evidence:result.evidence||{},revision:revision(),at:new Date().toISOString(),...extra};experimentLedger.push(entry);persist();renderTrace();return entry; }
+function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},revision:revision(),at:new Date().toISOString(),...extra};experimentLedger.push(entry);persistMutation(before);renderTrace();return entry; }
 async function run({expectedRevision=revision()}={}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const r=await runCase(value(),{signal});throwIfAborted(signal);record('run',r,{revision:testedRevision});renderHealth(r.status);return r; }
 function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.value,pins:[...pins],unitCounts:{html:unitsFor('html',s.value.html).length,css:unitsFor('css',s.value.css).length,js:unitsFor('js',s.value.js).length},latest:experimentLedger.at(-1)||null,webmcp:!!document.modelContext}; }
-function commitCase(next,event,expectedRevision=revision()){ const result=store.commit(next,event,expectedRevision); revisions.set(result.revision,{value:clone(result.value),pins:[...pins]}); persist();render();return inspect(); }
+function commitCase(next,event,expectedRevision=revision()){ const before=snapshotCanonical();const result=store.commit(next,event,expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();return inspect(); }
 function defineOracle({expectedRevision=revision(),oracle}){ return commitCase({...value(),oracle:clone(oracle)},{kind:'define_oracle'},expectedRevision); }
 function applySource({expectedRevision=revision(),targetAxis=axis,source}){ if(!['html','css','js'].includes(targetAxis))throw new Error('INVALID_AXIS'); return commitCase({...value(),[targetAxis]:String(source)},{kind:'source_edit',axis:targetAxis},expectedRevision); }
 async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const source=value()[targetAxis];const unit=unitsFor(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(pins.has(pinKey(targetAxis,unitId)))throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const result=await runCase(candidate,{signal});throwIfAborted(signal);record('probe',result,{axis:targetAxis,unitId,mutated:false,revision:testedRevision});return {...result,mutated:false,canonicalRevision:revision()}; }
-function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);const alreadyPinned=pins.has(key);if(alreadyPinned===pinned)return inspect();pinned?pins.add(key):pins.delete(key);const result=store.commit(value(),{kind:pinned?'pin':'unpin',axis:targetAxis,unitId},expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});experimentLedger.push({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:result.revision,at:new Date().toISOString()});persist();render();return inspect(); }
+function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);const alreadyPinned=pins.has(key);if(alreadyPinned===pinned)return inspect();const before=snapshotCanonical();pinned?pins.add(key):pins.delete(key);const result=store.commit(value(),{kind:pinned?'pin':'unpin',axis:targetAxis,unitId},expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});experimentLedger.push({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:result.revision,at:new Date().toISOString()});persistMutation(before);render();return inspect(); }
 async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}={}, {signal}={}){
   store.assertRevision(expectedRevision);throwIfAborted(signal);
   const source=value()[targetAxis], all=unitsFor(targetAxis,source);
@@ -160,11 +175,15 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
   throwIfAborted(signal);
   const keptIds=new Set(reduced.items.map(u=>u.id));const removed=all.filter(u=>!keptIds.has(u.id));const nextSource=removeUnits(source,removed);const final=await runCase({...value(),[targetAxis]:nextSource},{signal});
   throwIfAborted(signal);if(final.status!=='FAIL')throw new Error('REDUCTION_LOST_FAILURE');
-  const before=source.length,after=nextSource.length;commitCase({...value(),[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reduced.trialCount,removed:removed.length},expectedRevision);record('reduce',final,{axis:targetAxis,trials:reduced.trialCount,removed:removed.length,reduction:before?1-after/before:0});
-  return {status:final.status,before,after,reduction:before?1-after/before:0,trials:reduced.trialCount,removed:removed.length,revision:revision()};
+  const beforeLength=source.length,after=nextSource.length,before=snapshotCanonical();
+  const committed=store.commit({...value(),[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reduced.trialCount,removed:removed.length},expectedRevision);
+  revisions.set(committed.revision,{value:clone(committed.value),pins:[...pins]});
+  experimentLedger.push({kind:'reduce',status:final.status,evidence:final.evidence||{},revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reduced.trialCount,removed:removed.length,reduction:beforeLength?1-after/beforeLength:0});
+  persistMutation(before);render();renderHealth(final.status);
+  return {status:final.status,before:beforeLength,after,reduction:beforeLength?1-after/beforeLength:0,trials:reduced.trialCount,removed:removed.length,revision:revision()};
 }
 function history({limit=100}={}){ return clone(experimentLedger.slice(-Math.max(1,Math.min(200,Number(limit)||100)))); }
-function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');pins=new Set(snap.pins||[]);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persist();render();return inspect(); }
+function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();return inspect(); }
 function exportCase(){const c=value(),safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>${String(c.js).replace(/<\/script/gi,'<\\/script')}<\/script></body></html>`;}
 async function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){store.assertRevision(expectedRevision);throwIfAborted(signal);const baseline=await run({expectedRevision},{signal});if(baseline.status!=='FAIL')throw new Error('BASELINE_NOT_FAILING');const results=[];for(const targetAxis of axes){throwIfAborted(signal);const beforeRevision=revision();const r=await reduce({expectedRevision:beforeRevision,targetAxis,maxTrials:maxTrialsPerAxis},{signal});results.push({axis:targetAxis,...r});}return {status:'COMPLETE',revision:revision(),results};}
 
@@ -172,7 +191,7 @@ function renderHealth(status){$('health').textContent=status;$('health').dataset
 function renderTrace(){const list=$('trace');list.innerHTML='';for(const e of [...experimentLedger].reverse().slice(0,50)){const li=document.createElement('li');li.innerHTML=`<strong>${e.kind.toUpperCase()} · ${e.status}</strong><span>${e.revision} · ${new Date(e.at).toLocaleTimeString()}</span><code>${escapeHtml(JSON.stringify(e.evidence||{}))}</code>`;list.appendChild(li)}$('summary').textContent=experimentLedger.length?`${experimentLedger.length} evidence events · latest ${experimentLedger.at(-1).status}`:'No experiments yet.';}
 function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 function renderUnits(){const list=$('units'),units=unitsFor();list.innerHTML='';selectedUnitId=null;for(const unit of units){const row=document.createElement('button');row.type='button';row.className='unit';row.dataset.unitId=unit.id;row.setAttribute('aria-pressed','false');const pinned=pins.has(pinKey(axis,unit.id));row.innerHTML=`<span>${escapeHtml(unit.text.trim().replace(/\s+/g,' ').slice(0,120))}</span><small>${unit.kind}${pinned?' · pinned':''}</small>`;row.onclick=()=>{document.querySelectorAll('.unit').forEach(x=>x.setAttribute('aria-pressed','false'));row.setAttribute('aria-pressed','true');selectedUnitId=unit.id;$('probe').disabled=false;$('pin').disabled=false;};list.appendChild(row)}$('unit-count').textContent=`${units.length} units`;}
-function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';renderUnits();renderTrace();persist();}
+function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';renderUnits();renderTrace();persistBestEffort();}
 
 const REVISION_PROPERTY={expectedRevision:{type:'string',pattern:'^r[1-9]\\d*$'}};
 const TOOL_DEFS=[

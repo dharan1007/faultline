@@ -27,6 +27,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/runtime.js .github/workflows/apply-result-channel-fix.yml
+          git add -A
           git commit -m 'fix: execute sandbox candidate without eval'
           git push

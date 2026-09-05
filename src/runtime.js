@@ -117,8 +117,9 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false}={}){
   schedule(()=>{try{let actual;
    if(o.kind==='runtime_error'){actual=runtimeError}
    else {const el=querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='computed_style')actual=el?readComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
-   const fail=o.kind==='runtime_error'?Boolean(actual):same(actual,o.equals);
-   sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected:o.equals,kind:o.kind,selector:o.selector,property:o.property}})
+   const expected=o.kind==='computed_style'?String(o.equals):o.equals;
+   const fail=o.kind==='runtime_error'?Boolean(actual):same(actual,expected);
+   sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected,kind:o.kind,selector:o.selector,property:o.property}})
   }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},Number(o.delayMs)||0)
  }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},0);
  const start=()=>{executeCandidate();if(send)measure(send)};

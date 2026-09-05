@@ -5,6 +5,8 @@ const $ = id => document.getElementById(id);
 const clone = v => JSON.parse(JSON.stringify(v));
 const STORAGE_KEY = 'faultline-prod-v3';
 const LEGACY_STORAGE_KEY = 'faultline-prod-v2';
+const ORACLE_KINDS=['dom_property','computed_style','dom_exists','runtime_error'];
+const ACTION_KINDS=['none','click'];
 const fixture = {
   html:'<dialog id="modal" open><button id="save">Save</button></dialog><p id="noise">Irrelevant debug noise</p>',
   css:'#modal{display:block;position:fixed;z-index:10} #noise{color:gray} button{padding:8px}',
@@ -28,6 +30,19 @@ function pinKey(targetAxis,unitId){ return `${targetAxis}|${unitId}`; }
 function validRevisionEntry(entry){ return Array.isArray(entry)&&entry.length===2&&/^r[1-9]\d*$/.test(String(entry[0]))&&entry[1]?.value; }
 function abortError(){ return new DOMException('WebMCP execution aborted','AbortError'); }
 function throwIfAborted(signal){ if(signal?.aborted)throw abortError(); }
+function validateOracle(oracle){
+  if(!oracle||typeof oracle!=='object'||Array.isArray(oracle))throw new Error('INVALID_ORACLE');
+  const allowed=new Set(['kind','selector','property','equals','action','delayMs']);
+  if(Object.keys(oracle).some(key=>!allowed.has(key))||!ORACLE_KINDS.includes(oracle.kind))throw new Error('INVALID_ORACLE');
+  if(!oracle.action||typeof oracle.action!=='object'||Array.isArray(oracle.action))throw new Error('INVALID_ORACLE');
+  if(Object.keys(oracle.action).some(key=>!['kind','selector'].includes(key))||!ACTION_KINDS.includes(oracle.action.kind))throw new Error('INVALID_ORACLE');
+  if(oracle.action.kind==='click'&&typeof oracle.action.selector==='string'&&oracle.action.selector.trim()==='')throw new Error('INVALID_ORACLE');
+  if(oracle.action.kind==='click'&&typeof oracle.action.selector!=='string')throw new Error('INVALID_ORACLE');
+  if(oracle.kind!=='runtime_error'&&(typeof oracle.selector!=='string'||!oracle.selector.trim()))throw new Error('INVALID_ORACLE');
+  if(['dom_property','computed_style'].includes(oracle.kind)&&(typeof oracle.property!=='string'||!oracle.property.trim()))throw new Error('INVALID_ORACLE');
+  if(oracle.delayMs!==undefined&&(!Number.isFinite(oracle.delayMs)||oracle.delayMs<0||oracle.delayMs>2000))throw new Error('INVALID_ORACLE');
+  return oracle;
+}
 function persistencePayload(){ return {version:3,store:store.dump(),axis,pins:[...pins],experimentLedger,revisions:[...revisions.entries()].map(([rev,snapshot])=>[rev,clone(snapshot)])}; }
 function snapshotCanonical(){ return clone(persistencePayload()); }
 function restoreCanonical(snapshot){
@@ -156,7 +171,7 @@ function record(kind,result,extra={}){ const before=snapshotCanonical();const en
 async function run({expectedRevision=revision()}={}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const r=await runCase(value(),{signal});throwIfAborted(signal);record('run',r,{revision:testedRevision});renderHealth(r.status);return r; }
 function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.value,pins:[...pins],unitCounts:{html:unitsFor('html',s.value.html).length,css:unitsFor('css',s.value.css).length,js:unitsFor('js',s.value.js).length},latest:experimentLedger.at(-1)||null,webmcp:!!document.modelContext}; }
 function commitCase(next,event,expectedRevision=revision()){ const before=snapshotCanonical();const result=store.commit(next,event,expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();return inspect(); }
-function defineOracle({expectedRevision=revision(),oracle}){ return commitCase({...value(),oracle:clone(oracle)},{kind:'define_oracle'},expectedRevision); }
+function defineOracle({expectedRevision=revision(),oracle}){ validateOracle(oracle);return commitCase({...value(),oracle:clone(oracle)},{kind:'define_oracle'},expectedRevision); }
 function applySource({expectedRevision=revision(),targetAxis=axis,source}){ if(!['html','css','js'].includes(targetAxis))throw new Error('INVALID_AXIS'); return commitCase({...value(),[targetAxis]:String(source)},{kind:'source_edit',axis:targetAxis},expectedRevision); }
 async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const source=value()[targetAxis];const unit=unitsFor(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(pins.has(pinKey(targetAxis,unitId)))throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const result=await runCase(candidate,{signal});throwIfAborted(signal);record('probe',result,{axis:targetAxis,unitId,mutated:false,revision:testedRevision});return {...result,mutated:false,canonicalRevision:revision()}; }
 function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);const alreadyPinned=pins.has(key);if(alreadyPinned===pinned)return inspect();const before=snapshotCanonical();pinned?pins.add(key):pins.delete(key);const result=store.commit(value(),{kind:pinned?'pin':'unpin',axis:targetAxis,unitId},expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});experimentLedger.push({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:result.revision,at:new Date().toISOString()});persistMutation(before);render();return inspect(); }
@@ -203,10 +218,11 @@ function renderUnits(){const list=$('units'),units=unitsFor();list.innerHTML='';
 function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';renderUnits();renderTrace();persistBestEffort();}
 
 const REVISION_PROPERTY={expectedRevision:{type:'string',pattern:'^r[1-9]\\d*$'}};
+const ORACLE_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ORACLE_KINDS},selector:{type:'string'},property:{type:'string'},equals:{},action:{type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'}},required:['kind']},delayMs:{type:'number',minimum:0,maximum:2000}},required:['kind','action']};
 const TOOL_DEFS=[
  ['faultline_inspect','Inspect the canonical failure case, revision, pins and semantic-unit counts.',{},async()=>inspect(),true,true],
  ['faultline_run','Execute the locked deterministic failure oracle against the inspected canonical revision.',{...REVISION_PROPERTY},async(input,options)=>run(input,options),false,true,['expectedRevision']],
- ['faultline_define_oracle','Replace the deterministic failure oracle using an optimistic revision guard.',{...REVISION_PROPERTY,oracle:{type:'object'}},async input=>defineOracle(input),false,true,['expectedRevision','oracle']],
+ ['faultline_define_oracle','Replace the deterministic failure oracle using an optimistic revision guard.',{...REVISION_PROPERTY,oracle:ORACLE_SCHEMA},async input=>defineOracle(input),false,true,['expectedRevision','oracle']],
  ['faultline_apply_source','Replace one canonical HTML, CSS, or JavaScript source axis using an optimistic revision guard.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},source:{type:'string'}},async input=>applySource(input),false,true,['expectedRevision','targetAxis','source']],
  ['faultline_probe','Test removing one semantic unit from the inspected canonical revision without mutating canonical state.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'}},async(input,options)=>probe(input,options),true,true,['expectedRevision']],
  ['faultline_reduce','Delta-debug one source axis while preserving the failing oracle and rejecting stale revisions.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},maxTrials:{type:'integer',minimum:1,maximum:200}},async(input,options)=>reduce(input,options),false,false,['expectedRevision']],

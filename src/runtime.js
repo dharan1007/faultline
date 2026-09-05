@@ -64,9 +64,10 @@ function restoreLocal(){
 }
 
 function buildSandboxDocument(c,runId){
+  const safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');
   const safeJs=String(c.js).replace(/<\/script/gi,'<\\/script');
   const oracle=JSON.stringify(c.oracle).replace(/</g,'\\u003c');
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${c.css}</style></head><body>${c.html}<script>
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>
 let __faultlineRuntimeError=null;
 addEventListener('error',e=>{__faultlineRuntimeError=String(e.message||e.error||'runtime error')});
 try{${safeJs}}catch(e){__faultlineRuntimeError=String(e&&e.message||e)}

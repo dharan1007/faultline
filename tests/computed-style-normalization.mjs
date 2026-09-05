@@ -16,7 +16,7 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===11);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===12);
 
   const initial=await page.evaluate(()=>window.faultline.inspect());
   const htmlEdit=await page.evaluate(({revision})=>window.faultline.applySource({expectedRevision:revision,targetAxis:'html',source:'<div id="target">target</div>'}),{revision:initial.revision});

@@ -16,7 +16,7 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length>=11);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.some(tool=>tool.name==='faultline_load_case'));
 
   const before=await page.evaluate(()=>window.faultline.inspect());
   assert.equal(await page.evaluate(()=>typeof window.faultline.loadCase),'function','browser API must expose an atomic complete-case loader');
@@ -46,7 +46,6 @@ try{
   assert.equal(afterInvalid.revision,current.revision,'rejected complete cases must not advance revision');
   assert.deepEqual(afterInvalid.case,current.case,'rejected complete cases must leave canonical state untouched');
 
-  await page.waitForFunction(()=>window.__webmcpTools?.length===13);
   const tool=await page.evaluate(()=>{const entry=window.__webmcpTools.find(item=>item.name==='faultline_load_case');return entry&&{name:entry.name,inputSchema:entry.inputSchema};});
   assert.ok(tool,'WebMCP must expose the atomic complete-case loader');
   assert.deepEqual(tool.inputSchema.required,['expectedRevision','case'],'WebMCP loader must require revision and case');

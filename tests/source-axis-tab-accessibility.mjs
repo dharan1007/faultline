@@ -16,7 +16,7 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===11);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===12);
 
   const tabs=page.locator('[role="tab"]');
   assert.equal(await tabs.count(),3,'source axis must expose exactly three tabs');

@@ -19,7 +19,7 @@ try{
   await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length>=11);
 
   const before=await page.evaluate(()=>window.faultline.inspect());
-  assert.equal(typeof await page.evaluate(()=>window.faultline.loadCase),'function','browser API must expose an atomic complete-case loader');
+  assert.equal(await page.evaluate(()=>typeof window.faultline.loadCase),'function','browser API must expose an atomic complete-case loader');
 
   const nextCase={
     html:'<main><button id="go">Go</button><p id="noise">noise</p></main>',
@@ -47,7 +47,7 @@ try{
   assert.deepEqual(afterInvalid.case,current.case,'rejected complete cases must leave canonical state untouched');
 
   await page.waitForFunction(()=>window.__webmcpTools?.length===12);
-  const tool=await page.evaluate(()=>window.__webmcpTools.find(entry=>entry.name==='faultline_load_case'));
+  const tool=await page.evaluate(()=>{const entry=window.__webmcpTools.find(item=>item.name==='faultline_load_case');return entry&&{name:entry.name,inputSchema:entry.inputSchema};});
   assert.ok(tool,'WebMCP must expose the atomic complete-case loader');
   assert.deepEqual(tool.inputSchema.required,['expectedRevision','case'],'WebMCP loader must require revision and case');
   assert.equal(tool.inputSchema.properties.case.additionalProperties,false,'case schema must reject unknown fields');

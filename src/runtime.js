@@ -145,6 +145,8 @@ function executeCase(c,{signal}={}){
     experiment.tabIndex=-1;
     experiment.setAttribute('aria-hidden','true');
     experiment.setAttribute('sandbox','allow-scripts');
+    const previewPolicy=$('preview')?.getAttribute('csp');
+    if(previewPolicy)experiment.setAttribute('csp',previewPolicy);
     const bootstrapId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
     let done=false,resultPort=null;
     const timer=setTimeout(()=>finish({status:'UNRESOLVED',evidence:{reason:'HOST_TIMEOUT'}}),2200);

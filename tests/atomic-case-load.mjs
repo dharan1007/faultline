@@ -19,7 +19,7 @@ try{
   await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length>=11);
 
   const before=await page.evaluate(()=>window.faultline.inspect());
-  assert.equal(typeof await page.evaluate(()=>window.faultline.loadCase),'function','browser API must expose an atomic complete-case loader');
+  assert.equal(await page.evaluate(()=>typeof window.faultline.loadCase),'function','browser API must expose an atomic complete-case loader');
 
   const nextCase={
     html:'<main><button id="go">Go</button><p id="noise">noise</p></main>',

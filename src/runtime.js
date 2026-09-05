@@ -1,4 +1,5 @@
 import { semanticUnits, removeUnits, ddminReduce, createRevisionStore } from './reducer-engine.js';
+import { navigationRisk } from './sandbox-policy.js';
 
 const $ = id => document.getElementById(id);
 const clone = v => JSON.parse(JSON.stringify(v));
@@ -102,7 +103,12 @@ function executeCase(c,{signal}={}){
 }
 function runCase(c=value(),{signal}={}){
   const snapshot=clone(c);
-  const task=experimentQueue.then(()=>{throwIfAborted(signal);return executeCase(snapshot,{signal});});
+  const task=experimentQueue.then(()=>{
+    throwIfAborted(signal);
+    const risk=navigationRisk(snapshot);
+    if(risk)return {status:'UNRESOLVED',evidence:{reason:'UNSAFE_NAVIGATION',...risk}};
+    return executeCase(snapshot,{signal});
+  });
   experimentQueue=task.then(()=>undefined,()=>undefined);
   return task;
 }

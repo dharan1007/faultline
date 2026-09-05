@@ -46,7 +46,7 @@ try{
   assert.equal(afterInvalid.revision,current.revision,'rejected complete cases must not advance revision');
   assert.deepEqual(afterInvalid.case,current.case,'rejected complete cases must leave canonical state untouched');
 
-  await page.waitForFunction(()=>window.__webmcpTools?.length===12);
+  await page.waitForFunction(()=>window.__webmcpTools?.length===13);
   const tool=await page.evaluate(()=>{const entry=window.__webmcpTools.find(item=>item.name==='faultline_load_case');return entry&&{name:entry.name,inputSchema:entry.inputSchema};});
   assert.ok(tool,'WebMCP must expose the atomic complete-case loader');
   assert.deepEqual(tool.inputSchema.required,['expectedRevision','case'],'WebMCP loader must require revision and case');

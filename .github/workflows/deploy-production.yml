@@ -1,0 +1,85 @@
+name: Deploy verified FAULTLINE production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faultline-production
+  cancel-in-progress: false
+
+jobs:
+  verify-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERCEL_ORG_ID: team_APBZJjf6iizHCTuseqHosFnU
+      VERCEL_PROJECT_ID: prj_XtQdMYG2kOufYTrZ1SDj61VEExDM
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Check out exact production candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Record immutable source SHA
+        run: |
+          set -euo pipefail
+          echo "SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          test "$(git branch --show-current)" = "main"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install exact dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify deterministic core
+        run: npm test
+
+      - name: Verify JavaScript syntax
+        run: npm run check
+
+      - name: Verify production tree
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify real browser and WebMCP behavior
+        run: npm run test:browser
+
+      - name: Require Vercel credential
+        run: |
+          set -euo pipefail
+          test -n "${VERCEL_TOKEN:-}" || { echo 'VERCEL_TOKEN repository secret is required'; exit 1; }
+
+      - name: Bind exact existing Vercel project
+        run: |
+          set -euo pipefail
+          mkdir -p .vercel
+          printf '%s\n' '{"orgId":"team_APBZJjf6iizHCTuseqHosFnU","projectId":"prj_XtQdMYG2kOufYTrZ1SDj61VEExDM"}' > .vercel/project.json
+          node -e "const p=require('./.vercel/project.json'); if(p.orgId!=='team_APBZJjf6iizHCTuseqHosFnU'||p.projectId!=='prj_XtQdMYG2kOufYTrZ1SDj61VEExDM') process.exit(1)"
+
+      - name: Deploy exact green tree to existing production project
+        id: deploy
+        run: |
+          set -euo pipefail
+          npx --yes vercel@latest deploy --prod --yes --token "$VERCEL_TOKEN" --scope tejs-projects-70bb4568 | tee /tmp/vercel-deploy.log
+          DEPLOYMENT_URL=$(tail -n 1 /tmp/vercel-deploy.log | tr -d '\r')
+          test -n "$DEPLOYMENT_URL"
+          echo "deployment_url=$DEPLOYMENT_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Verify deployment belongs to intended production project
+        run: |
+          set -euo pipefail
+          npx --yes vercel@latest inspect "${{ steps.deploy.outputs.deployment_url }}" --token "$VERCEL_TOKEN" --scope tejs-projects-70bb4568 > /tmp/vercel-inspect.txt
+          grep -F 'faultline-webmcp' /tmp/vercel-inspect.txt
+          echo "Deployed source SHA: $SOURCE_SHA"

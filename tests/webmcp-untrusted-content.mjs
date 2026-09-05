@@ -16,7 +16,7 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===12);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===13);
 
   const annotations=await page.evaluate(()=>Object.fromEntries(window.__webmcpTools.map(tool=>[tool.name,tool.annotations])));
   const candidateContentTools=[
@@ -34,6 +34,7 @@ try{
   for(const name of candidateContentTools){
     assert.equal(annotations[name]?.untrustedContentHint,true,`${name} returns candidate-controlled content and must advertise untrustedContentHint=true`);
   }
+  assert.equal(annotations.faultline_reset_case?.untrustedContentHint,false,'faultline_reset_case returns only the trusted built-in fixture and bounded canonical metadata');
   assert.equal(annotations.faultline_reduce?.untrustedContentHint,false,'faultline_reduce returns bounded structural reduction metrics only');
   assert.equal(annotations.faultline_autopilot?.untrustedContentHint,false,'faultline_autopilot returns bounded structural reduction metrics only');
 

@@ -1,6 +1,6 @@
 import './runtime.js';
 
-const actionIds=['apply','run','probe','pin','reduce','autopilot','lock'];
+const actionIds=['apply','run','probe','pin','reduce','autopilot','lock','reset'];
 const axisTabs=[...document.querySelectorAll('[role="tab"][data-axis]')];
 const integrationNote=document.querySelector('#integration-workspace .integration-column:nth-child(2) .integration-note');
 

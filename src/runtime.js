@@ -5,7 +5,7 @@ const $ = id => document.getElementById(id);
 const clone = v => JSON.parse(JSON.stringify(v));
 const STORAGE_KEY = 'faultline-prod-v3';
 const LEGACY_STORAGE_KEY = 'faultline-prod-v2';
-const MAX_RUNTIME_REVISIONS = 32;
+const MAX_RUNTIME_REVISIONS = 16;
 const MAX_EXPERIMENT_LEDGER = 200;
 const ORACLE_KINDS=['dom_property','computed_style','dom_exists','runtime_error'];
 const ACTION_KINDS=['none','click'];

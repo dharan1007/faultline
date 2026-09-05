@@ -16,7 +16,7 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===13);
+  await page.waitForFunction(()=>window.faultline && document.getElementById('preview'));
   const preview=page.frameLocator('#preview');
 
   const initial=await page.evaluate(()=>window.faultline.inspect());

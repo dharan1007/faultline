@@ -16,7 +16,7 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===12);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===13);
 
   const workflow=page.locator('nav[aria-label="FAULTLINE workflow"]');
   assert.equal(await workflow.count(),1,'workbench must expose one explicit workflow navigator');

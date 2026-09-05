@@ -4,17 +4,32 @@ const actionIds=['apply','run','probe','pin','reduce','autopilot','lock','reset'
 const axisTabs=[...document.querySelectorAll('[role="tab"][data-axis]')];
 const integrationNote=document.querySelector('#integration-workspace .integration-column:nth-child(2) .integration-note');
 const integrationBadge=document.querySelector('#integration-workspace>summary .tool-badge');
+const integrationFlow=document.querySelector('#integration-workspace .integration-column:nth-child(2) pre');
+const browserFlow=document.querySelector('#integration-workspace .integration-column:nth-child(1) pre');
 const toolCount=window.faultline.manifest().length;
+const toolCountLabel=({13:'thirteen',14:'fourteen'})[toolCount]||String(toolCount);
 
 if(integrationBadge)integrationBadge.textContent=`${toolCount} WebMCP tools`;
 if(integrationNote){
-  integrationNote.textContent=integrationNote.textContent.replace(/\b(?:twelve|\d+) WebMCP tools\b/i,toolCount===13?'thirteen WebMCP tools':`${toolCount} WebMCP tools`);
+  integrationNote.textContent=integrationNote.textContent.replace(/\b(?:twelve|thirteen|fourteen|\d+) WebMCP tools\b/i,`${toolCountLabel} WebMCP tools`);
   if(!integrationNote.textContent.includes('faultline_apply_source')){
     const separator=document.createTextNode(' Single-axis agent writes use ');
     const tool=document.createElement('code');
     tool.textContent='faultline_apply_source';
     integrationNote.append(separator,tool,document.createTextNode('.'));
   }
+  if(!integrationNote.textContent.includes('faultline_units')){
+    const separator=document.createTextNode(' Discover actionable semantic IDs with ');
+    const tool=document.createElement('code');
+    tool.textContent='faultline_units';
+    integrationNote.append(separator,tool,document.createTextNode(' before probe or pin operations.'));
+  }
+}
+if(integrationFlow&&!integrationFlow.textContent.includes('faultline_units')){
+  integrationFlow.textContent=integrationFlow.textContent.replace('faultline_probe','faultline_units({ targetAxis })\n  ↓\nfaultline_probe({ expectedRevision, targetAxis, unitId })');
+}
+if(browserFlow&&!browserFlow.textContent.includes('window.faultline.units')){
+  browserFlow.textContent+=`\n\nconst frontier = await window.faultline.units({ targetAxis: 'html' })\nconst unitId = frontier.units[0]?.id`;
 }
 
 function reportActionError(error){

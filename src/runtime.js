@@ -83,7 +83,7 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false}={}){
   const safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');
   const candidateSource=JSON.stringify(String(c.js)).replace(/</g,'\\u003c');
   const oracle=JSON.stringify(c.oracle).replace(/</g,'\\u003c');
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style><script>
 (function(){
  const candidateSource=${candidateSource};
  const o=${oracle};
@@ -91,31 +91,26 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false}={}){
  const querySelector=Document.prototype.querySelector.bind(document);
  const readComputedStyle=getComputedStyle.bind(window);
  const same=Object.is;
+ const resultChannel=${previewOnly?'null':'new MessageChannel()'};
+ const resultPort=resultChannel?.port1||null;
+ const send=resultPort?resultPort.postMessage.bind(resultPort):null;
  let runtimeError=null;
  addEventListener('error',e=>{runtimeError=String(e.message||e.error||'runtime error');e.preventDefault()});
  const executeCandidate=()=>{try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){runtimeError=String(e&&e.message||e)}};
- const measure=send=>schedule(()=>{try{
+ const measure=sendResult=>schedule(()=>{try{
   if(o.action?.kind==='click'){const target=querySelector(o.action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click()}
   schedule(()=>{try{let actual;
    if(o.kind==='runtime_error'){actual=runtimeError}
    else {const el=querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='computed_style')actual=el?readComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
    const fail=o.kind==='runtime_error'?Boolean(actual):same(actual,o.equals);
-   send({status:fail?'FAIL':'PASS',evidence:{actual,expected:o.equals,kind:o.kind,selector:o.selector,property:o.property}})
-  }catch(e){send({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},Number(o.delayMs)||0)
- }catch(e){send({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},0);
- if(${previewOnly?'true':'false'}){executeCandidate();return;}
- const onChannel=e=>{
-  if(e.data?.type!=='faultline:channel'||e.data.bootstrapId!==${JSON.stringify(bootstrapId)}||!e.ports?.[0])return;
-  removeEventListener('message',onChannel);
-  const port=e.ports[0];
-  const send=port.postMessage.bind(port);
-  executeCandidate();
-  measure(send);
- };
- addEventListener('message',onChannel);
- parent.postMessage({type:'faultline:ready',bootstrapId:${JSON.stringify(bootstrapId)}},'*');
+   sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected:o.equals,kind:o.kind,selector:o.selector,property:o.property}})
+  }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},Number(o.delayMs)||0)
+ }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},0);
+ const start=()=>{executeCandidate();if(send)measure(send)};
+ if(resultChannel)parent.postMessage({type:'faultline:ready',bootstrapId:${JSON.stringify(bootstrapId)}},'*',[resultChannel.port2]);
+ if(document.readyState==='loading')addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
-<\/script></body></html>`;
+<\/script></head><body>${c.html}</body></html>`;
 }
 
 function executeCase(c,{signal}={}){
@@ -123,22 +118,21 @@ function executeCase(c,{signal}={}){
     if(signal?.aborted){reject(abortError());return;}
     const preview=$('preview');
     const bootstrapId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
-    const channel=new MessageChannel();
-    let done=false,channelSent=false;
+    let done=false,resultPort=null;
     const timer=setTimeout(()=>finish({status:'UNRESOLVED',evidence:{reason:'HOST_TIMEOUT'}}),2200);
     const onReady=e=>{
-      if(channelSent||e.source!==preview.contentWindow||e.data?.type!=='faultline:ready'||e.data.bootstrapId!==bootstrapId)return;
-      channelSent=true;
+      if(done||resultPort||e.source!==preview.contentWindow||e.data?.type!=='faultline:ready'||e.data.bootstrapId!==bootstrapId||!e.ports?.[0])return;
       removeEventListener('message',onReady);
-      preview.contentWindow.postMessage({type:'faultline:channel',bootstrapId},'*',[channel.port2]);
+      resultPort=e.ports[0];
+      resultPort.onmessage=event=>{
+        const result=event.data;
+        if(!result||!['PASS','FAIL','UNRESOLVED'].includes(result.status))return;
+        finish({status:result.status,evidence:result.evidence||{}});
+      };
+      try{resultPort.start()}catch{}
     };
     const onAbort=()=>cancel();
-    channel.port1.onmessage=e=>{
-      const result=e.data;
-      if(!result||!['PASS','FAIL','UNRESOLVED'].includes(result.status))return;
-      finish({status:result.status,evidence:result.evidence||{}});
-    };
-    function cleanup(){clearTimeout(timer);removeEventListener('message',onReady);signal?.removeEventListener('abort',onAbort);channel.port1.onmessage=null;try{channel.port1.close()}catch{}try{channel.port2.close()}catch{}}
+    function cleanup(){clearTimeout(timer);removeEventListener('message',onReady);signal?.removeEventListener('abort',onAbort);if(resultPort){resultPort.onmessage=null;try{resultPort.close()}catch{}}}
     function finish(result){ if(done)return;done=true;cleanup();resolve(result); }
     function cancel(){ if(done)return;done=true;cleanup();preview.srcdoc='<!doctype html><title>Cancelled</title>';reject(abortError()); }
     addEventListener('message',onReady);

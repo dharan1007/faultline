@@ -1,4 +1,4 @@
-name: Apply trusted result channel fix
+name: Apply CSP-compatible trusted result channel fix
 on:
   push:
     branches: [tdd/result-forgery-containment]
@@ -10,71 +10,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch runtime
+      - name: Patch candidate execution without eval
         shell: python
         run: |
           from pathlib import Path
           p=Path('src/runtime.js')
           s=p.read_text()
-          start=s.index('function buildSandboxDocument(c,runId){')
-          end=s.index('\nfunction runCase(', start)
-          replacement=r'''function buildSandboxDocument(c){
-  const safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');
-  const safeJs=String(c.js).replace(/<\/script/gi,'<\\/script');
-  const oracle=JSON.stringify(c.oracle).replace(/</g,'\\u003c');
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>
-(()=>{
- const trustedParent=parent;
- const stopImmediate=Event.prototype.stopImmediatePropagation;
- let runtimeError=null;
- const o=${oracle};
- addEventListener('error',e=>{runtimeError=String(e.message||e.error||'runtime error')});
- addEventListener('message',function init(e){
-  if(!e.isTrusted||e.source!==trustedParent||e.data?.type!=='faultline:init'||typeof e.data.runId!=='string')return;
-  stopImmediate.call(e);
-  removeEventListener('message',init,true);
-  const runId=e.data.runId;
-  const send=(status,evidence)=>trustedParent.postMessage({type:'faultline:result',runId,status,evidence},'*');
-  setTimeout(()=>{try{
-   if(o.action?.kind==='click'){const target=document.querySelector(o.action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click()}
-   setTimeout(()=>{try{let actual;
-    if(o.kind==='runtime_error'){actual=runtimeError}
-    else {const el=document.querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='computed_style')actual=el?getComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
-    const fail=o.kind==='runtime_error'?Boolean(actual):Object.is(actual,o.equals);
-    send(fail?'FAIL':'PASS',{actual,expected:o.equals,kind:o.kind,selector:o.selector,property:o.property});
-   }catch(err){send('UNRESOLVED',{reason:String(err&&err.message||err)})}},Number(o.delayMs)||0)
-  }catch(err){send('UNRESOLVED',{reason:String(err&&err.message||err)})}},0)
- },true);
-})();
-${safeJs}
-<\/script></body></html>`;
-}
-
-function executeCase(c,{signal}={}){
-  return new Promise((resolve,reject)=>{
-    if(signal?.aborted){reject(abortError());return;}
-    const runId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
-    let done=false;
-    const preview=$('preview');
-    const timer=setTimeout(()=>finish({status:'UNRESOLVED',evidence:{reason:'HOST_TIMEOUT'}}),2200);
-    const onMessage=e=>{ if(e.source===preview.contentWindow&&e.data?.type==='faultline:result'&&e.data.runId===runId) finish({status:e.data.status,evidence:e.data.evidence||{}}); };
-    const onAbort=()=>cancel();
-    const onLoad=()=>preview.contentWindow?.postMessage({type:'faultline:init',runId},'*');
-    function cleanup(){clearTimeout(timer);removeEventListener('message',onMessage);preview.removeEventListener('load',onLoad);signal?.removeEventListener('abort',onAbort);}
-    function finish(result){ if(done)return;done=true;cleanup();resolve(result); }
-    function cancel(){ if(done)return;done=true;cleanup();preview.srcdoc='<!doctype html><title>Cancelled</title>';reject(abortError()); }
-    addEventListener('message',onMessage);
-    preview.addEventListener('load',onLoad,{once:true});
-    signal?.addEventListener('abort',onAbort,{once:true});
-    preview.srcdoc=buildSandboxDocument(c);
-  });
-}
-'''
-          p.write_text(s[:start]+replacement+s[end:])
+          old="const executeCandidate=()=>{try{(0,eval)(candidateSource)}catch(e){runtimeError=String(e&&e.message||e)}};"
+          new="const executeCandidate=()=>{try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){runtimeError=String(e&&e.message||e)}};"
+          if old not in s:
+              raise SystemExit('expected eval candidate executor not found')
+          p.write_text(s.replace(old,new,1))
+      - name: Remove one-shot patch workflow
+        run: git rm .github/workflows/apply-result-channel-fix.yml
       - name: Commit patch
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/runtime.js
-          git commit -m 'fix: authenticate sandbox oracle results'
+          git add src/runtime.js .github/workflows/apply-result-channel-fix.yml
+          git commit -m 'fix: execute sandbox candidate without eval'
           git push

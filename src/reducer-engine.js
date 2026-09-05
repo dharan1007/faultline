@@ -1,4 +1,14 @@
 const clone = value => JSON.parse(JSON.stringify(value));
+const MAX_REVISION_SNAPSHOTS = 32;
+const MAX_REVISION_LEDGER = 64;
+
+function trimSnapshots(snapshots,currentRevision) {
+  while (snapshots.size > MAX_REVISION_SNAPSHOTS) {
+    const oldest = snapshots.keys().next().value;
+    if (oldest === currentRevision) break;
+    snapshots.delete(oldest);
+  }
+}
 
 export function semanticUnits(axis, source) {
   source = String(source ?? '');
@@ -69,7 +79,8 @@ function normalizePersistedState(persistedState) {
     snapshots.set(String(entry[0]), clone(entry[1]));
   }
   if (!snapshots.has(currentRevision)) snapshots.set(currentRevision, clone(persistedState.value));
-  return { revision, value:clone(persistedState.value), snapshots, ledger:clone(persistedState.ledger) };
+  trimSnapshots(snapshots,currentRevision);
+  return { revision, value:clone(persistedState.value), snapshots, ledger:clone(persistedState.ledger.slice(-MAX_REVISION_LEDGER)) };
 }
 
 export function createRevisionStore(initialValue, persistedState=null) {
@@ -81,7 +92,16 @@ export function createRevisionStore(initialValue, persistedState=null) {
   const current = () => `r${revision}`;
   const assertRevision = expected => { if (expected !== current()) throw new Error(`STALE_REVISION expected=${expected} current=${current()}`); };
   const inspect = () => ({ revision:current(), value:clone(value), history:clone(ledger) });
-  const commit = (nextValue,event={},expectedRevision=current()) => { assertRevision(expectedRevision); value=clone(nextValue); revision++; snapshots.set(current(),clone(value)); ledger.push({...event,revision:current(),at:new Date().toISOString()}); return inspect(); };
+  const commit = (nextValue,event={},expectedRevision=current()) => {
+    assertRevision(expectedRevision);
+    value=clone(nextValue);
+    revision++;
+    snapshots.set(current(),clone(value));
+    trimSnapshots(snapshots,current());
+    ledger.push({...event,revision:current(),at:new Date().toISOString()});
+    if (ledger.length > MAX_REVISION_LEDGER) ledger.splice(0,ledger.length-MAX_REVISION_LEDGER);
+    return inspect();
+  };
   const restore = (targetRevision,expectedRevision=current()) => { assertRevision(expectedRevision); if(!snapshots.has(targetRevision)) throw new Error('REVISION_NOT_FOUND'); return commit(snapshots.get(targetRevision),{kind:'restore',from:targetRevision},expectedRevision); };
   const dump = () => ({ version:1, revision, value:clone(value), snapshots:[...snapshots.entries()].map(([rev,snapshot])=>[rev,clone(snapshot)]), ledger:clone(ledger) });
   return { inspect, commit, restore, assertRevision, snapshot:rev=>snapshots.has(rev)?clone(snapshots.get(rev)):undefined, dump };

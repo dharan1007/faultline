@@ -16,7 +16,7 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===11);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===12);
 
   const before=await page.evaluate(()=>window.faultline.inspect());
   const invalidOracle={kind:'totally_unknown',selector:'',property:'',equals:true,action:{kind:'explode',selector:''},delayMs:-10};

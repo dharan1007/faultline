@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/reducer-engine.test.js",
-    "check": "node --check src/reducer-engine.js && node --check src/runtime.js && node --check tests/browser-e2e.mjs && node --check tests/webmcp-cancellation.mjs && node --check tests/oracle-script-data.mjs && node --check tests/evidence-revision-lineage.mjs && node --check tests/css-sandbox-boundary.mjs && node --check tests/pin-revision-integrity.mjs && node --check tests/export-css-boundary.mjs",
+    "check": "node --check src/reducer-engine.js && node --check src/runtime.js && node --check tests/browser-e2e.mjs && node --check tests/webmcp-cancellation.mjs && node --check tests/oracle-script-data.mjs && node --check tests/evidence-revision-lineage.mjs && node --check tests/css-sandbox-boundary.mjs && node --check tests/pin-revision-integrity.mjs && node --check tests/export-css-boundary.mjs && node --check tests/navigation-network-containment.mjs",
     "build": "node -e \"const fs=require('fs'); for (const f of ['index.html','src/runtime.js','src/reducer-engine.js']) if(!fs.existsSync(f)) process.exit(1); console.log('static production tree verified')\"",
-    "test:browser": "node tests/browser-e2e.mjs && node tests/webmcp-cancellation.mjs && node tests/oracle-script-data.mjs && node tests/evidence-revision-lineage.mjs && node tests/css-sandbox-boundary.mjs && node tests/pin-revision-integrity.mjs && node tests/export-css-boundary.mjs"
+    "test:browser": "node tests/browser-e2e.mjs && node tests/webmcp-cancellation.mjs && node tests/oracle-script-data.mjs && node tests/evidence-revision-lineage.mjs && node tests/css-sandbox-boundary.mjs && node tests/pin-revision-integrity.mjs && node tests/export-css-boundary.mjs && node tests/navigation-network-containment.mjs"
   },
   "devDependencies": {
     "playwright": "1.55.0"

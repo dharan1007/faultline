@@ -140,12 +140,16 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false}={}){
 function executeCase(c,{signal}={}){
   return new Promise((resolve,reject)=>{
     if(signal?.aborted){reject(abortError());return;}
-    const preview=$('preview');
+    const experiment=document.createElement('iframe');
+    experiment.hidden=true;
+    experiment.tabIndex=-1;
+    experiment.setAttribute('aria-hidden','true');
+    experiment.setAttribute('sandbox','allow-scripts');
     const bootstrapId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
     let done=false,resultPort=null;
     const timer=setTimeout(()=>finish({status:'UNRESOLVED',evidence:{reason:'HOST_TIMEOUT'}}),2200);
     const onReady=e=>{
-      if(done||resultPort||e.source!==preview.contentWindow||e.data?.type!=='faultline:ready'||e.data.bootstrapId!==bootstrapId||!e.ports?.[0])return;
+      if(done||resultPort||e.source!==experiment.contentWindow||e.data?.type!=='faultline:ready'||e.data.bootstrapId!==bootstrapId||!e.ports?.[0])return;
       removeEventListener('message',onReady);
       resultPort=e.ports[0];
       resultPort.onmessage=event=>{
@@ -156,12 +160,13 @@ function executeCase(c,{signal}={}){
       try{resultPort.start()}catch{}
     };
     const onAbort=()=>cancel();
-    function cleanup(){clearTimeout(timer);removeEventListener('message',onReady);signal?.removeEventListener('abort',onAbort);if(resultPort){resultPort.onmessage=null;try{resultPort.close()}catch{}}}
-    function finish(result){ if(done)return;done=true;cleanup();resolve(result); }
-    function cancel(){ if(done)return;done=true;cleanup();preview.srcdoc='<!doctype html><title>Cancelled</title>';reject(abortError()); }
+    function cleanup(){clearTimeout(timer);removeEventListener('message',onReady);signal?.removeEventListener('abort',onAbort);if(resultPort){resultPort.onmessage=null;try{resultPort.close()}catch{}}experiment.remove();}
+    function finish(result){if(done)return;done=true;cleanup();resolve(result);}
+    function cancel(){if(done)return;done=true;cleanup();reject(abortError());}
     addEventListener('message',onReady);
     signal?.addEventListener('abort',onAbort,{once:true});
-    preview.srcdoc=buildSandboxDocument(c,bootstrapId);
+    document.body.appendChild(experiment);
+    experiment.srcdoc=buildSandboxDocument(c,bootstrapId);
   });
 }
 function runCase(c=value(),{signal}={}){
@@ -179,7 +184,7 @@ function runCase(c=value(),{signal}={}){
 function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},revision:revision(),at:new Date().toISOString(),...extra};experimentLedger.push(entry);persistMutation(before);renderTrace();return entry; }
 async function run({expectedRevision=revision()}={}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const r=await runCase(value(),{signal});throwIfAborted(signal);record('run',r,{revision:testedRevision});renderHealth(r.status);return r; }
 function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.value,pins:[...pins],unitCounts:{html:unitsFor('html',s.value.html).length,css:unitsFor('css',s.value.css).length,js:unitsFor('js',s.value.js).length},latest:experimentLedger.at(-1)||null,webmcp:!!document.modelContext}; }
-function commitCase(next,event,expectedRevision=revision()){ const before=snapshotCanonical();const result=store.commit(next,event,expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();return inspect(); }
+function commitCase(next,event,expectedRevision=revision()){ const before=snapshotCanonical();const result=store.commit(next,event,expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();renderPreview();return inspect(); }
 function defineOracle({expectedRevision=revision(),oracle}){ validateOracle(oracle);return commitCase({...value(),oracle:clone(oracle)},{kind:'define_oracle'},expectedRevision); }
 function applySource({expectedRevision=revision(),targetAxis=axis,source}){ if(!['html','css','js'].includes(targetAxis))throw new Error('INVALID_AXIS'); return commitCase({...value(),[targetAxis]:String(source)},{kind:'source_edit',axis:targetAxis},expectedRevision); }
 function loadCase({expectedRevision=revision(),case:nextCase}){
@@ -191,6 +196,7 @@ function loadCase({expectedRevision=revision(),case:nextCase}){
   revisions.set(result.revision,{value:clone(result.value),pins:[]});
   persistMutation(before);
   render();
+  renderPreview();
   return inspect();
 }
 function resetCase({expectedRevision=revision()}={}){ return loadCase({expectedRevision,case:fixture}); }
@@ -209,11 +215,11 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
   const committed=store.commit({...value(),[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reduced.trialCount,removed:removed.length},expectedRevision);
   revisions.set(committed.revision,{value:clone(committed.value),pins:[...pins]});
   experimentLedger.push({kind:'reduce',status:final.status,evidence:final.evidence||{},revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reduced.trialCount,removed:removed.length,reduction:beforeLength?1-after/beforeLength:0});
-  persistMutation(before);render();renderHealth(final.status);
+  persistMutation(before);render();renderPreview();renderHealth(final.status);
   return {status:final.status,before:beforeLength,after,reduction:beforeLength?1-after/beforeLength:0,trials:reduced.trialCount,removed:removed.length,revision:revision()};
 }
 function history({limit=100}={}){ return clone(experimentLedger.slice(-Math.max(1,Math.min(200,Number(limit)||100)))); }
-function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();return inspect(); }
+function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();renderPreview();return inspect(); }
 function exportCase(){const c=value(),safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>${String(c.js).replace(/<\/script/gi,'<\\/script')}<\/script></body></html>`;}
 async function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){
   store.assertRevision(expectedRevision);throwIfAborted(signal);
@@ -236,6 +242,7 @@ function renderHealth(status){$('health').textContent=status;$('health').dataset
 function renderTrace(){const list=$('trace');list.innerHTML='';for(const e of [...experimentLedger].reverse().slice(0,50)){const li=document.createElement('li');li.innerHTML=`<strong>${e.kind.toUpperCase()} · ${e.status}</strong><span>${e.revision} · ${new Date(e.at).toLocaleTimeString()}</span><code>${escapeHtml(JSON.stringify(e.evidence||{}))}</code>`;list.appendChild(li)}$('summary').textContent=experimentLedger.length?`${experimentLedger.length} evidence events · latest ${experimentLedger.at(-1).status}`:'No experiments yet.';}
 function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 function renderUnits(){const list=$('units'),units=unitsFor();list.innerHTML='';selectedUnitId=null;for(const unit of units){const row=document.createElement('button');row.type='button';row.className='unit';row.dataset.unitId=unit.id;row.setAttribute('aria-pressed','false');const pinned=pins.has(pinKey(axis,unit.id));row.innerHTML=`<span>${escapeHtml(unit.text.trim().replace(/\s+/g,' ').slice(0,120))}</span><small>${unit.kind}${pinned?' · pinned':''}</small>`;row.onclick=()=>{document.querySelectorAll('.unit').forEach(x=>x.setAttribute('aria-pressed','false'));row.setAttribute('aria-pressed','true');selectedUnitId=unit.id;$('probe').disabled=false;$('pin').disabled=false;};list.appendChild(row)}$('unit-count').textContent=`${units.length} units`;}
+function renderPreview(){const preview=$('preview');if(!preview)return;preview.srcdoc=buildSandboxDocument(value(),'canonical-preview',{previewOnly:true});}
 function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';renderUnits();renderTrace();persistBestEffort();}
 
 const REVISION_PROPERTY={expectedRevision:{type:'string',pattern:'^r[1-9]\\d*$'}};
@@ -270,4 +277,4 @@ $('autopilot').onclick=()=>autopilot().then(()=>renderHealth('COMPLETE')).catch(
 $('lock').onclick=()=>defineOracle({oracle:{kind:$('oracle-kind').value,selector:$('oracle-selector').value,property:$('oracle-property').value,equals:normalizeExpected($('oracle-equals').value),action:{kind:$('action-kind').value,selector:$('action-selector').value},delayMs:0}});
 $('export').onclick=()=>{const a=document.createElement('a'),blob=new Blob([exportCase()],{type:'text/html'});a.href=URL.createObjectURL(blob);a.download='faultline-reproducer.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $('reset').onclick=()=>resetCase({expectedRevision:revision()});
-restoreLocal();revisions.set(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();registerWebMCP();$('preview').srcdoc=buildSandboxDocument(value(),'initial-preview',{previewOnly:true});
+restoreLocal();revisions.set(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();renderPreview();registerWebMCP();

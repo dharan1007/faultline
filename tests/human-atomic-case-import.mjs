@@ -21,6 +21,8 @@ try{
   assert.equal(await page.locator('#case-import').count(),1,'human workflow must expose one case import surface');
   assert.equal(await page.locator('#case-import-json').count(),1,'case import must expose a JSON editor');
   assert.equal(await page.locator('#import-case').count(),1,'case import must expose one explicit atomic import action');
+  await page.locator('#case-import > summary').click();
+  assert.equal(await page.locator('#case-import').evaluate(element=>element.open),true,'case import surface must be keyboard/click expandable');
 
   const before=await page.evaluate(()=>window.faultline.inspect());
   const imported={

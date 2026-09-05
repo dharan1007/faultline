@@ -64,41 +64,71 @@ function restoreLocal(){
   }catch{}
 }
 
-function buildSandboxDocument(c,runId){
+function buildSandboxDocument(c,bootstrapId,{previewOnly=false}={}){
   const safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');
-  const safeJs=String(c.js).replace(/<\/script/gi,'<\\/script');
+  const candidateSource=JSON.stringify(String(c.js)).replace(/</g,'\\u003c');
   const oracle=JSON.stringify(c.oracle).replace(/</g,'\\u003c');
   return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>
-let __faultlineRuntimeError=null;
-addEventListener('error',e=>{__faultlineRuntimeError=String(e.message||e.error||'runtime error')});
-try{${safeJs}}catch(e){__faultlineRuntimeError=String(e&&e.message||e)}
-const o=${oracle};
-setTimeout(()=>{try{
- if(o.action?.kind==='click'){const target=document.querySelector(o.action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click()}
- setTimeout(()=>{try{let actual;
-  if(o.kind==='runtime_error'){actual=__faultlineRuntimeError}
-  else {const el=document.querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='computed_style')actual=el?getComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
-  const fail=o.kind==='runtime_error'?Boolean(actual):Object.is(actual,o.equals);
-  parent.postMessage({type:'faultline:result',runId:${JSON.stringify(runId)},status:fail?'FAIL':'PASS',evidence:{actual,expected:o.equals,kind:o.kind,selector:o.selector,property:o.property}},'*')
- }catch(e){parent.postMessage({type:'faultline:result',runId:${JSON.stringify(runId)},status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}},'*')}},Number(o.delayMs)||0)
-}catch(e){parent.postMessage({type:'faultline:result',runId:${JSON.stringify(runId)},status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}},'*')}},0)
+(function(){
+ const candidateSource=${candidateSource};
+ const o=${oracle};
+ const schedule=setTimeout.bind(window);
+ const querySelector=Document.prototype.querySelector.bind(document);
+ const readComputedStyle=getComputedStyle.bind(window);
+ const same=Object.is;
+ let runtimeError=null;
+ addEventListener('error',e=>{runtimeError=String(e.message||e.error||'runtime error')});
+ const executeCandidate=()=>{try{(0,eval)(candidateSource)}catch(e){runtimeError=String(e&&e.message||e)}};
+ const measure=send=>schedule(()=>{try{
+  if(o.action?.kind==='click'){const target=querySelector(o.action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click()}
+  schedule(()=>{try{let actual;
+   if(o.kind==='runtime_error'){actual=runtimeError}
+   else {const el=querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='computed_style')actual=el?readComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
+   const fail=o.kind==='runtime_error'?Boolean(actual):same(actual,o.equals);
+   send({status:fail?'FAIL':'PASS',evidence:{actual,expected:o.equals,kind:o.kind,selector:o.selector,property:o.property}})
+  }catch(e){send({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},Number(o.delayMs)||0)
+ }catch(e){send({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},0);
+ if(${previewOnly?'true':'false'}){executeCandidate();return;}
+ const onChannel=e=>{
+  if(e.data?.type!=='faultline:channel'||e.data.bootstrapId!==${JSON.stringify(bootstrapId)}||!e.ports?.[0])return;
+  removeEventListener('message',onChannel);
+  const port=e.ports[0];
+  const send=port.postMessage.bind(port);
+  executeCandidate();
+  measure(send);
+ };
+ addEventListener('message',onChannel);
+ parent.postMessage({type:'faultline:ready',bootstrapId:${JSON.stringify(bootstrapId)}},'*');
+})();
 <\/script></body></html>`;
 }
 
 function executeCase(c,{signal}={}){
   return new Promise((resolve,reject)=>{
     if(signal?.aborted){reject(abortError());return;}
-    const runId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
-    let done=false;
+    const preview=$('preview');
+    const bootstrapId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
+    const channel=new MessageChannel();
+    let done=false,channelSent=false;
     const timer=setTimeout(()=>finish({status:'UNRESOLVED',evidence:{reason:'HOST_TIMEOUT'}}),2200);
-    const onMessage=e=>{ if(e.data?.type==='faultline:result'&&e.data.runId===runId) finish({status:e.data.status,evidence:e.data.evidence||{}}); };
+    const onReady=e=>{
+      if(channelSent||e.source!==preview.contentWindow||e.data?.type!=='faultline:ready'||e.data.bootstrapId!==bootstrapId)return;
+      channelSent=true;
+      removeEventListener('message',onReady);
+      preview.contentWindow.postMessage({type:'faultline:channel',bootstrapId},'*',[channel.port2]);
+    };
     const onAbort=()=>cancel();
-    function cleanup(){clearTimeout(timer);removeEventListener('message',onMessage);signal?.removeEventListener('abort',onAbort);}
+    channel.port1.onmessage=e=>{
+      const result=e.data;
+      if(!result||!['PASS','FAIL','UNRESOLVED'].includes(result.status))return;
+      finish({status:result.status,evidence:result.evidence||{}});
+    };
+    function cleanup(){clearTimeout(timer);removeEventListener('message',onReady);signal?.removeEventListener('abort',onAbort);channel.port1.onmessage=null;try{channel.port1.close()}catch{}try{channel.port2.close()}catch{}}
     function finish(result){ if(done)return;done=true;cleanup();resolve(result); }
-    function cancel(){ if(done)return;done=true;cleanup();$('preview').srcdoc='<!doctype html><title>Cancelled</title>';reject(abortError()); }
-    addEventListener('message',onMessage);
+    function cancel(){ if(done)return;done=true;cleanup();preview.srcdoc='<!doctype html><title>Cancelled</title>';reject(abortError()); }
+    addEventListener('message',onReady);
     signal?.addEventListener('abort',onAbort,{once:true});
-    $('preview').srcdoc=buildSandboxDocument(c,runId);
+    preview.srcdoc=buildSandboxDocument(c,bootstrapId);
   });
 }
 function runCase(c=value(),{signal}={}){
@@ -172,4 +202,4 @@ $('autopilot').onclick=()=>autopilot().then(()=>renderHealth('COMPLETE')).catch(
 $('lock').onclick=()=>defineOracle({oracle:{kind:$('oracle-kind').value,selector:$('oracle-selector').value,property:$('oracle-property').value,equals:normalizeExpected($('oracle-equals').value),action:{kind:$('action-kind').value,selector:$('action-selector').value},delayMs:0}});
 $('export').onclick=()=>{const a=document.createElement('a'),blob=new Blob([exportCase()],{type:'text/html'});a.href=URL.createObjectURL(blob);a.download='faultline-reproducer.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $('reset').onclick=()=>{store=createRevisionStore(fixture);pins.clear();experimentLedger=[];axis='html';revisions.clear();revisions.set('r1',{value:clone(fixture),pins:[]});try{localStorage.removeItem(STORAGE_KEY);localStorage.removeItem(LEGACY_STORAGE_KEY);}catch{}render();};
-restoreLocal();revisions.set(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();registerWebMCP();$('preview').srcdoc=buildSandboxDocument(value(),'initial-preview');
+restoreLocal();revisions.set(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();registerWebMCP();$('preview').srcdoc=buildSandboxDocument(value(),'initial-preview',{previewOnly:true});

@@ -77,7 +77,7 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false}={}){
  const readComputedStyle=getComputedStyle.bind(window);
  const same=Object.is;
  let runtimeError=null;
- addEventListener('error',e=>{runtimeError=String(e.message||e.error||'runtime error')});
+ addEventListener('error',e=>{runtimeError=String(e.message||e.error||'runtime error');e.preventDefault()});
  const executeCandidate=()=>{try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){runtimeError=String(e&&e.message||e)}};
  const measure=send=>schedule(()=>{try{
   if(o.action?.kind==='click'){const target=querySelector(o.action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click()}

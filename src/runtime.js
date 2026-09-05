@@ -5,6 +5,8 @@ const $ = id => document.getElementById(id);
 const clone = v => JSON.parse(JSON.stringify(v));
 const STORAGE_KEY = 'faultline-prod-v3';
 const LEGACY_STORAGE_KEY = 'faultline-prod-v2';
+const MAX_RUNTIME_REVISIONS = 32;
+const MAX_EXPERIMENT_LEDGER = 200;
 const ORACLE_KINDS=['dom_property','computed_style','dom_exists','runtime_error'];
 const ACTION_KINDS=['none','click'];
 const fixture = {
@@ -28,6 +30,16 @@ function normalizeExpected(v){ const s=String(v); if(s==='true')return true;if(s
 function unitsFor(targetAxis=axis, source=value()[targetAxis]){ return semanticUnits(targetAxis,source); }
 function pinKey(targetAxis,unitId){ return `${targetAxis}|${unitId}`; }
 function validRevisionEntry(entry){ return Array.isArray(entry)&&entry.length===2&&/^r[1-9]\d*$/.test(String(entry[0]))&&entry[1]?.value; }
+function trimRuntimeHistory(){
+  while(revisions.size>MAX_RUNTIME_REVISIONS){
+    const oldest=revisions.keys().next().value;
+    if(oldest===revision())break;
+    revisions.delete(oldest);
+  }
+  if(experimentLedger.length>MAX_EXPERIMENT_LEDGER) experimentLedger.splice(0,experimentLedger.length-MAX_EXPERIMENT_LEDGER);
+}
+function rememberRevision(rev,snapshot){ revisions.set(rev,clone(snapshot));trimRuntimeHistory(); }
+function rememberExperiment(entry){ experimentLedger.push(entry);trimRuntimeHistory();return entry; }
 function abortError(){ return new DOMException('WebMCP execution aborted','AbortError'); }
 function throwIfAborted(signal){ if(signal?.aborted)throw abortError(); }
 function validateOracle(oracle){
@@ -51,16 +63,17 @@ function validateCase(candidate){
   validateOracle(candidate.oracle);
   return candidate;
 }
-function persistencePayload(){ return {version:3,store:store.dump(),axis,pins:[...pins],experimentLedger,revisions:[...revisions.entries()].map(([rev,snapshot])=>[rev,clone(snapshot)])}; }
+function persistencePayload(){ trimRuntimeHistory();return {version:3,store:store.dump(),axis,pins:[...pins],experimentLedger:clone(experimentLedger),revisions:[...revisions.entries()].map(([rev,snapshot])=>[rev,clone(snapshot)])}; }
 function snapshotCanonical(){ return clone(persistencePayload()); }
 function restoreCanonical(snapshot){
   store=createRevisionStore(fixture,snapshot.store);
   axis=['html','css','js'].includes(snapshot.axis)?snapshot.axis:'html';
   pins=new Set(Array.isArray(snapshot.pins)?snapshot.pins:[]);
-  experimentLedger=Array.isArray(snapshot.experimentLedger)?clone(snapshot.experimentLedger):[];
+  experimentLedger=Array.isArray(snapshot.experimentLedger)?clone(snapshot.experimentLedger.slice(-MAX_EXPERIMENT_LEDGER)):[];
   revisions.clear();
-  for(const entry of Array.isArray(snapshot.revisions)?snapshot.revisions:[]) if(validRevisionEntry(entry)) revisions.set(String(entry[0]),clone(entry[1]));
+  for(const entry of Array.isArray(snapshot.revisions)?snapshot.revisions.slice(-MAX_RUNTIME_REVISIONS):[]) if(validRevisionEntry(entry)) revisions.set(String(entry[0]),clone(entry[1]));
   if(!revisions.has(revision())) revisions.set(revision(),{value:clone(value()),pins:[...pins]});
+  trimRuntimeHistory();
 }
 function writePersistence(){ localStorage.setItem(STORAGE_KEY,JSON.stringify(persistencePayload())); }
 function persistBestEffort(){ try{writePersistence();return true}catch{return false} }
@@ -78,10 +91,11 @@ function restoreLocal(){
       store=createRevisionStore(fixture,raw.store);
       axis=['html','css','js'].includes(raw.axis)?raw.axis:'html';
       pins=new Set(Array.isArray(raw.pins)?raw.pins:[]);
-      experimentLedger=Array.isArray(raw.experimentLedger)?raw.experimentLedger:[];
+      experimentLedger=Array.isArray(raw.experimentLedger)?raw.experimentLedger.slice(-MAX_EXPERIMENT_LEDGER):[];
       revisions.clear();
-      for(const entry of Array.isArray(raw.revisions)?raw.revisions:[]) if(validRevisionEntry(entry)) revisions.set(String(entry[0]),clone(entry[1]));
+      for(const entry of Array.isArray(raw.revisions)?raw.revisions.slice(-MAX_RUNTIME_REVISIONS):[]) if(validRevisionEntry(entry)) revisions.set(String(entry[0]),clone(entry[1]));
       if(!revisions.has(revision())) revisions.set(revision(),{value:clone(value()),pins:[...pins]});
+      trimRuntimeHistory();
       return;
     }
   }catch{ try{localStorage.removeItem(STORAGE_KEY);}catch{} }
@@ -94,9 +108,9 @@ function restoreLocal(){
     store=createRevisionStore(fixture,{version:1,revision:legacyRevision,value:legacy.state.value,snapshots:[[currentRevision,legacy.state.value]],ledger:Array.isArray(legacy.state.history)?legacy.state.history:[]});
     axis=['html','css','js'].includes(legacy.axis)?legacy.axis:'html';
     pins=new Set(Array.isArray(legacy.pins)?legacy.pins:[]);
-    experimentLedger=Array.isArray(legacy.experimentLedger)?legacy.experimentLedger:[];
+    experimentLedger=Array.isArray(legacy.experimentLedger)?legacy.experimentLedger.slice(-MAX_EXPERIMENT_LEDGER):[];
     revisions.clear();
-    revisions.set(currentRevision,{value:clone(value()),pins:[...pins]});
+    rememberRevision(currentRevision,{value:clone(value()),pins:[...pins]});
     persistBestEffort();
     localStorage.removeItem(LEGACY_STORAGE_KEY);
   }catch{}
@@ -183,7 +197,7 @@ function runCase(c=value(),{signal}={}){
   return task;
 }
 
-function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},revision:revision(),at:new Date().toISOString(),...extra};experimentLedger.push(entry);persistMutation(before);renderTrace();return entry; }
+function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},revision:revision(),at:new Date().toISOString(),...extra};rememberExperiment(entry);persistMutation(before);renderTrace();return entry; }
 async function run({expectedRevision=revision()}={}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const r=await runCase(value(),{signal});throwIfAborted(signal);record('run',r,{revision:testedRevision});renderHealth(r.status);return r; }
 function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.value,pins:[...pins],unitCounts:{html:unitsFor('html',s.value.html).length,css:unitsFor('css',s.value.css).length,js:unitsFor('js',s.value.js).length},latest:experimentLedger.at(-1)||null,webmcp:!!document.modelContext}; }
 function units({targetAxis=axis}={}){
@@ -191,7 +205,7 @@ function units({targetAxis=axis}={}){
   const s=store.inspect();
   return {revision:s.revision,targetAxis,units:unitsFor(targetAxis,s.value[targetAxis]).map(unit=>({id:unit.id,kind:unit.kind,text:unit.text,pinned:pins.has(pinKey(targetAxis,unit.id))}))};
 }
-function commitCase(next,event,expectedRevision=revision()){ const before=snapshotCanonical();const result=store.commit(next,event,expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();renderPreview();return inspect(); }
+function commitCase(next,event,expectedRevision=revision()){ const before=snapshotCanonical();const result=store.commit(next,event,expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();renderPreview();return inspect(); }
 function defineOracle({expectedRevision=revision(),oracle}){ validateOracle(oracle);return commitCase({...value(),oracle:clone(oracle)},{kind:'define_oracle'},expectedRevision); }
 function applySource({expectedRevision=revision(),targetAxis=axis,source}){ if(!['html','css','js'].includes(targetAxis))throw new Error('INVALID_AXIS'); return commitCase({...value(),[targetAxis]:String(source)},{kind:'source_edit',axis:targetAxis},expectedRevision); }
 function loadCase({expectedRevision=revision(),case:nextCase}){
@@ -200,7 +214,7 @@ function loadCase({expectedRevision=revision(),case:nextCase}){
   const before=snapshotCanonical();
   pins.clear();
   const result=store.commit(clone(nextCase),{kind:'case_load'},expectedRevision);
-  revisions.set(result.revision,{value:clone(result.value),pins:[]});
+  rememberRevision(result.revision,{value:clone(result.value),pins:[]});
   persistMutation(before);
   render();
   renderPreview();
@@ -208,7 +222,7 @@ function loadCase({expectedRevision=revision(),case:nextCase}){
 }
 function resetCase({expectedRevision=revision()}={}){ return loadCase({expectedRevision,case:fixture}); }
 async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const source=value()[targetAxis];const unit=unitsFor(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(pins.has(pinKey(targetAxis,unitId)))throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const result=await runCase(candidate,{signal});throwIfAborted(signal);record('probe',result,{axis:targetAxis,unitId,mutated:false,revision:testedRevision});return {...result,mutated:false,canonicalRevision:revision()}; }
-function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);const alreadyPinned=pins.has(key);if(alreadyPinned===pinned)return inspect();const before=snapshotCanonical();pinned?pins.add(key):pins.delete(key);const result=store.commit(value(),{kind:pinned?'pin':'unpin',axis:targetAxis,unitId},expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});experimentLedger.push({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:result.revision,at:new Date().toISOString()});persistMutation(before);render();return inspect(); }
+function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);const alreadyPinned=pins.has(key);if(alreadyPinned===pinned)return inspect();const before=snapshotCanonical();pinned?pins.add(key):pins.delete(key);const result=store.commit(value(),{kind:pinned?'pin':'unpin',axis:targetAxis,unitId},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});rememberExperiment({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:result.revision,at:new Date().toISOString()});persistMutation(before);render();return inspect(); }
 async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}={}, {signal}={}){
   store.assertRevision(expectedRevision);throwIfAborted(signal);
   const source=value()[targetAxis], all=unitsFor(targetAxis,source);
@@ -220,13 +234,13 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
   throwIfAborted(signal);if(final.status!=='FAIL')throw new Error('REDUCTION_LOST_FAILURE');
   const beforeLength=source.length,after=nextSource.length,before=snapshotCanonical();
   const committed=store.commit({...value(),[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reduced.trialCount,removed:removed.length},expectedRevision);
-  revisions.set(committed.revision,{value:clone(committed.value),pins:[...pins]});
-  experimentLedger.push({kind:'reduce',status:final.status,evidence:final.evidence||{},revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reduced.trialCount,removed:removed.length,reduction:beforeLength?1-after/beforeLength:0});
+  rememberRevision(committed.revision,{value:clone(committed.value),pins:[...pins]});
+  rememberExperiment({kind:'reduce',status:final.status,evidence:final.evidence||{},revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reduced.trialCount,removed:removed.length,reduction:beforeLength?1-after/beforeLength:0});
   persistMutation(before);render();renderPreview();renderHealth(final.status);
   return {status:final.status,before:beforeLength,after,reduction:beforeLength?1-after/beforeLength:0,trials:reduced.trialCount,removed:removed.length,revision:revision()};
 }
 function history({limit=100}={}){ return clone(experimentLedger.slice(-Math.max(1,Math.min(200,Number(limit)||100)))); }
-function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();renderPreview();return inspect(); }
+function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();renderPreview();return inspect(); }
 function exportCase(){const c=value(),safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>${String(c.js).replace(/<\/script/gi,'<\\/script')}<\/script></body></html>`;}
 async function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){
   store.assertRevision(expectedRevision);throwIfAborted(signal);
@@ -285,4 +299,4 @@ $('autopilot').onclick=()=>autopilot().then(()=>renderHealth('COMPLETE')).catch(
 $('lock').onclick=()=>defineOracle({oracle:{kind:$('oracle-kind').value,selector:$('oracle-selector').value,property:$('oracle-property').value,equals:normalizeExpected($('oracle-equals').value),action:{kind:$('action-kind').value,selector:$('action-selector').value},delayMs:0}});
 $('export').onclick=()=>{const a=document.createElement('a'),blob=new Blob([exportCase()],{type:'text/html'});a.href=URL.createObjectURL(blob);a.download='faultline-reproducer.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $('reset').onclick=()=>resetCase({expectedRevision:revision()});
-restoreLocal();revisions.set(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();renderPreview();registerWebMCP();
+restoreLocal();rememberRevision(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();renderPreview();registerWebMCP();

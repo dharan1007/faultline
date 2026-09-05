@@ -179,7 +179,22 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
 function history({limit=100}={}){ return clone(experimentLedger.slice(-Math.max(1,Math.min(200,Number(limit)||100)))); }
 function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);revisions.set(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();return inspect(); }
 function exportCase(){const c=value(),safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>${String(c.js).replace(/<\/script/gi,'<\\/script')}<\/script></body></html>`;}
-async function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){store.assertRevision(expectedRevision);throwIfAborted(signal);const baseline=await run({expectedRevision},{signal});if(baseline.status!=='FAIL')throw new Error('BASELINE_NOT_FAILING');const results=[];for(const targetAxis of axes){throwIfAborted(signal);const beforeRevision=revision();const r=await reduce({expectedRevision:beforeRevision,targetAxis,maxTrials:maxTrialsPerAxis},{signal});results.push({axis:targetAxis,...r});}return {status:'COMPLETE',revision:revision(),results};}
+async function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){
+  store.assertRevision(expectedRevision);throwIfAborted(signal);
+  const baseline=await run({expectedRevision},{signal});
+  store.assertRevision(expectedRevision);
+  if(baseline.status!=='FAIL')throw new Error('BASELINE_NOT_FAILING');
+  const results=[];
+  let ownedRevision=expectedRevision;
+  for(const targetAxis of axes){
+    throwIfAborted(signal);
+    store.assertRevision(ownedRevision);
+    const r=await reduce({expectedRevision:ownedRevision,targetAxis,maxTrials:maxTrialsPerAxis},{signal});
+    ownedRevision=r.revision;
+    results.push({axis:targetAxis,...r});
+  }
+  return {status:'COMPLETE',revision:ownedRevision,results};
+}
 
 function renderHealth(status){$('health').textContent=status;$('health').dataset.state=status;}
 function renderTrace(){const list=$('trace');list.innerHTML='';for(const e of [...experimentLedger].reverse().slice(0,50)){const li=document.createElement('li');li.innerHTML=`<strong>${e.kind.toUpperCase()} · ${e.status}</strong><span>${e.revision} · ${new Date(e.at).toLocaleTimeString()}</span><code>${escapeHtml(JSON.stringify(e.evidence||{}))}</code>`;list.appendChild(li)}$('summary').textContent=experimentLedger.length?`${experimentLedger.length} evidence events · latest ${experimentLedger.at(-1).status}`:'No experiments yet.';}

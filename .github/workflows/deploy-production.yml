@@ -120,10 +120,16 @@ jobs:
       - name: Smoke-test staged deployment against verified source
         run: |
           set -euo pipefail
-          curl -fsS --retry 8 --retry-delay 2 "$DEPLOYMENT_URL/" -o /tmp/faultline-staged-index.html
-          curl -fsS --retry 8 --retry-delay 2 "$DEPLOYMENT_URL/src/runtime.js" -o /tmp/faultline-staged-runtime.js
-          cmp index.html /tmp/faultline-staged-index.html
-          cmp src/runtime.js /tmp/faultline-staged-runtime.js
+          for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js; do
+            if [ "$file" = "index.html" ]; then
+              remote_path="/"
+            else
+              remote_path="/$file"
+            fi
+            output="/tmp/faultline-staged-${file//\//-}"
+            curl -fsS --retry 8 --retry-delay 2 "$DEPLOYMENT_URL$remote_path" -o "$output"
+            cmp "$file" "$output"
+          done
 
       - name: Promote staged deployment to production
         env:
@@ -135,17 +141,27 @@ jobs:
           set -euo pipefail
           MATCHED=0
           for attempt in $(seq 1 18); do
-            if curl -fsS "$VERCEL_PRODUCTION_URL/" -o /tmp/faultline-live-index.html \
-              && curl -fsS "$VERCEL_PRODUCTION_URL/src/runtime.js" -o /tmp/faultline-live-runtime.js \
-              && cmp -s index.html /tmp/faultline-live-index.html \
-              && cmp -s src/runtime.js /tmp/faultline-live-runtime.js; then
+            TREE_MATCHED=1
+            for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js; do
+              if [ "$file" = "index.html" ]; then
+                remote_path="/"
+              else
+                remote_path="/$file"
+              fi
+              output="/tmp/faultline-live-${file//\//-}"
+              if ! curl -fsS "$VERCEL_PRODUCTION_URL$remote_path" -o "$output" || ! cmp -s "$file" "$output"; then
+                TREE_MATCHED=0
+                break
+              fi
+            done
+            if [ "$TREE_MATCHED" = 1 ]; then
               MATCHED=1
               break
             fi
             sleep 5
           done
           test "$MATCHED" = 1 || {
-            echo "::error::Production alias did not converge to the verified source tree"
+            echo "::error::Production alias did not converge to the complete verified source tree"
             exit 1
           }
 

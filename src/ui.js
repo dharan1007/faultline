@@ -7,7 +7,7 @@ const integrationBadge=document.querySelector('#integration-workspace>summary .t
 const integrationFlow=document.querySelector('#integration-workspace .integration-column:nth-child(2) pre');
 const browserFlow=document.querySelector('#integration-workspace .integration-column:nth-child(1) pre');
 const toolCount=window.faultline.manifest().length;
-const toolCountLabel=({13:'thirteen',14:'fourteen'})[toolCount]||String(toolCount);
+const toolCountLabel=({13:'thirteen',14:'fourteen',15:'fifteen'})[toolCount]||String(toolCount);
 
 if(integrationBadge)integrationBadge.textContent=`${toolCount} WebMCP tools`;
 if(integrationNote){
@@ -23,6 +23,12 @@ if(integrationNote){
     const tool=document.createElement('code');
     tool.textContent='faultline_units';
     integrationNote.append(separator,tool,document.createTextNode(' before probe or pin operations.'));
+  }
+  if(!integrationNote.textContent.includes('faultline_revisions')){
+    const separator=document.createTextNode(' Discover bounded recovery points with ');
+    const tool=document.createElement('code');
+    tool.textContent='faultline_revisions';
+    integrationNote.append(separator,tool,document.createTextNode(' before faultline_restore.'));
   }
 }
 if(integrationFlow&&!integrationFlow.textContent.includes('faultline_units')){
@@ -125,8 +131,87 @@ function installCaseJsonExport(){
   reproducerButton.insertAdjacentElement('beforebegin',button);
 }
 
+function installRevisionRecovery(){
+  const actionBar=document.querySelector('#case-workspace .action-bar');
+  if(!actionBar||document.getElementById('revision-recovery'))return ()=>{};
+
+  const details=document.createElement('details');
+  details.id='revision-recovery';
+  details.style.marginTop='12px';
+  details.style.paddingTop='12px';
+  details.style.borderTop='1px solid var(--line)';
+
+  const summary=document.createElement('summary');
+  summary.className='btn ghost';
+  summary.textContent='Recoverable revisions';
+
+  const help=document.createElement('p');
+  help.className='small';
+  help.textContent='Restore a retained canonical checkpoint as a new guarded revision. Current state is never rewritten in place.';
+
+  const list=document.createElement('div');
+  list.setAttribute('role','list');
+  list.setAttribute('aria-label','Recoverable canonical revisions');
+  list.style.display='grid';
+  list.style.gap='7px';
+
+  const refresh=()=>{
+    const state=window.faultline.revisions({limit:8});
+    list.replaceChildren();
+    for(const item of state.revisions){
+      const row=document.createElement('div');
+      row.setAttribute('role','listitem');
+      row.style.display='flex';
+      row.style.alignItems='center';
+      row.style.justifyContent='space-between';
+      row.style.gap='10px';
+      row.style.padding='9px 10px';
+      row.style.border='1px solid var(--line)';
+      row.style.borderRadius='9px';
+      row.style.background='#08090c';
+
+      const mutation=item.event?.kind?item.event.kind.replaceAll('_',' '):'initial state';
+      const mutationAxis=item.event?.axis?` · ${item.event.axis.toUpperCase()}`:'';
+      const meta=document.createElement('span');
+      meta.className='small';
+      meta.textContent=`${item.revision}${item.current?' · current':''} · ${mutation}${mutationAxis} · H${item.summary.htmlChars} C${item.summary.cssChars} J${item.summary.jsChars}`;
+      row.append(meta);
+
+      if(!item.current){
+        const button=document.createElement('button');
+        button.type='button';
+        button.className='btn';
+        button.dataset.revision=item.revision;
+        button.textContent='Restore';
+        button.setAttribute('aria-label',`Restore canonical revision ${item.revision}`);
+        button.addEventListener('click',()=>{
+          try{
+            const current=window.faultline.inspect();
+            window.faultline.restore({expectedRevision:current.revision,targetRevision:item.revision});
+            refresh();
+            const health=document.getElementById('health');
+            if(health){health.textContent='READY';health.dataset.state='READY';}
+          }catch(error){reportActionError(error);refresh();}
+        });
+        row.append(button);
+      }
+      list.append(row);
+    }
+  };
+
+  details.addEventListener('toggle',()=>{if(details.open)refresh();});
+  details.append(summary,help,list);
+  actionBar.insertAdjacentElement('afterend',details);
+  refresh();
+
+  const revisionBadge=document.getElementById('revision');
+  if(revisionBadge)new MutationObserver(refresh).observe(revisionBadge,{childList:true,subtree:true,characterData:true});
+  return refresh;
+}
+
 installCaseImport();
 installCaseJsonExport();
+installRevisionRecovery();
 
 function syncAxisTabStops(activeTab=axisTabs.find(tab=>tab.getAttribute('aria-selected')==='true')){
   for(const tab of axisTabs)tab.tabIndex=tab===activeTab?0:-1;

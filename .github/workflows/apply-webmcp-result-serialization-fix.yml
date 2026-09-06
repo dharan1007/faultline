@@ -20,17 +20,37 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply WebMCP native result contract
+      - name: Apply native WebMCP result contract and spec-faithful test boundary
         run: |
           python - <<'PY'
           from pathlib import Path
-          path=Path('src/runtime.js')
-          text=path.read_text()
+
+          runtime=Path('src/runtime.js')
+          text=runtime.read_text()
           old="execute:async(input,options)=>JSON.stringify(await (CANCELLABLE_WEBMCP_TOOLS.has(name)?executeWebMCPOperation(name,execute,input||{},options||{}):execute(input||{},options||{})))"
           new="execute:async(input,options)=>await (CANCELLABLE_WEBMCP_TOOLS.has(name)?executeWebMCPOperation(name,execute,input||{},options||{}):execute(input||{},options||{}))"
           if text.count(old)!=1:
               raise SystemExit(f'expected one WebMCP execute wrapper, found {text.count(old)}')
-          path.write_text(text.replace(old,new))
+          runtime.write_text(text.replace(old,new))
+
+          # Existing tests historically stored the raw registration callback and therefore
+          # expected it to return the already-serialized string. Keep those test call sites
+          # stable by making their mock registration boundary emulate the user agent's
+          # specification-mandated JSON serialization. The new regression intentionally
+          # does not use this adapter and verifies the raw registered callback returns a JS value.
+          adapter="tools.push({...tool,execute:async(input,options)=>JSON.stringify(await tool.execute(input,options))})"
+          changed=[]
+          for path in Path('tests').glob('*.mjs'):
+              if path.name=='webmcp-native-result-serialization.mjs':
+                  continue
+              source=path.read_text()
+              updated=source.replace('tools.push(tool)',adapter)
+              if updated!=source:
+                  path.write_text(updated)
+                  changed.append(path.name)
+          if not changed:
+              raise SystemExit('expected legacy WebMCP test harnesses to require serialization adapters')
+          print('adapted test harnesses:', ', '.join(sorted(changed)))
           PY
           rm .github/workflows/apply-webmcp-result-serialization-fix.yml
       - run: npm install --no-audit --no-fund

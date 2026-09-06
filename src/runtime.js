@@ -40,7 +40,7 @@ function revision(){ return store.inspect().revision; }
 function normalizeExpected(v){ const s=String(v); if(s==='true')return true;if(s==='false')return false;if(s==='null')return null;if(s==='undefined')return undefined;if(s!==''&&!Number.isNaN(Number(s)))return Number(s);return v; }
 function unitsFor(targetAxis=axis, source=value()[targetAxis]){ return semanticUnits(targetAxis,source); }
 function pinKey(targetAxis,unitId){ return `${targetAxis}|${unitId}`; }
-function validRevisionEntry(entry){ return Array.isArray(entry)&&entry.length===2&&/^r[1-9]\d*$/.test(String(entry[0]))&&entry[1]?.value; }
+function validRevisionEntry(entry){ return Array.isArray(entry)&&entry.length===2&&/^r[1-9]\d*$/.test(String(entry[0]))&&entry[1]?.value&&Number(String(entry[0]).slice(1))<=Number(revision().slice(1)); }
 function trimRuntimeHistory(){
   while(revisions.size>MAX_RUNTIME_REVISIONS){
     const oldest=revisions.keys().next().value;

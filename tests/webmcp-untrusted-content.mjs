@@ -16,7 +16,7 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===14);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.some(tool=>tool.name==='faultline_revisions'));
 
   const annotations=await page.evaluate(()=>Object.fromEntries(window.__webmcpTools.map(tool=>[tool.name,tool.annotations])));
   const candidateContentTools=[
@@ -38,12 +38,14 @@ try{
   assert.equal(annotations.faultline_reset_case?.untrustedContentHint,false,'faultline_reset_case returns only the trusted built-in fixture and bounded canonical metadata');
   assert.equal(annotations.faultline_reduce?.untrustedContentHint,false,'faultline_reduce returns bounded structural reduction metrics only');
   assert.equal(annotations.faultline_autopilot?.untrustedContentHint,false,'faultline_autopilot returns bounded structural reduction metrics only');
+  assert.equal(annotations.faultline_revisions?.untrustedContentHint,false,'faultline_revisions returns bounded structural recovery metadata without historical candidate source text');
+  assert.equal(annotations.faultline_revisions?.readOnlyHint,true,'faultline_revisions must remain a read-only discovery operation');
 
   const manifest=await page.evaluate(()=>window.faultline.manifest());
   for(const entry of manifest){
     assert.deepEqual(entry.annotations,annotations[entry.name],`${entry.name} manifest annotations must match the registered WebMCP contract`);
   }
-  console.log('WebMCP trust annotation PASS: candidate-controlled tool outputs, including semantic unit text, are marked untrusted while bounded structural outputs remain trusted.');
+  console.log('WebMCP trust annotation PASS: candidate-controlled outputs are marked untrusted while bounded structural outputs, including recoverable revision discovery, remain trusted.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

@@ -71,12 +71,14 @@ async function executeWebMCPOperation(tool,execute,input,options={}){
   const controller=requestId?new AbortController():null;
   const signal=combineAbortSignals(options?.signal,controller?.signal);
   if(requestId)activeWebMCPOperations.set(requestId,{requestId,tool,startedAt:new Date().toISOString(),controller});
+  let abortListener=null;
   try{
     throwIfAborted(signal);
-    const abortPromise=signal?new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(abortError()),{once:true})):null;
+    const abortPromise=signal?new Promise((_,reject)=>{abortListener=()=>reject(abortError());signal.addEventListener('abort',abortListener,{once:true});}):null;
     const task=Promise.resolve().then(()=>execute(input,{signal}));
     return await (abortPromise?Promise.race([task,abortPromise]):task);
   }finally{
+    if(signal&&abortListener)signal.removeEventListener('abort',abortListener);
     if(requestId)activeWebMCPOperations.delete(requestId);
   }
 }

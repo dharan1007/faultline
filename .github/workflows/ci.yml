@@ -2,36 +2,18 @@ name: ci
 on:
   push:
   pull_request:
-permissions:
-  contents: write
 jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply abort-listener lifecycle fix on feature branch
-        if: github.ref == 'refs/heads/fix/webmcp-abort-listener-cleanup'
-        run: python -c "from pathlib import Path; import base64; p=Path('src/runtime.js'); t=p.read_text(); old=base64.b64decode('ICBpZihyZXF1ZXN0SWQpYWN0aXZlV2ViTUNQT3BlcmF0aW9ucy5zZXQocmVxdWVzdElkLHtyZXF1ZXN0SWQsdG9vbCxzdGFydGVkQXQ6bmV3IERhdGUoKS50b0lTT1N0cmluZygpLGNvbnRyb2xsZXJ9KTsKICB0cnl7CiAgICB0aHJvd0lmQWJvcnRlZChzaWduYWwpOwogICAgY29uc3QgYWJvcnRQcm9taXNlPXNpZ25hbD9uZXcgUHJvbWlzZSgoXyxyZWplY3QpPT5zaWduYWwuYWRkRXZlbnRMaXN0ZW5lcignYWJvcnQnLCgpPT5yZWplY3QoYWJvcnRFcnJvcigpKSx7b25jZTp0cnVlfSkpOm51bGw7CiAgICBjb25zdCB0YXNrPVByb21pc2UucmVzb2x2ZSgpLnRoZW4oKCk9PmV4ZWN1dGUoaW5wdXQse3NpZ25hbH0pKTsKICAgIHJldHVybiBhd2FpdCAoYWJvcnRQcm9taXNlP1Byb21pc2UucmFjZShbdGFzayxhYm9ydFByb21pc2VdKTp0YXNrKTsKICB9ZmluYWxseXsKICAgIGlmKHJlcXVlc3RJZClhY3RpdmVXZWJNQ1BPcGVyYXRpb25zLmRlbGV0ZShyZXF1ZXN0SWQpOwogIH0K').decode(); new=base64.b64decode('ICBpZihyZXF1ZXN0SWQpYWN0aXZlV2ViTUNQT3BlcmF0aW9ucy5zZXQocmVxdWVzdElkLHtyZXF1ZXN0SWQsdG9vbCxzdGFydGVkQXQ6bmV3IERhdGUoKS50b0lTT1N0cmluZygpLGNvbnRyb2xsZXJ9KTsKICBsZXQgYWJvcnRMaXN0ZW5lcj1udWxsOwogIHRyeXsKICAgIHRocm93SWZBYm9ydGVkKHNpZ25hbCk7CiAgICBjb25zdCBhYm9ydFByb21pc2U9c2lnbmFsP25ldyBQcm9taXNlKChfLHJlamVjdCk9PnthYm9ydExpc3RlbmVyPSgpPT5yZWplY3QoYWJvcnRFcnJvcigpKTtzaWduYWwuYWRkRXZlbnRMaXN0ZW5lcignYWJvcnQnLGFib3J0TGlzdGVuZXIse29uY2U6dHJ1ZX0pO30pOm51bGw7CiAgICBjb25zdCB0YXNrPVByb21pc2UucmVzb2x2ZSgpLnRoZW4oKCk9PmV4ZWN1dGUoaW5wdXQse3NpZ25hbH0pKTsKICAgIHJldHVybiBhd2FpdCAoYWJvcnRQcm9taXNlP1Byb21pc2UucmFjZShbdGFzayxhYm9ydFByb21pc2VdKTp0YXNrKTsKICB9ZmluYWxseXsKICAgIGlmKHNpZ25hbCYmYWJvcnRMaXN0ZW5lcilzaWduYWwucmVtb3ZlRXZlbnRMaXN0ZW5lcignYWJvcnQnLGFib3J0TGlzdGVuZXIpOwogICAgaWYocmVxdWVzdElkKWFjdGl2ZVdlYk1DUE9wZXJhdGlvbnMuZGVsZXRlKHJlcXVlc3RJZCk7CiAgfQo=').decode(); assert t.count(old)==1, t.count(old); p.write_text(t.replace(old,new))"
       - run: npm install --no-audit --no-fund
       - run: npm test
       - run: npm run check
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
-      - name: Commit exact green runtime tree
-        if: github.ref == 'refs/heads/fix/webmcp-abort-listener-cleanup'
-        run: |
-          git checkout origin/main -- .github/workflows/ci.yml
-          git rm -f .github/workflows/apply-webmcp-abort-listener-cleanup.yml
-          rm -f package-lock.json
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/runtime.js .github/workflows/ci.yml package.json tests/webmcp-abort-listener-cleanup.mjs
-          git commit -m "fix: detach completed WebMCP abort listeners"
-          git push origin HEAD:fix/webmcp-abort-listener-cleanup

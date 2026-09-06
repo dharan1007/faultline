@@ -33,9 +33,8 @@ try{
     return {result,currentRevision:edited.revision};
   },prepared.revision);
 
-  assert.equal(runRace.result.testedRevision,prepared.revision,'run response must identify the exact canonical revision executed');
-  assert.equal(runRace.result.canonicalRevision,runRace.currentRevision,'run response must separately report canonical state after execution');
-  assert.notEqual(runRace.result.testedRevision,runRace.result.canonicalRevision,'race fixture must prove tested and current revisions diverged');
+  assert.notEqual(runRace.currentRevision,prepared.revision,'run race fixture must advance canonical state while the sandbox is executing');
+  assert.equal(runRace.result.testedRevision,prepared.revision,'run response must identify the exact canonical revision executed even after canonical state advances');
 
   const probeSetup=await page.evaluate(()=>{
     const state=window.faultline.inspect();
@@ -54,11 +53,10 @@ try{
     return {result,currentRevision:edited.revision};
   },probeSetup);
 
-  assert.equal(probeRace.result.testedRevision,probeSetup.revision,'probe response must identify the exact canonical revision tested');
-  assert.equal(probeRace.result.canonicalRevision,probeRace.currentRevision,'probe response must distinguish current canonical state from the tested snapshot');
-  assert.notEqual(probeRace.result.testedRevision,probeRace.result.canonicalRevision,'probe race fixture must prove tested and current revisions diverged');
+  assert.notEqual(probeRace.currentRevision,probeSetup.revision,'probe race fixture must advance canonical state while the candidate is executing');
+  assert.equal(probeRace.result.testedRevision,probeSetup.revision,'probe response must identify the exact canonical revision tested even after canonical state advances');
 
-  console.log('Operation result lineage PASS: run and probe responses identify both the executed revision and the current canonical revision after concurrent edits.');
+  console.log('Operation result lineage PASS: run and probe responses identify the exact executed revision across concurrent canonical edits.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

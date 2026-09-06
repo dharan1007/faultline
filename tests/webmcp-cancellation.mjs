@@ -27,23 +27,37 @@ try{
   });
 
   const outcome=await page.evaluate(async expectedRevision=>{
-    const tool=window.__webmcpTools.find(t=>t.name==='faultline_run');
-    const controller=new AbortController();
+    const runTool=window.__webmcpTools.find(t=>t.name==='faultline_run');
+    const cancelTool=window.__webmcpTools.find(t=>t.name==='faultline_cancel_active');
+    assertWebMCP(runTool,'faultline_run');
+    assertWebMCP(cancelTool,'faultline_cancel_active');
+
     const started=performance.now();
-    const pending=tool.execute({expectedRevision},{signal:controller.signal})
+    const pending=runTool.execute({expectedRevision})
       .then(()=>({resolved:true,elapsed:performance.now()-started}))
       .catch(error=>({resolved:false,name:error?.name||'',message:String(error?.message||error),elapsed:performance.now()-started}));
-    setTimeout(()=>controller.abort(),30);
-    return pending;
+
+    await new Promise(r=>setTimeout(r,30));
+    const cancelResult=JSON.parse(await cancelTool.execute({}));
+    const result=await pending;
+    return {result,cancelResult};
+
+    function assertWebMCP(tool,name){
+      if(!tool)throw new Error(`${name} is not registered`);
+      if(tool.execute.length>1)throw new Error(`${name} execute callback must use the current one-argument WebMCP contract`);
+    }
   },prepared.revision);
 
-  assert.equal(outcome.resolved,false,'aborted WebMCP execution must reject');
-  assert.equal(outcome.name,'AbortError','aborted WebMCP execution must reject with AbortError');
-  assert.ok(outcome.elapsed<500,`abort must stop promptly; elapsed=${outcome.elapsed}`);
+  assert.equal(outcome.result.resolved,false,'cancelled WebMCP execution must reject');
+  assert.equal(outcome.result.name,'AbortError','cancelled WebMCP execution must reject with AbortError');
+  assert.ok(outcome.result.elapsed<500,`cancel must stop promptly; elapsed=${outcome.result.elapsed}`);
+  assert.equal(outcome.cancelResult.status,'CANCEL_REQUESTED','cancel tool must report an active cancellation request');
+  assert.equal(outcome.cancelResult.operations.length,1,'cancel must identify the active WebMCP operation');
+  assert.equal(outcome.cancelResult.operations[0].tool,'faultline_run');
 
   const history=await page.evaluate(()=>window.faultline.history());
-  assert.equal(history.some(entry=>entry.kind==='run'&&entry.revision===prepared.revision),false,'aborted runs must not be recorded as completed evidence');
-  console.log('WebMCP cancellation PASS: abort signal stops an in-flight experiment promptly and leaves no completed evidence record.');
+  assert.equal(history.some(entry=>entry.kind==='run'&&entry.revision===prepared.revision),false,'cancelled runs must not be recorded as completed evidence');
+  console.log('WebMCP cancellation PASS: spec-compliant one-argument tool calls can cancel active long-running work promptly without recording completed evidence.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

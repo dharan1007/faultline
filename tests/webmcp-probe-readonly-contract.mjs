@@ -25,7 +25,7 @@ try{
     const unit=window.faultline.units({targetAxis:'html'}).units[0];
     const historyBefore=window.faultline.history().length;
     const storageBefore=localStorage.getItem('faultline-prod-v3');
-    await probeTool.execute({expectedRevision:before.revision,targetAxis:'html',unitId:unit.id});
+    await probeTool.execute({expectedRevision:before.revision,requestId:'probe-annotation',targetAxis:'html',unitId:unit.id});
     const after=window.faultline.inspect();
     const historyAfter=window.faultline.history().length;
     const storageAfter=localStorage.getItem('faultline-prod-v3');

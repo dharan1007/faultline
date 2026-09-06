@@ -28,7 +28,7 @@ try{
 
   const runResult=await page.evaluate(async testedRevision=>{
     const runTool=window.__webmcpTools.find(t=>t.name==='faultline_run');
-    const pending=runTool.execute({expectedRevision:testedRevision});
+    const pending=runTool.execute({expectedRevision:testedRevision,requestId:'lineage-run'});
     await new Promise(r=>setTimeout(r,60));
     const current=window.faultline.inspect();
     window.faultline.applySource({
@@ -59,7 +59,7 @@ try{
 
   const probeResult=await page.evaluate(async setup=>{
     const probeTool=window.__webmcpTools.find(t=>t.name==='faultline_probe');
-    const pending=probeTool.execute({expectedRevision:setup.revision,targetAxis:'html',unitId:setup.unitId});
+    const pending=probeTool.execute({expectedRevision:setup.revision,requestId:'lineage-probe',targetAxis:'html',unitId:setup.unitId});
     await new Promise(r=>setTimeout(r,60));
     const current=window.faultline.inspect();
     window.faultline.applySource({

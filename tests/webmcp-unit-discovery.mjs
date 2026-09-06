@@ -25,7 +25,7 @@ try{
     const toolListed=JSON.parse(await unitsTool.execute({targetAxis:'html'}));
     const probeTool=window.__webmcpTools.find(tool=>tool.name==='faultline_probe');
     const candidate=toolListed.units.find(unit=>!unit.pinned);
-    const probe=JSON.parse(await probeTool.execute({expectedRevision:before.revision,targetAxis:'html',unitId:candidate.id}));
+    const probe=JSON.parse(await probeTool.execute({expectedRevision:before.revision,requestId:'unit-discovery-probe',targetAxis:'html',unitId:candidate.id}));
     const after=window.faultline.inspect();
     return {before,listed,toolListed,probe,after,manifest:window.faultline.manifest()};
   });

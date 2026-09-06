@@ -66,6 +66,24 @@ if(!s.includes(oldReg))throw new Error('registration callback anchor missing');
 s=s.replace(oldReg,newReg);
 fs.writeFileSync(runtimePath,s);
 
+const browserPath='tests/browser-e2e.mjs';
+let browser=fs.readFileSync(browserPath,'utf8');
+const oldBrowser=`  for(const name of ['faultline_run','faultline_probe','faultline_reduce','faultline_autopilot']){\n    assert.ok(guardedContracts[name].properties.includes('requestId'),\`${'${name}'} must expose requestId for targeted cancellation\`);\n    assert.ok(guardedContracts[name].required.includes('requestId'),\`${'${name}'} must require requestId for targeted cancellation\`);\n  }`;
+const newBrowser=`  for(const name of ['faultline_run','faultline_probe','faultline_reduce','faultline_autopilot']){\n    assert.ok(guardedContracts[name].properties.includes('requestId'),\`${'${name}'} must retain optional requestId for compatibility cancellation\`);\n    assert.ok(!guardedContracts[name].required.includes('requestId'),\`${'${name}'} must allow native options.signal cancellation without proprietary requestId\`);\n  }`;
+if(!browser.includes(oldBrowser))throw new Error('browser contract anchor missing');
+browser=browser.replace(oldBrowser,newBrowser);
+fs.writeFileSync(browserPath,browser);
+
+const axisPath='tests/webmcp-explicit-axis-contract.mjs';
+let axis=fs.readFileSync(axisPath,'utf8');
+const oldExpected=`  const expected={\n    faultline_probe:['expectedRevision','requestId','targetAxis','unitId'],\n    faultline_pin:['expectedRevision','targetAxis','unitId'],\n    faultline_reduce:['expectedRevision','requestId','targetAxis']\n  };`;
+const newExpected=`  const expected={\n    faultline_probe:['expectedRevision','targetAxis','unitId'],\n    faultline_pin:['expectedRevision','targetAxis','unitId'],\n    faultline_reduce:['expectedRevision','targetAxis']\n  };`;
+if(!axis.includes(oldExpected))throw new Error('explicit-axis expected anchor missing');
+axis=axis.replace(oldExpected,newExpected);
+axis=axis.replace('registered WebMCP schemas must require every input needed to choose a deterministic semantic axis/unit and cancellation owner','registered WebMCP schemas must require every input needed to choose a deterministic semantic axis/unit while native cancellation remains transport-owned');
+axis=axis.replace('WebMCP explicit-axis contract PASS: probe, pin, and reduce cannot inherit hidden human tab state, while cancellable operations require caller-owned request IDs.','WebMCP explicit-axis contract PASS: probe, pin, and reduce cannot inherit hidden human tab state, while cancellation uses the native WebMCP execution signal.');
+fs.writeFileSync(axisPath,axis);
+
 const pkgPath='package.json';
 let pkg=fs.readFileSync(pkgPath,'utf8');
 const checkAnchor='node --check tests/runtime-recovery-case-validation.mjs';

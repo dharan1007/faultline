@@ -44,7 +44,7 @@ try{
   },prepared.revision);
 
   assert.ok(outcome.runSchema?.properties?.requestId,'long-running WebMCP tools must accept a caller-owned requestId');
-  assert.ok(outcome.runSchema.required?.includes('requestId'),'requestId must be required for deterministic cancellation ownership');
+  assert.ok(!outcome.runSchema.required?.includes('requestId'),'requestId must remain optional because native options.signal owns standard cancellation');
   assert.deepEqual(outcome.cancelSchema?.required,['requestId'],'cancel tool must require the requestId it owns');
   assert.equal(outcome.cancelled.resolved,false,'targeted operation must reject after cancellation');
   assert.equal(outcome.cancelled.name,'AbortError','targeted operation must reject with AbortError');

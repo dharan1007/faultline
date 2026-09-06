@@ -45,7 +45,7 @@ try{
 
     function assertWebMCP(tool,name){
       if(!tool)throw new Error(`${name} is not registered`);
-      if(tool.execute.length>1)throw new Error(`${name} execute callback must use the current one-argument WebMCP contract`);
+      if(tool.execute.length!==2)throw new Error(`${name} execute callback must use the current two-argument WebMCP contract`);
     }
   },prepared.revision);
 
@@ -59,7 +59,7 @@ try{
 
   const history=await page.evaluate(()=>window.faultline.history());
   assert.equal(history.some(entry=>entry.kind==='run'&&entry.revision===prepared.revision),false,'cancelled runs must not be recorded as completed evidence');
-  console.log('WebMCP cancellation PASS: spec-compliant one-argument tool calls can cancel one identified long-running operation promptly without recording completed evidence.');
+  console.log('WebMCP cancellation PASS: two-argument WebMCP tools preserve compatibility requestId cancellation without recording completed evidence.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

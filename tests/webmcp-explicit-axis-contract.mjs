@@ -29,15 +29,15 @@ try{
   });
 
   const expected={
-    faultline_probe:['expectedRevision','requestId','targetAxis','unitId'],
+    faultline_probe:['expectedRevision','targetAxis','unitId'],
     faultline_pin:['expectedRevision','targetAxis','unitId'],
-    faultline_reduce:['expectedRevision','requestId','targetAxis']
+    faultline_reduce:['expectedRevision','targetAxis']
   };
 
-  assert.deepEqual(contracts.registered,expected,'registered WebMCP schemas must require every input needed to choose a deterministic semantic axis/unit and cancellation owner');
+  assert.deepEqual(contracts.registered,expected,'registered WebMCP schemas must require every input needed to choose a deterministic semantic axis/unit while native cancellation remains transport-owned');
   assert.deepEqual(contracts.manifest,expected,'manifest must exactly match the registered deterministic input contract');
 
-  console.log('WebMCP explicit-axis contract PASS: probe, pin, and reduce cannot inherit hidden human tab state, while cancellable operations require caller-owned request IDs.');
+  console.log('WebMCP explicit-axis contract PASS: probe, pin, and reduce cannot inherit hidden human tab state, while cancellation uses the native WebMCP execution signal.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

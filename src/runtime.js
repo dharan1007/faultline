@@ -54,18 +54,30 @@ function rememberExperiment(entry){ experimentLedger.push(entry);trimRuntimeHist
 function abortError(){ return new DOMException('WebMCP execution aborted','AbortError'); }
 function throwIfAborted(signal){ if(signal?.aborted)throw abortError(); }
 function requireRequestId(input){ const requestId=String(input?.requestId??'');if(!REQUEST_ID_PATTERN.test(requestId))throw new Error('INVALID_REQUEST_ID');return requestId; }
-async function executeWebMCPOperation(tool,execute,input){
-  const requestId=requireRequestId(input);
-  if(activeWebMCPOperations.has(requestId))throw new Error('REQUEST_ID_IN_USE');
+function optionalRequestId(input){ const raw=input?.requestId;if(raw===undefined||raw===null||raw==='')return null;return requireRequestId(input); }
+function combineAbortSignals(...signals){
+  const active=signals.filter(Boolean);
+  if(!active.length)return undefined;
+  if(active.length===1)return active[0];
+  if(typeof AbortSignal.any==='function')return AbortSignal.any(active);
   const controller=new AbortController();
-  const operation={requestId,tool,startedAt:new Date().toISOString(),controller};
-  activeWebMCPOperations.set(requestId,operation);
-  const abortPromise=new Promise((_,reject)=>controller.signal.addEventListener('abort',()=>reject(abortError()),{once:true}));
+  const abort=()=>controller.abort();
+  for(const signal of active){if(signal.aborted){controller.abort();break;}signal.addEventListener('abort',abort,{once:true});}
+  return controller.signal;
+}
+async function executeWebMCPOperation(tool,execute,input,options={}){
+  const requestId=optionalRequestId(input);
+  if(requestId&&activeWebMCPOperations.has(requestId))throw new Error('REQUEST_ID_IN_USE');
+  const controller=requestId?new AbortController():null;
+  const signal=combineAbortSignals(options?.signal,controller?.signal);
+  if(requestId)activeWebMCPOperations.set(requestId,{requestId,tool,startedAt:new Date().toISOString(),controller});
+  throwIfAborted(signal);
+  const abortPromise=signal?new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(abortError()),{once:true})):null;
   try{
-    const task=Promise.resolve().then(()=>execute(input,{signal:controller.signal}));
-    return await Promise.race([task,abortPromise]);
+    const task=Promise.resolve().then(()=>execute(input,{signal}));
+    return await (abortPromise?Promise.race([task,abortPromise]):task);
   }finally{
-    activeWebMCPOperations.delete(requestId);
+    if(requestId)activeWebMCPOperations.delete(requestId);
   }
 }
 function cancelActiveWebMCP({requestId}={}){
@@ -350,20 +362,20 @@ const TOOL_DEFS=[
  ['faultline_units','List actionable semantic units and pin state for one canonical source axis.',{targetAxis:{type:'string',enum:['html','css','js']}},async input=>units(input),true,true,['targetAxis']],
  ['faultline_load_case','Replace the complete canonical HTML, CSS, JavaScript and oracle in one optimistic revision.',{...REVISION_PROPERTY,case:CASE_SCHEMA},async input=>loadCase(input),false,true,['expectedRevision','case']],
  ['faultline_reset_case','Reset to the built-in fixture as one guarded canonical revision while preserving recoverable history.',{...REVISION_PROPERTY},async input=>resetCase(input),false,false,['expectedRevision']],
- ['faultline_run','Execute the locked deterministic failure oracle against the inspected canonical revision. requestId is caller-owned and can be cancelled independently.',{...REVISION_PROPERTY,...REQUEST_PROPERTY},async(input,options)=>run(input,options),false,true,['expectedRevision','requestId']],
+ ['faultline_run','Execute the locked deterministic failure oracle against the inspected canonical revision. Native WebMCP options.signal cancellation is supported; requestId is an optional compatibility handle for faultline_cancel_active.',{...REVISION_PROPERTY,...REQUEST_PROPERTY},async(input,options)=>run(input,options),false,true,['expectedRevision']],
  ['faultline_cancel_active','Cancel one active long-running FAULTLINE WebMCP operation by its caller-owned requestId without affecting unrelated work.',{...REQUEST_PROPERTY},async input=>cancelActiveWebMCP(input),false,false,['requestId']],
  ['faultline_define_oracle','Replace the deterministic failure oracle using an optimistic revision guard.',{...REVISION_PROPERTY,oracle:ORACLE_SCHEMA},async input=>defineOracle(input),false,true,['expectedRevision','oracle']],
  ['faultline_apply_source','Replace one canonical HTML, CSS, or JavaScript source axis using an optimistic revision guard.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},source:{type:'string'}},async input=>applySource(input),false,true,['expectedRevision','targetAxis','source']],
- ['faultline_probe','Test removing one semantic unit from the inspected canonical revision without mutating canonical state; the probe evidence trail is persisted. requestId is caller-owned and independently cancellable.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'}},async(input,options)=>probe(input,options),false,true,['expectedRevision','requestId','targetAxis','unitId']],
- ['faultline_reduce','Delta-debug one source axis while preserving the failing oracle and rejecting stale revisions. requestId is caller-owned and independently cancellable.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},maxTrials:{type:'integer',minimum:1,maximum:200}},async(input,options)=>reduce(input,options),false,false,['expectedRevision','requestId','targetAxis']],
+ ['faultline_probe','Test removing one semantic unit from the inspected canonical revision without mutating canonical state; the probe evidence trail is persisted. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'}},async(input,options)=>probe(input,options),false,true,['expectedRevision','targetAxis','unitId']],
+ ['faultline_reduce','Delta-debug one source axis while preserving the failing oracle and rejecting stale revisions. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},maxTrials:{type:'integer',minimum:1,maximum:200}},async(input,options)=>reduce(input,options),false,false,['expectedRevision','targetAxis']],
  ['faultline_pin','Pin or unpin a semantic unit so reduction cannot remove it, guarded by canonical revision.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'},pinned:{type:'boolean'}},async input=>pin(input),false,true,['expectedRevision','targetAxis','unitId']],
  ['faultline_history','Read recent deterministic experiment evidence.',{limit:{type:'integer',minimum:1,maximum:200}},async input=>history(input),true,true],
  ['faultline_revisions','List bounded recoverable canonical revisions with mutation metadata for guarded restore.',{limit:{type:'integer',minimum:1,maximum:16}},async input=>listRevisions(input),true,false],
  ['faultline_restore','Restore a prior canonical revision only if the inspected current revision is still current.',{...REVISION_PROPERTY,targetRevision:{type:'string'}},async input=>restore(input),false,true,['expectedRevision','targetRevision']],
  ['faultline_export','Export the current case as a standalone HTML reproducer.',{},async()=>({html:exportCase()}),true,true],
- ['faultline_autopilot','Run baseline verification and reduce HTML, CSS and JS sequentially from one inspected revision. requestId is caller-owned and independently cancellable.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,maxTrialsPerAxis:{type:'integer',minimum:1,maximum:200}},async(input,options)=>autopilot(input,options),false,false,['expectedRevision','requestId']]
+ ['faultline_autopilot','Run baseline verification and reduce HTML, CSS and JS sequentially from one inspected revision. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,maxTrialsPerAxis:{type:'integer',minimum:1,maximum:200}},async(input,options)=>autopilot(input,options),false,false,['expectedRevision']]
 ];
-function registerWebMCP(){const mc=document.modelContext;if(!mc?.registerTool){$('webmcp').textContent='WebMCP unavailable';return;}const controllers=[];Promise.all(TOOL_DEFS.map(async([name,description,properties,execute,readOnly,untrustedContent,required=[]])=>{const controller=new AbortController();controllers.push(controller);await mc.registerTool({name,title:name.replace('faultline_','FAULTLINE · '),description,inputSchema:{type:'object',properties,required,additionalProperties:false},execute:async input=>JSON.stringify(await (CANCELLABLE_WEBMCP_TOOLS.has(name)?executeWebMCPOperation(name,execute,input||{}):execute(input||{}))),annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}},{signal:controller.signal});})).then(()=>{$('webmcp').textContent=`WebMCP ready · ${TOOL_DEFS.length} tools`;$('webmcp').dataset.state='ready';}).catch(e=>{$('webmcp').textContent='WebMCP registration error';$('webmcp').title=String(e?.message||e);});window.addEventListener('pagehide',()=>{controllers.forEach(c=>c.abort());abortAllWebMCP();},{once:true});}
+function registerWebMCP(){const mc=document.modelContext;if(!mc?.registerTool){$('webmcp').textContent='WebMCP unavailable';return;}const controllers=[];Promise.all(TOOL_DEFS.map(async([name,description,properties,execute,readOnly,untrustedContent,required=[]])=>{const controller=new AbortController();controllers.push(controller);await mc.registerTool({name,title:name.replace('faultline_','FAULTLINE · '),description,inputSchema:{type:'object',properties,required,additionalProperties:false},execute:async(input,options)=>JSON.stringify(await (CANCELLABLE_WEBMCP_TOOLS.has(name)?executeWebMCPOperation(name,execute,input||{},options||{}):execute(input||{},options||{}))),annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}},{signal:controller.signal});})).then(()=>{$('webmcp').textContent=`WebMCP ready · ${TOOL_DEFS.length} tools`;$('webmcp').dataset.state='ready';}).catch(e=>{$('webmcp').textContent='WebMCP registration error';$('webmcp').title=String(e?.message||e);});window.addEventListener('pagehide',()=>{controllers.forEach(c=>c.abort());abortAllWebMCP();},{once:true});}
 
 window.faultline={inspect,units,loadCase,resetCase,run,defineOracle,applySource,probe,reduce,pin,history,revisions:listRevisions,restore,exportCase,autopilot,manifest:()=>TOOL_DEFS.map(([name,description,properties,,readOnly,untrustedContent,required=[]])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},readOnly,annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}}))};
 

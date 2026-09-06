@@ -40,8 +40,8 @@ try{
     assert.ok(guardedContracts[name].required.includes('expectedRevision'),`${name} must require expectedRevision`);
   }
   for(const name of ['faultline_run','faultline_probe','faultline_reduce','faultline_autopilot']){
-    assert.ok(guardedContracts[name].properties.includes('requestId'),`${name} must expose requestId for targeted cancellation`);
-    assert.ok(guardedContracts[name].required.includes('requestId'),`${name} must require requestId for targeted cancellation`);
+    assert.ok(guardedContracts[name].properties.includes('requestId'),`${name} must retain optional requestId for compatibility cancellation`);
+    assert.ok(!guardedContracts[name].required.includes('requestId'),`${name} must allow native options.signal cancellation without proprietary requestId`);
   }
 
   const sourceToolContract=await page.evaluate(()=>{const t=window.__webmcpTools.find(tool=>tool.name==='faultline_apply_source');return t&&{properties:Object.keys(t.inputSchema?.properties||{}).sort(),required:[...(t.inputSchema?.required||[])].sort(),additionalProperties:t.inputSchema?.additionalProperties};});

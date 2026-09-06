@@ -1,0 +1,49 @@
+name: apply-webmcp-result-serialization-fix
+
+on:
+  push:
+    branches:
+      - fix/webmcp-native-result-serialization
+    paths:
+      - .github/workflows/apply-webmcp-result-serialization-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply WebMCP native result contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('src/runtime.js')
+          text=path.read_text()
+          old="execute:async(input,options)=>JSON.stringify(await (CANCELLABLE_WEBMCP_TOOLS.has(name)?executeWebMCPOperation(name,execute,input||{},options||{}):execute(input||{},options||{})))"
+          new="execute:async(input,options)=>await (CANCELLABLE_WEBMCP_TOOLS.has(name)?executeWebMCPOperation(name,execute,input||{},options||{}):execute(input||{},options||{}))"
+          if text.count(old)!=1:
+              raise SystemExit(f'expected one WebMCP execute wrapper, found {text.count(old)}')
+          path.write_text(text.replace(old,new))
+          PY
+          rm .github/workflows/apply-webmcp-result-serialization-fix.yml
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run check
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Commit exact green tree
+        run: |
+          rm -f package-lock.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: return native WebMCP tool results"
+          git push origin HEAD:fix/webmcp-native-result-serialization

@@ -199,14 +199,15 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false}={}){
  const resultChannel=${previewOnly?'null':'new MessageChannel()'};
  const resultPort=resultChannel?.port1||null;
  const send=resultPort?resultPort.postMessage.bind(resultPort):null;
- let runtimeError=null;
- addEventListener('error',e=>{runtimeError=String(e.error?.message??e.message??e.error??'runtime error');e.preventDefault()});
- addEventListener('unhandledrejection',e=>{runtimeError=String(e.reason?.message??e.reason??'unhandled rejection');e.preventDefault()});
- const executeCandidate=()=>{try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){runtimeError=String(e&&e.message||e)}};
+ const runtimeErrors=[];
+ const captureRuntimeError=value=>runtimeErrors.push(String(value));
+ addEventListener('error',e=>{captureRuntimeError(e.error?.message??e.message??e.error??'runtime error');e.preventDefault()});
+ addEventListener('unhandledrejection',e=>{captureRuntimeError(e.reason?.message??e.reason??'unhandled rejection');e.preventDefault()});
+ const executeCandidate=()=>{try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e)}};
  const measure=sendResult=>schedule(()=>{try{
   if(o.action?.kind==='click'){const target=querySelector(o.action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click()}
   schedule(()=>{try{let actual;
-   if(o.kind==='runtime_error'){actual=runtimeError}
+   if(o.kind==='runtime_error'){const expectedRuntime=o.equals!==undefined?String(o.equals):undefined;actual=expectedRuntime===undefined?(runtimeErrors.at(-1)??null):(runtimeErrors.find(message=>same(message,expectedRuntime))??runtimeErrors.at(-1)??null)}
    else {const el=querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='computed_style')actual=el?readComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
    const expected=o.kind==='computed_style'?String(o.equals):o.kind==='runtime_error'&&o.equals!==undefined?String(o.equals):o.equals;
    const fail=o.kind==='runtime_error'?(o.equals===undefined?Boolean(actual):same(actual,expected)):same(actual,expected);

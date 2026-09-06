@@ -12,7 +12,7 @@ try{
   const page=await browser.newPage();
   await page.addInitScript(()=>{
     const tools=[];
-    Object.defineProperty(document,'modelContext',{configurable:true,value:{registerTool:async tool=>tools.push(tool)}});
+    Object.defineProperty(document,'modelContext',{configurable:true,value:{registerTool:async tool=>tools.push({...tool,execute:async(input,options)=>JSON.stringify(await tool.execute(input,options))})}});
     Object.defineProperty(AbortSignal,'any',{configurable:true,writable:true,value:undefined});
     window.__webmcpTools=tools;
   });

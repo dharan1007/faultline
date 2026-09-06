@@ -14,7 +14,7 @@ try{
   page.on('request',request=>requests.push(request.url()));
   await page.addInitScript(()=>{
     const tools=[];
-    Object.defineProperty(document,'modelContext',{configurable:true,value:{registerTool:async(tool)=>{if(!tool?.name||!tool?.description||typeof tool.execute!=='function')throw new TypeError('invalid WebMCP tool');if(tool.handler)throw new TypeError('legacy handler is forbidden');tools.push(tool);}}});
+    Object.defineProperty(document,'modelContext',{configurable:true,value:{registerTool:async(tool)=>{if(!tool?.name||!tool?.description||typeof tool.execute!=='function')throw new TypeError('invalid WebMCP tool');if(tool.handler)throw new TypeError('legacy handler is forbidden');tools.push({...tool,execute:async(input,options)=>JSON.stringify(await tool.execute(input,options))});}}});
     window.__webmcpTools=tools;
   });
   const errors=[];page.on('pageerror',e=>errors.push(String(e)));

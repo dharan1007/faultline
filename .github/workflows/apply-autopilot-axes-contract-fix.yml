@@ -1,0 +1,53 @@
+name: apply-autopilot-axes-contract-fix
+
+on:
+  push:
+    branches:
+      - fix/webmcp-autopilot-axes-contract-20260906
+    paths:
+      - .github/workflows/apply-autopilot-axes-contract-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply minimal autopilot axes contract fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('src/runtime.js')
+          text=path.read_text()
+          old="function exportCase(){const c=value(),safeCss=String(c.css).replace(/<\\/style/gi,'<\\\\/style');return `<!doctype html><html><head><meta charset=\"utf-8\"><style>${safeCss}</style></head><body>${c.html}<script>${String(c.js).replace(/<\\/script/gi,'<\\\\/script')}<\\/script></body></html>`;}\nasync function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){\n  store.assertRevision(expectedRevision);throwIfAborted(signal);"
+          new="function exportCase(){const c=value(),safeCss=String(c.css).replace(/<\\/style/gi,'<\\\\/style');return `<!doctype html><html><head><meta charset=\"utf-8\"><style>${safeCss}</style></head><body>${c.html}<script>${String(c.js).replace(/<\\/script/gi,'<\\\\/script')}<\\/script></body></html>`;}\nfunction validateAxes(axes){if(!Array.isArray(axes)||axes.length<1||axes.length>3||axes.some(targetAxis=>!['html','css','js'].includes(targetAxis))||new Set(axes).size!==axes.length)throw new Error('INVALID_AXES');return axes;}\nasync function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){\n  validateAxes(axes);store.assertRevision(expectedRevision);throwIfAborted(signal);"
+          if text.count(old)!=1:
+              raise SystemExit(f'expected autopilot anchor once, found {text.count(old)}')
+          text=text.replace(old,new)
+          old_tool="['faultline_autopilot','Run baseline verification and reduce HTML, CSS and JS sequentially from one inspected revision. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,maxTrialsPerAxis:{type:'integer',minimum:1,maximum:200}},async(input,options)=>autopilot(input,options),false,false,['expectedRevision']]"
+          new_tool="['faultline_autopilot','Run baseline verification and reduce the requested source axes sequentially from one inspected revision. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,axes:{type:'array',items:{type:'string',enum:['html','css','js']},minItems:1,maxItems:3,uniqueItems:true},maxTrialsPerAxis:{type:'integer',minimum:1,maximum:200}},async(input,options)=>autopilot(input,options),false,false,['expectedRevision']]"
+          if text.count(old_tool)!=1:
+              raise SystemExit(f'expected WebMCP tool anchor once, found {text.count(old_tool)}')
+          path.write_text(text.replace(old_tool,new_tool))
+          PY
+          rm .github/workflows/apply-autopilot-axes-contract-fix.yml
+      - run: npm install --no-audit --no-fund --no-package-lock
+      - run: npm test
+      - run: npm run check
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Commit exact green tree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: expose validated autopilot axis selection"
+          git push origin HEAD:fix/webmcp-autopilot-axes-contract-20260906

@@ -1,0 +1,24 @@
+name: webmcp-native-execution-signal-red
+
+on:
+  push:
+    branches:
+      - fix/webmcp-native-execution-signal-20260906
+    paths:
+      - tests/webmcp-native-execution-signal.mjs
+      - .github/workflows/webmcp-native-execution-signal-red.yml
+
+permissions:
+  contents: read
+
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/webmcp-native-execution-signal.mjs

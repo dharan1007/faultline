@@ -74,6 +74,17 @@ if(!browser.includes(oldBrowser))throw new Error('browser contract anchor missin
 browser=browser.replace(oldBrowser,newBrowser);
 fs.writeFileSync(browserPath,browser);
 
+const cancelPath='tests/webmcp-cancellation.mjs';
+let cancellation=fs.readFileSync(cancelPath,'utf8');
+cancellation=cancellation.replace("if(tool.execute.length>1)throw new Error(`${name} execute callback must use the current one-argument WebMCP contract`);","if(tool.execute.length!==2)throw new Error(`${name} execute callback must use the current two-argument WebMCP contract`);");
+cancellation=cancellation.replace('WebMCP cancellation PASS: spec-compliant one-argument tool calls can cancel one identified long-running operation promptly without recording completed evidence.','WebMCP cancellation PASS: two-argument WebMCP tools preserve compatibility requestId cancellation without recording completed evidence.');
+fs.writeFileSync(cancelPath,cancellation);
+
+const targetedPath='tests/webmcp-targeted-cancellation.mjs';
+let targeted=fs.readFileSync(targetedPath,'utf8');
+targeted=targeted.replace("assert.ok(outcome.runSchema.required?.includes('requestId'),'requestId must be required for deterministic cancellation ownership');","assert.ok(!outcome.runSchema.required?.includes('requestId'),'requestId must remain optional because native options.signal owns standard cancellation');");
+fs.writeFileSync(targetedPath,targeted);
+
 const axisPath='tests/webmcp-explicit-axis-contract.mjs';
 let axis=fs.readFileSync(axisPath,'utf8');
 const oldExpected=`  const expected={\n    faultline_probe:['expectedRevision','requestId','targetAxis','unitId'],\n    faultline_pin:['expectedRevision','targetAxis','unitId'],\n    faultline_reduce:['expectedRevision','requestId','targetAxis']\n  };`;

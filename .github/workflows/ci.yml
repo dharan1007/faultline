@@ -17,37 +17,7 @@ jobs:
           node-version: 22
       - name: Apply abort-listener lifecycle fix on feature branch
         if: github.ref == 'refs/heads/fix/webmcp-abort-listener-cleanup'
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path=Path('src/runtime.js')
-          text=path.read_text()
-          old="""  if(requestId)activeWebMCPOperations.set(requestId,{requestId,tool,startedAt:new Date().toISOString(),controller});
-  try{
-    throwIfAborted(signal);
-    const abortPromise=signal?new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(abortError()),{once:true})):null;
-    const task=Promise.resolve().then(()=>execute(input,{signal}));
-    return await (abortPromise?Promise.race([task,abortPromise]):task);
-  }finally{
-    if(requestId)activeWebMCPOperations.delete(requestId);
-  }
-"""
-          new="""  if(requestId)activeWebMCPOperations.set(requestId,{requestId,tool,startedAt:new Date().toISOString(),controller});
-  let abortListener=null;
-  try{
-    throwIfAborted(signal);
-    const abortPromise=signal?new Promise((_,reject)=>{abortListener=()=>reject(abortError());signal.addEventListener('abort',abortListener,{once:true});}):null;
-    const task=Promise.resolve().then(()=>execute(input,{signal}));
-    return await (abortPromise?Promise.race([task,abortPromise]):task);
-  }finally{
-    if(signal&&abortListener)signal.removeEventListener('abort',abortListener);
-    if(requestId)activeWebMCPOperations.delete(requestId);
-  }
-"""
-          if text.count(old)!=1:
-              raise SystemExit(f'expected one execution lifecycle block, found {text.count(old)}')
-          path.write_text(text.replace(old,new))
-          PY
+        run: python -c "from pathlib import Path; import base64; p=Path('src/runtime.js'); t=p.read_text(); old=base64.b64decode('ICBpZihyZXF1ZXN0SWQpYWN0aXZlV2ViTUNQT3BlcmF0aW9ucy5zZXQocmVxdWVzdElkLHtyZXF1ZXN0SWQsdG9vbCxzdGFydGVkQXQ6bmV3IERhdGUoKS50b0lTT1N0cmluZygpLGNvbnRyb2xsZXJ9KTsKICB0cnl7CiAgICB0aHJvd0lmQWJvcnRlZChzaWduYWwpOwogICAgY29uc3QgYWJvcnRQcm9taXNlPXNpZ25hbD9uZXcgUHJvbWlzZSgoXyxyZWplY3QpPT5zaWduYWwuYWRkRXZlbnRMaXN0ZW5lcignYWJvcnQnLCgpPT5yZWplY3QoYWJvcnRFcnJvcigpKSx7b25jZTp0cnVlfSkpOm51bGw7CiAgICBjb25zdCB0YXNrPVByb21pc2UucmVzb2x2ZSgpLnRoZW4oKCk9PmV4ZWN1dGUoaW5wdXQse3NpZ25hbH0pKTsKICAgIHJldHVybiBhd2FpdCAoYWJvcnRQcm9taXNlP1Byb21pc2UucmFjZShbdGFzayxhYm9ydFByb21pc2VdKTp0YXNrKTsKICB9ZmluYWxseXsKICAgIGlmKHJlcXVlc3RJZClhY3RpdmVXZWJNQ1BPcGVyYXRpb25zLmRlbGV0ZShyZXF1ZXN0SWQpOwogIH0K').decode(); new=base64.b64decode('ICBpZihyZXF1ZXN0SWQpYWN0aXZlV2ViTUNQT3BlcmF0aW9ucy5zZXQocmVxdWVzdElkLHtyZXF1ZXN0SWQsdG9vbCxzdGFydGVkQXQ6bmV3IERhdGUoKS50b0lTT1N0cmluZygpLGNvbnRyb2xsZXJ9KTsKICBsZXQgYWJvcnRMaXN0ZW5lcj1udWxsOwogIHRyeXsKICAgIHRocm93SWZBYm9ydGVkKHNpZ25hbCk7CiAgICBjb25zdCBhYm9ydFByb21pc2U9c2lnbmFsP25ldyBQcm9taXNlKChfLHJlamVjdCk9PnthYm9ydExpc3RlbmVyPSgpPT5yZWplY3QoYWJvcnRFcnJvcigpKTtzaWduYWwuYWRkRXZlbnRMaXN0ZW5lcignYWJvcnQnLGFib3J0TGlzdGVuZXIse29uY2U6dHJ1ZX0pO30pOm51bGw7CiAgICBjb25zdCB0YXNrPVByb21pc2UucmVzb2x2ZSgpLnRoZW4oKCk9PmV4ZWN1dGUoaW5wdXQse3NpZ25hbH0pKTsKICAgIHJldHVybiBhd2FpdCAoYWJvcnRQcm9taXNlP1Byb21pc2UucmFjZShbdGFzayxhYm9ydFByb21pc2VdKTp0YXNrKTsKICB9ZmluYWxseXsKICAgIGlmKHNpZ25hbCYmYWJvcnRMaXN0ZW5lcilzaWduYWwucmVtb3ZlRXZlbnRMaXN0ZW5lcignYWJvcnQnLGFib3J0TGlzdGVuZXIpOwogICAgaWYocmVxdWVzdElkKWFjdGl2ZVdlYk1DUE9wZXJhdGlvbnMuZGVsZXRlKHJlcXVlc3RJZCk7CiAgfQo=').decode(); assert t.count(old)==1, t.count(old); p.write_text(t.replace(old,new))"
       - run: npm install --no-audit --no-fund
       - run: npm test
       - run: npm run check

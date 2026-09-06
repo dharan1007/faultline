@@ -22,6 +22,8 @@ let pins = new Set();
 let selectedUnitId = null;
 let experimentLedger = [];
 let experimentQueue = Promise.resolve();
+const activeWebMCPOperations = new Map();
+const CANCELLABLE_WEBMCP_TOOLS = new Set(['faultline_run','faultline_probe','faultline_reduce','faultline_autopilot']);
 const revisions = new Map([['r1',{value:clone(fixture),pins:[]}]]);
 
 function value(){ return store.inspect().value; }
@@ -42,6 +44,25 @@ function rememberRevision(rev,snapshot){ revisions.set(rev,clone(snapshot));trim
 function rememberExperiment(entry){ experimentLedger.push(entry);trimRuntimeHistory();return entry; }
 function abortError(){ return new DOMException('WebMCP execution aborted','AbortError'); }
 function throwIfAborted(signal){ if(signal?.aborted)throw abortError(); }
+function operationId(){ return crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`; }
+async function executeWebMCPOperation(tool,execute,input){
+  const id=operationId();
+  const controller=new AbortController();
+  const operation={id,tool,startedAt:new Date().toISOString(),controller};
+  activeWebMCPOperations.set(id,operation);
+  const abortPromise=new Promise((_,reject)=>controller.signal.addEventListener('abort',()=>reject(abortError()),{once:true}));
+  try{
+    const task=Promise.resolve().then(()=>execute(input,{signal:controller.signal}));
+    return await Promise.race([task,abortPromise]);
+  }finally{
+    activeWebMCPOperations.delete(id);
+  }
+}
+function cancelActiveWebMCP(){
+  const operations=[...activeWebMCPOperations.values()].map(({id,tool,startedAt})=>({id,tool,startedAt}));
+  for(const operation of activeWebMCPOperations.values()) operation.controller.abort();
+  return {status:operations.length?'CANCEL_REQUESTED':'IDLE',operations};
+}
 function validateOracle(oracle){
   if(!oracle||typeof oracle!=='object'||Array.isArray(oracle))throw new Error('INVALID_ORACLE');
   const allowed=new Set(['kind','selector','property','equals','action','delayMs']);
@@ -298,6 +319,7 @@ const TOOL_DEFS=[
  ['faultline_load_case','Replace the complete canonical HTML, CSS, JavaScript and oracle in one optimistic revision.',{...REVISION_PROPERTY,case:CASE_SCHEMA},async input=>loadCase(input),false,true,['expectedRevision','case']],
  ['faultline_reset_case','Reset to the built-in fixture as one guarded canonical revision while preserving recoverable history.',{...REVISION_PROPERTY},async input=>resetCase(input),false,false,['expectedRevision']],
  ['faultline_run','Execute the locked deterministic failure oracle against the inspected canonical revision.',{...REVISION_PROPERTY},async(input,options)=>run(input,options),false,true,['expectedRevision']],
+ ['faultline_cancel_active','Cancel all currently active long-running FAULTLINE WebMCP run, probe, reduce, or autopilot operations.',{},async()=>cancelActiveWebMCP(),false,false],
  ['faultline_define_oracle','Replace the deterministic failure oracle using an optimistic revision guard.',{...REVISION_PROPERTY,oracle:ORACLE_SCHEMA},async input=>defineOracle(input),false,true,['expectedRevision','oracle']],
  ['faultline_apply_source','Replace one canonical HTML, CSS, or JavaScript source axis using an optimistic revision guard.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},source:{type:'string'}},async input=>applySource(input),false,true,['expectedRevision','targetAxis','source']],
  ['faultline_probe','Test removing one semantic unit from the inspected canonical revision without mutating canonical state; the probe evidence trail is persisted.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'}},async(input,options)=>probe(input,options),false,true,['expectedRevision','targetAxis','unitId']],
@@ -309,7 +331,7 @@ const TOOL_DEFS=[
  ['faultline_export','Export the current case as a standalone HTML reproducer.',{},async()=>({html:exportCase()}),true,true],
  ['faultline_autopilot','Run baseline verification and reduce HTML, CSS and JS sequentially from one inspected revision.',{...REVISION_PROPERTY,maxTrialsPerAxis:{type:'integer',minimum:1,maximum:200}},async(input,options)=>autopilot(input,options),false,false,['expectedRevision']]
 ];
-function registerWebMCP(){const mc=document.modelContext;if(!mc?.registerTool){$('webmcp').textContent='WebMCP unavailable';return;}const controllers=[];Promise.all(TOOL_DEFS.map(async([name,description,properties,execute,readOnly,untrustedContent,required=[]])=>{const controller=new AbortController();controllers.push(controller);await mc.registerTool({name,title:name.replace('faultline_','FAULTLINE · '),description,inputSchema:{type:'object',properties,required,additionalProperties:false},execute:async(input,options)=>JSON.stringify(await execute(input||{},options||{})),annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}},{signal:controller.signal});})).then(()=>{$('webmcp').textContent=`WebMCP ready · ${TOOL_DEFS.length} tools`;$('webmcp').dataset.state='ready';}).catch(e=>{$('webmcp').textContent='WebMCP registration error';$('webmcp').title=String(e?.message||e);});window.addEventListener('pagehide',()=>controllers.forEach(c=>c.abort()),{once:true});}
+function registerWebMCP(){const mc=document.modelContext;if(!mc?.registerTool){$('webmcp').textContent='WebMCP unavailable';return;}const controllers=[];Promise.all(TOOL_DEFS.map(async([name,description,properties,execute,readOnly,untrustedContent,required=[]])=>{const controller=new AbortController();controllers.push(controller);await mc.registerTool({name,title:name.replace('faultline_','FAULTLINE · '),description,inputSchema:{type:'object',properties,required,additionalProperties:false},execute:async input=>JSON.stringify(await (CANCELLABLE_WEBMCP_TOOLS.has(name)?executeWebMCPOperation(name,execute,input||{}):execute(input||{}))),annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}},{signal:controller.signal});})).then(()=>{$('webmcp').textContent=`WebMCP ready · ${TOOL_DEFS.length} tools`;$('webmcp').dataset.state='ready';}).catch(e=>{$('webmcp').textContent='WebMCP registration error';$('webmcp').title=String(e?.message||e);});window.addEventListener('pagehide',()=>{controllers.forEach(c=>c.abort());cancelActiveWebMCP();},{once:true});}
 
 window.faultline={inspect,units,loadCase,resetCase,run,defineOracle,applySource,probe,reduce,pin,history,revisions:listRevisions,restore,exportCase,autopilot,manifest:()=>TOOL_DEFS.map(([name,description,properties,,readOnly,untrustedContent,required=[]])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},readOnly,annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}}))};
 

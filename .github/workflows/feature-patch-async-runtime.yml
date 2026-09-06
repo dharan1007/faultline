@@ -7,7 +7,6 @@ permissions:
   contents: write
 jobs:
   patch:
-    if: github.event.head_commit.message != 'fix: capture unhandled promise rejections as runtime errors'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,8 +25,8 @@ jobs:
           const source=fs.readFileSync(path,'utf8');
           const before=" addEventListener('error',e=>{runtimeError=String(e.error?.message??e.message??e.error??'runtime error');e.preventDefault()});\n";
           const after=before+" addEventListener('unhandledrejection',e=>{runtimeError=String(e.reason?.message??e.reason??'unhandled rejection');e.preventDefault()});\n";
-          if(!source.includes(before)) throw new Error('expected sandbox runtime-error listener not found');
           if(source.includes("addEventListener('unhandledrejection'")) process.exit(0);
+          if(!source.includes(before)) throw new Error('expected sandbox runtime-error listener not found');
           fs.writeFileSync(path,source.replace(before,after));
           NODE
           git diff --check

@@ -1,0 +1,58 @@
+name: apply-fallback-signal-cleanup
+
+on:
+  push:
+    branches:
+      - fix/webmcp-fallback-signal-cleanup
+    paths:
+      - .github/workflows/apply-fallback-signal-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply fallback signal cleanup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/runtime.js')
+          text = path.read_text()
+          old = """function combineAbortSignals(...signals){\n  const active=signals.filter(Boolean);\n  if(!active.length)return undefined;\n  if(active.length===1)return active[0];\n  if(typeof AbortSignal.any==='function')return AbortSignal.any(active);\n  const controller=new AbortController();\n  const abort=()=>controller.abort();\n  for(const signal of active){if(signal.aborted){controller.abort();break;}signal.addEventListener('abort',abort,{once:true});}\n  return controller.signal;\n}\n"""
+          new = """function combineAbortSignals(...signals){\n  const active=signals.filter(Boolean);\n  if(!active.length)return {signal:undefined,cleanup:()=>{}};\n  if(active.length===1)return {signal:active[0],cleanup:()=>{}};\n  if(typeof AbortSignal.any==='function')return {signal:AbortSignal.any(active),cleanup:()=>{}};\n  const controller=new AbortController();\n  const abort=()=>controller.abort();\n  const listening=[];\n  for(const signal of active){if(signal.aborted){controller.abort();break;}signal.addEventListener('abort',abort,{once:true});listening.push(signal);}\n  return {signal:controller.signal,cleanup:()=>{for(const signal of listening)signal.removeEventListener('abort',abort);}};\n}\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one combineAbortSignals implementation, found {text.count(old)}')
+          text = text.replace(old, new)
+          old_line = "  const signal=combineAbortSignals(options?.signal,controller?.signal);"
+          new_line = "  const combinedSignal=combineAbortSignals(options?.signal,controller?.signal);\n  const signal=combinedSignal.signal;"
+          if text.count(old_line) != 1:
+              raise SystemExit(f'expected one combined signal assignment, found {text.count(old_line)}')
+          text = text.replace(old_line, new_line)
+          old_finally = "    if(signal&&abortListener)signal.removeEventListener('abort',abortListener);\n    if(requestId)activeWebMCPOperations.delete(requestId);"
+          new_finally = "    if(signal&&abortListener)signal.removeEventListener('abort',abortListener);\n    combinedSignal.cleanup();\n    if(requestId)activeWebMCPOperations.delete(requestId);"
+          if text.count(old_finally) != 1:
+              raise SystemExit(f'expected one WebMCP cleanup block, found {text.count(old_finally)}')
+          path.write_text(text.replace(old_finally, new_finally))
+          PY
+          rm .github/workflows/apply-fallback-signal-cleanup.yml
+      - run: npm install --no-audit --no-fund --no-package-lock
+      - run: npm test
+      - run: npm run check
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Commit exact green tree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: detach fallback WebMCP signal listeners"
+          git push origin HEAD:fix/webmcp-fallback-signal-cleanup

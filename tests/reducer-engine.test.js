@@ -55,3 +55,22 @@ test('revision store dump and hydrate preserve canonical revision, snapshots and
   assert.equal(restored.revision, 'r3');
   assert.equal(restored.value.html, 'A');
 });
+
+test('revision store rejects persisted snapshots from revisions newer than the canonical revision', () => {
+  const tampered = {
+    version:1,
+    revision:2,
+    value:{html:'B',css:'',js:''},
+    snapshots:[
+      ['r1',{html:'A',css:'',js:''}],
+      ['r2',{html:'B',css:'',js:''}],
+      ['r99',{html:'future',css:'',js:''}]
+    ],
+    ledger:[]
+  };
+  assert.throws(
+    () => createRevisionStore({html:'ignored',css:'',js:''}, tampered),
+    /INVALID_PERSISTED_STATE/,
+    'recovery history must never contain a future revision that canonical history has not reached'
+  );
+});

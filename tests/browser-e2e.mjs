@@ -39,6 +39,10 @@ try{
     assert.ok(guardedContracts[name].properties.includes('expectedRevision'),`${name} must expose expectedRevision`);
     assert.ok(guardedContracts[name].required.includes('expectedRevision'),`${name} must require expectedRevision`);
   }
+  for(const name of ['faultline_run','faultline_probe','faultline_reduce','faultline_autopilot']){
+    assert.ok(guardedContracts[name].properties.includes('requestId'),`${name} must expose requestId for targeted cancellation`);
+    assert.ok(guardedContracts[name].required.includes('requestId'),`${name} must require requestId for targeted cancellation`);
+  }
 
   const sourceToolContract=await page.evaluate(()=>{const t=window.__webmcpTools.find(tool=>tool.name==='faultline_apply_source');return t&&{properties:Object.keys(t.inputSchema?.properties||{}).sort(),required:[...(t.inputSchema?.required||[])].sort(),additionalProperties:t.inputSchema?.additionalProperties};});
   assert.deepEqual(sourceToolContract,{properties:['expectedRevision','source','targetAxis'],required:['expectedRevision','source','targetAxis'],additionalProperties:false});
@@ -64,7 +68,7 @@ try{
   await page.evaluate(({expectedRevision,oracle})=>window.faultline.defineOracle({expectedRevision,oracle}),{expectedRevision:concurrencyAfter.revision,oracle:{...concurrencyAfter.case.oracle,delayMs:0}});
 
   const baselineRevision=(await page.evaluate(()=>window.faultline.inspect())).revision;
-  const baseline=await page.evaluate(async expectedRevision=>JSON.parse(await window.__webmcpTools.find(t=>t.name==='faultline_run').execute({expectedRevision})),baselineRevision);assert.equal(baseline.status,'FAIL');
+  const baseline=await page.evaluate(async expectedRevision=>JSON.parse(await window.__webmcpTools.find(t=>t.name==='faultline_run').execute({expectedRevision,requestId:'browser-baseline'})),baselineRevision);assert.equal(baseline.status,'FAIL');
   const before=await page.evaluate(()=>window.faultline.inspect());assert.ok(before.case.html.includes('noise'));
   const noiseId=await page.evaluate(()=>{const u=[...document.querySelectorAll('.unit')].find(x=>x.textContent.includes('Irrelevant debug noise'));return u?.dataset.unitId});assert.ok(noiseId);
   const probe=await page.evaluate(id=>window.faultline.probe({targetAxis:'html',unitId:id}),noiseId);assert.equal(probe.status,'FAIL');assert.equal(probe.mutated,false);
@@ -84,5 +88,5 @@ try{
   assert.equal(requests.slice(requestCountBeforeContainment).some(url=>url.includes('/__faultline_side_effect__')),false,'experiment source escaped the sandbox and reached the network');
 
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);assert.equal(await page.locator('#source').isVisible(),true);assert.equal(await page.locator('#preview').isVisible(),true);assert.equal(errors.length,0,errors.join('\n'));
-  console.log('Browser gate PASS: Chromium loaded UI, registered 16 spec-valid WebMCP tools with semantic-unit discovery, spec-compliant cancellation, and revision guards on every canonical operation, serialized concurrent sandbox experiments, rejected stale source/oracle mutations, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, blocked experiment network side effects, and passed mobile overflow checks.');
+  console.log('Browser gate PASS: Chromium loaded UI, registered 16 spec-valid WebMCP tools with semantic-unit discovery, targeted cancellation, and revision guards on every canonical operation, serialized concurrent sandbox experiments, rejected stale source/oracle mutations, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, blocked experiment network side effects, and passed mobile overflow checks.');
 } finally {if(browser)await browser.close();server.kill('SIGTERM');}

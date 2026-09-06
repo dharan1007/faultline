@@ -32,13 +32,14 @@ try{
     assertWebMCP(runTool,'faultline_run');
     assertWebMCP(cancelTool,'faultline_cancel_active');
 
+    const requestId='single-cancel';
     const started=performance.now();
-    const pending=runTool.execute({expectedRevision})
+    const pending=runTool.execute({expectedRevision,requestId})
       .then(()=>({resolved:true,elapsed:performance.now()-started}))
       .catch(error=>({resolved:false,name:error?.name||'',message:String(error?.message||error),elapsed:performance.now()-started}));
 
     await new Promise(r=>setTimeout(r,30));
-    const cancelResult=JSON.parse(await cancelTool.execute({}));
+    const cancelResult=JSON.parse(await cancelTool.execute({requestId}));
     const result=await pending;
     return {result,cancelResult};
 
@@ -54,10 +55,11 @@ try{
   assert.equal(outcome.cancelResult.status,'CANCEL_REQUESTED','cancel tool must report an active cancellation request');
   assert.equal(outcome.cancelResult.operations.length,1,'cancel must identify the active WebMCP operation');
   assert.equal(outcome.cancelResult.operations[0].tool,'faultline_run');
+  assert.equal(outcome.cancelResult.operations[0].requestId,'single-cancel');
 
   const history=await page.evaluate(()=>window.faultline.history());
   assert.equal(history.some(entry=>entry.kind==='run'&&entry.revision===prepared.revision),false,'cancelled runs must not be recorded as completed evidence');
-  console.log('WebMCP cancellation PASS: spec-compliant one-argument tool calls can cancel active long-running work promptly without recording completed evidence.');
+  console.log('WebMCP cancellation PASS: spec-compliant one-argument tool calls can cancel one identified long-running operation promptly without recording completed evidence.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

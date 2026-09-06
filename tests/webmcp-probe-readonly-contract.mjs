@@ -20,6 +20,7 @@ try{
 
   const result=await page.evaluate(async()=>{
     const probeTool=window.__webmcpTools.find(tool=>tool.name==='faultline_probe');
+    const manifestProbe=window.faultline.manifest().find(tool=>tool.name==='faultline_probe');
     const before=window.faultline.inspect();
     const unit=window.faultline.units({targetAxis:'html'}).units[0];
     const historyBefore=window.faultline.history().length;
@@ -30,6 +31,7 @@ try{
     const storageAfter=localStorage.getItem('faultline-prod-v3');
     return {
       readOnlyHint:probeTool.annotations?.readOnlyHint,
+      manifestReadOnlyHint:manifestProbe?.annotations?.readOnlyHint,
       beforeRevision:before.revision,
       afterRevision:after.revision,
       historyBefore,
@@ -44,6 +46,7 @@ try{
   assert.equal(result.latestKind,'probe','persisted evidence must identify the probe operation');
   assert.equal(result.storageChanged,true,'probe evidence must be durable across reloads');
   assert.equal(result.readOnlyHint,false,'a tool that persists observable evidence must not advertise readOnlyHint=true');
+  assert.equal(result.manifestReadOnlyHint,result.readOnlyHint,'browser manifest and registered WebMCP tool must expose the same risk annotation');
   console.log('WebMCP probe annotation PASS: persisted probe evidence is correctly advertised as a state-modifying tool effect.');
 } finally {
   if(browser)await browser.close();

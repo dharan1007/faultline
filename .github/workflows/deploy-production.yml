@@ -13,13 +13,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify-and-promote:
+  verify-deploy-and-promote:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       VERCEL_ORG_ID: team_APBZJjf6iizHCTuseqHosFnU
       VERCEL_PROJECT_ID: prj_XtQdMYG2kOufYTrZ1SDj61VEExDM
       VERCEL_PRODUCTION_BRANCH: production
+      VERCEL_PRODUCTION_URL: https://faultline-webmcp.vercel.app
     steps:
       - name: Check out exact production candidate
         uses: actions/checkout@v4
@@ -61,7 +62,7 @@ jobs:
           git fetch --no-tags origin main
           CURRENT_MAIN=$(git rev-parse origin/main)
           test "$SOURCE_SHA" = "$CURRENT_MAIN" || {
-            echo "main advanced from $SOURCE_SHA to $CURRENT_MAIN while verification ran; refusing stale production promotion"
+            echo "main advanced from $SOURCE_SHA to $CURRENT_MAIN while verification ran; refusing stale production deployment"
             exit 1
           }
 
@@ -76,9 +77,82 @@ jobs:
             }
           fi
 
-      - name: Promote exact green tree
+      - name: Require Vercel deployment credential
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${VERCEL_TOKEN:-}" || {
+            echo "::error::VERCEL_TOKEN repository secret is required for exact-project production deployment"
+            exit 1
+          }
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Bind checkout to existing Vercel project
+        run: |
+          set -euo pipefail
+          mkdir -p .vercel
+          printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
+          cat .vercel/project.json
+
+      - name: Pull production project settings
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build exact verified tree for Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Create staged production deployment without moving domains
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          DEPLOYMENT_URL=$(vercel deploy --prebuilt --prod --skip-domain --token="$VERCEL_TOKEN")
+          test -n "$DEPLOYMENT_URL"
+          echo "DEPLOYMENT_URL=$DEPLOYMENT_URL" >> "$GITHUB_ENV"
+          echo "Staged exact verified tree at $DEPLOYMENT_URL"
+
+      - name: Smoke-test staged deployment against verified source
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 8 --retry-delay 2 "$DEPLOYMENT_URL/" -o /tmp/faultline-staged-index.html
+          curl -fsS --retry 8 --retry-delay 2 "$DEPLOYMENT_URL/src/runtime.js" -o /tmp/faultline-staged-runtime.js
+          cmp index.html /tmp/faultline-staged-index.html
+          cmp src/runtime.js /tmp/faultline-staged-runtime.js
+
+      - name: Promote staged deployment to production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel promote "$DEPLOYMENT_URL" --token="$VERCEL_TOKEN"
+
+      - name: Verify public production alias serves exact tree
+        run: |
+          set -euo pipefail
+          MATCHED=0
+          for attempt in $(seq 1 18); do
+            if curl -fsS "$VERCEL_PRODUCTION_URL/" -o /tmp/faultline-live-index.html \
+              && curl -fsS "$VERCEL_PRODUCTION_URL/src/runtime.js" -o /tmp/faultline-live-runtime.js \
+              && cmp -s index.html /tmp/faultline-live-index.html \
+              && cmp -s src/runtime.js /tmp/faultline-live-runtime.js; then
+              MATCHED=1
+              break
+            fi
+            sleep 5
+          done
+          test "$MATCHED" = 1 || {
+            echo "::error::Production alias did not converge to the verified source tree"
+            exit 1
+          }
+
+      - name: Mark exact deployed tree as production source
         run: |
           set -euo pipefail
           git push origin "$SOURCE_SHA:refs/heads/$VERCEL_PRODUCTION_BRANCH"
-          echo "Promoted verified source SHA $SOURCE_SHA to $VERCEL_PRODUCTION_BRANCH"
+          echo "Deployed and promoted verified source SHA $SOURCE_SHA"
           echo "Vercel project: $VERCEL_PROJECT_ID ($VERCEL_ORG_ID)"
+          echo "Production URL: $VERCEL_PRODUCTION_URL"

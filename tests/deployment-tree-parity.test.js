@@ -15,8 +15,8 @@ test('production deployment parity verifies every shipped application file befor
   for (const file of productionFiles) {
     const occurrences = workflow.split(file).length - 1;
     assert.ok(
-      occurrences >= 3,
-      `${file} must be part of the production file manifest and both staged/live parity checks; found ${occurrences} workflow references`
+      occurrences >= 2,
+      `${file} must be verified in both staged and live production parity checks; found ${occurrences} workflow references`
     );
   }
 

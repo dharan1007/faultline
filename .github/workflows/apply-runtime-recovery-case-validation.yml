@@ -1,0 +1,49 @@
+name: apply-runtime-recovery-case-validation
+
+on:
+  push:
+    branches:
+      - fix/runtime-recovery-case-validation
+    paths:
+      - .github/workflows/apply-runtime-recovery-case-validation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply minimal recovery-case validation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('src/runtime.js')
+          text=path.read_text()
+          old="function validRevisionEntry(entry,maxRevision=Infinity){ const match=Array.isArray(entry)&&entry.length===2&&/^r([1-9]\\d*)$/.exec(String(entry[0]));return !!match&&Number(match[1])<=maxRevision&&entry[1]?.value; }"
+          new="function validRevisionEntry(entry,maxRevision=Infinity){ const match=Array.isArray(entry)&&entry.length===2&&/^r([1-9]\\d*)$/.exec(String(entry[0]));if(!match||Number(match[1])>maxRevision||!entry[1]?.value)return false;try{validateCase(entry[1].value);return true}catch{return false} }"
+          if text.count(old)!=1:
+              raise SystemExit(f'expected one validator occurrence, found {text.count(old)}')
+          path.write_text(text.replace(old,new))
+          PY
+          rm .github/workflows/apply-runtime-recovery-case-validation.yml
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run check
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Commit exact green source change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/runtime.js
+          git add -u .github/workflows
+          git commit -m "fix: validate persisted runtime recovery cases"
+          git push origin HEAD:fix/runtime-recovery-case-validation

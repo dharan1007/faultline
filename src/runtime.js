@@ -71,9 +71,9 @@ async function executeWebMCPOperation(tool,execute,input,options={}){
   const controller=requestId?new AbortController():null;
   const signal=combineAbortSignals(options?.signal,controller?.signal);
   if(requestId)activeWebMCPOperations.set(requestId,{requestId,tool,startedAt:new Date().toISOString(),controller});
-  throwIfAborted(signal);
-  const abortPromise=signal?new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(abortError()),{once:true})):null;
   try{
+    throwIfAborted(signal);
+    const abortPromise=signal?new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(abortError()),{once:true})):null;
     const task=Promise.resolve().then(()=>execute(input,{signal}));
     return await (abortPromise?Promise.race([task,abortPromise]):task);
   }finally{

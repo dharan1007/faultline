@@ -57,19 +57,21 @@ function requireRequestId(input){ const requestId=String(input?.requestId??'');i
 function optionalRequestId(input){ const raw=input?.requestId;if(raw===undefined||raw===null||raw==='')return null;return requireRequestId(input); }
 function combineAbortSignals(...signals){
   const active=signals.filter(Boolean);
-  if(!active.length)return undefined;
-  if(active.length===1)return active[0];
-  if(typeof AbortSignal.any==='function')return AbortSignal.any(active);
+  if(!active.length)return {signal:undefined,cleanup:()=>{}};
+  if(active.length===1)return {signal:active[0],cleanup:()=>{}};
+  if(typeof AbortSignal.any==='function')return {signal:AbortSignal.any(active),cleanup:()=>{}};
   const controller=new AbortController();
   const abort=()=>controller.abort();
-  for(const signal of active){if(signal.aborted){controller.abort();break;}signal.addEventListener('abort',abort,{once:true});}
-  return controller.signal;
+  const listening=[];
+  for(const signal of active){if(signal.aborted){controller.abort();break;}signal.addEventListener('abort',abort,{once:true});listening.push(signal);}
+  return {signal:controller.signal,cleanup:()=>{for(const signal of listening)signal.removeEventListener('abort',abort);}};
 }
 async function executeWebMCPOperation(tool,execute,input,options={}){
   const requestId=optionalRequestId(input);
   if(requestId&&activeWebMCPOperations.has(requestId))throw new Error('REQUEST_ID_IN_USE');
   const controller=requestId?new AbortController():null;
-  const signal=combineAbortSignals(options?.signal,controller?.signal);
+  const combinedSignal=combineAbortSignals(options?.signal,controller?.signal);
+  const signal=combinedSignal.signal;
   if(requestId)activeWebMCPOperations.set(requestId,{requestId,tool,startedAt:new Date().toISOString(),controller});
   let abortListener=null;
   try{
@@ -79,6 +81,7 @@ async function executeWebMCPOperation(tool,execute,input,options={}){
     return await (abortPromise?Promise.race([task,abortPromise]):task);
   }finally{
     if(signal&&abortListener)signal.removeEventListener('abort',abortListener);
+    combinedSignal.cleanup();
     if(requestId)activeWebMCPOperations.delete(requestId);
   }
 }

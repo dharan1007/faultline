@@ -7,6 +7,14 @@ const STORAGE_KEY = 'faultline-prod-v3';
 const LEGACY_STORAGE_KEY = 'faultline-prod-v2';
 const MAX_RUNTIME_REVISIONS = 16;
 const MAX_EXPERIMENT_LEDGER = 200;
+const PERSISTENCE_PROFILES=[
+  {storeSnapshots:32,storeLedger:64,runtimeRevisions:16,experiments:200},
+  {storeSnapshots:16,storeLedger:32,runtimeRevisions:8,experiments:100},
+  {storeSnapshots:8,storeLedger:16,runtimeRevisions:4,experiments:50},
+  {storeSnapshots:4,storeLedger:8,runtimeRevisions:2,experiments:25},
+  {storeSnapshots:2,storeLedger:4,runtimeRevisions:1,experiments:10},
+  {storeSnapshots:1,storeLedger:1,runtimeRevisions:1,experiments:1}
+];
 const ORACLE_KINDS=['dom_property','computed_style','dom_exists','runtime_error'];
 const ACTION_KINDS=['none','click'];
 const REQUEST_ID_PATTERN=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -90,8 +98,13 @@ function validateCase(candidate){
   validateOracle(candidate.oracle);
   return candidate;
 }
-function persistencePayload(){ trimRuntimeHistory();return {version:3,store:store.dump(),axis,pins:[...pins],experimentLedger:clone(experimentLedger),revisions:[...revisions.entries()].map(([rev,snapshot])=>[rev,clone(snapshot)])}; }
-function snapshotCanonical(){ return clone(persistencePayload()); }
+function persistencePayload(profile=PERSISTENCE_PROFILES[0]){
+  trimRuntimeHistory();
+  const dumped=store.dump();
+  const persistedStore={...dumped,snapshots:clone(dumped.snapshots.slice(-profile.storeSnapshots)),ledger:clone(dumped.ledger.slice(-profile.storeLedger))};
+  return {version:3,store:persistedStore,axis,pins:[...pins],experimentLedger:clone(experimentLedger.slice(-profile.experiments)),revisions:[...revisions.entries()].slice(-profile.runtimeRevisions).map(([rev,snapshot])=>[rev,clone(snapshot)])};
+}
+function snapshotCanonical(){ return clone(persistencePayload(PERSISTENCE_PROFILES[0])); }
 function restoreCanonical(snapshot){
   store=createRevisionStore(fixture,snapshot.store);
   axis=['html','css','js'].includes(snapshot.axis)?snapshot.axis:'html';
@@ -102,10 +115,19 @@ function restoreCanonical(snapshot){
   if(!revisions.has(revision())) revisions.set(revision(),{value:clone(value()),pins:[...pins]});
   trimRuntimeHistory();
 }
-function writePersistence(){ localStorage.setItem(STORAGE_KEY,JSON.stringify(persistencePayload())); }
-function persistBestEffort(){ try{writePersistence();return true}catch{return false} }
+function isQuotaError(error){ return error?.name==='QuotaExceededError'||error?.name==='NS_ERROR_DOM_QUOTA_REACHED'||error?.code===22||error?.code===1014; }
+function writePersistence(profile=PERSISTENCE_PROFILES[0]){ localStorage.setItem(STORAGE_KEY,JSON.stringify(persistencePayload(profile))); }
+function writePersistenceAdaptive(){
+  let quotaError=null;
+  for(const profile of PERSISTENCE_PROFILES){
+    try{writePersistence(profile);return profile;}
+    catch(error){if(!isQuotaError(error))throw error;quotaError=error;}
+  }
+  throw quotaError||new Error('PERSISTENCE_FAILED');
+}
+function persistBestEffort(){ try{writePersistenceAdaptive();return true}catch{return false} }
 function persistMutation(before){
-  try{writePersistence();}
+  try{writePersistenceAdaptive();}
   catch{
     restoreCanonical(before);
     throw new Error('PERSISTENCE_FAILED');

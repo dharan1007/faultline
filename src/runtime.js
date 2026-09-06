@@ -40,7 +40,7 @@ function revision(){ return store.inspect().revision; }
 function normalizeExpected(v){ const s=String(v); if(s==='true')return true;if(s==='false')return false;if(s==='null')return null;if(s==='undefined')return undefined;if(s!==''&&!Number.isNaN(Number(s)))return Number(s);return v; }
 function unitsFor(targetAxis=axis, source=value()[targetAxis]){ return semanticUnits(targetAxis,source); }
 function pinKey(targetAxis,unitId){ return `${targetAxis}|${unitId}`; }
-function validRevisionEntry(entry){ return Array.isArray(entry)&&entry.length===2&&/^r[1-9]\d*$/.test(String(entry[0]))&&entry[1]?.value; }
+function validRevisionEntry(entry,maxRevision=Infinity){ const match=Array.isArray(entry)&&entry.length===2&&/^r([1-9]\d*)$/.exec(String(entry[0]));return !!match&&Number(match[1])<=maxRevision&&entry[1]?.value; }
 function trimRuntimeHistory(){
   while(revisions.size>MAX_RUNTIME_REVISIONS){
     const oldest=revisions.keys().next().value;
@@ -111,7 +111,8 @@ function restoreCanonical(snapshot){
   pins=new Set(Array.isArray(snapshot.pins)?snapshot.pins:[]);
   experimentLedger=Array.isArray(snapshot.experimentLedger)?clone(snapshot.experimentLedger.slice(-MAX_EXPERIMENT_LEDGER)):[];
   revisions.clear();
-  for(const entry of Array.isArray(snapshot.revisions)?snapshot.revisions.slice(-MAX_RUNTIME_REVISIONS):[]) if(validRevisionEntry(entry)) revisions.set(String(entry[0]),clone(entry[1]));
+  const maxRevision=Number(revision().slice(1));
+  for(const entry of Array.isArray(snapshot.revisions)?snapshot.revisions.slice(-MAX_RUNTIME_REVISIONS):[]) if(validRevisionEntry(entry,maxRevision)) revisions.set(String(entry[0]),clone(entry[1]));
   if(!revisions.has(revision())) revisions.set(revision(),{value:clone(value()),pins:[...pins]});
   trimRuntimeHistory();
 }
@@ -142,7 +143,8 @@ function restoreLocal(){
       pins=new Set(Array.isArray(raw.pins)?raw.pins:[]);
       experimentLedger=Array.isArray(raw.experimentLedger)?raw.experimentLedger.slice(-MAX_EXPERIMENT_LEDGER):[];
       revisions.clear();
-      for(const entry of Array.isArray(raw.revisions)?raw.revisions.slice(-MAX_RUNTIME_REVISIONS):[]) if(validRevisionEntry(entry)) revisions.set(String(entry[0]),clone(entry[1]));
+      const maxRevision=Number(revision().slice(1));
+      for(const entry of Array.isArray(raw.revisions)?raw.revisions.slice(-MAX_RUNTIME_REVISIONS):[]) if(validRevisionEntry(entry,maxRevision)) revisions.set(String(entry[0]),clone(entry[1]));
       if(!revisions.has(revision())) revisions.set(revision(),{value:clone(value()),pins:[...pins]});
       trimRuntimeHistory();
       return;

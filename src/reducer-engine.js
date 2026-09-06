@@ -77,6 +77,8 @@ function normalizePersistedState(persistedState) {
   const snapshots = new Map();
   for (const entry of persistedState.snapshots) {
     if (!Array.isArray(entry) || entry.length !== 2 || !/^r[1-9]\d*$/.test(String(entry[0]))) throw new Error('INVALID_PERSISTED_STATE');
+    const snapshotRevision = Number(String(entry[0]).slice(1));
+    if (snapshotRevision > revision) throw new Error('INVALID_PERSISTED_STATE');
     snapshots.set(String(entry[0]), clone(entry[1]));
   }
   if (!snapshots.has(currentRevision)) snapshots.set(currentRevision, clone(persistedState.value));

@@ -1,0 +1,48 @@
+name: apply-preaborted-request-cleanup-fix
+
+on:
+  push:
+    branches:
+      - fix/webmcp-preaborted-request-cleanup
+    paths:
+      - .github/workflows/apply-preaborted-request-cleanup-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply request lifecycle cleanup fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/runtime.js')
+          text = path.read_text()
+          old = """  if(requestId)activeWebMCPOperations.set(requestId,{requestId,tool,startedAt:new Date().toISOString(),controller});\n  throwIfAborted(signal);\n  const abortPromise=signal?new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(abortError()),{once:true})):null;\n  try{\n    const task=Promise.resolve().then(()=>execute(input,{signal}));\n    return await (abortPromise?Promise.race([task,abortPromise]):task);\n  }finally{\n    if(requestId)activeWebMCPOperations.delete(requestId);\n  }"""
+          new = """  if(requestId)activeWebMCPOperations.set(requestId,{requestId,tool,startedAt:new Date().toISOString(),controller});\n  try{\n    throwIfAborted(signal);\n    const abortPromise=signal?new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(abortError()),{once:true})):null;\n    const task=Promise.resolve().then(()=>execute(input,{signal}));\n    return await (abortPromise?Promise.race([task,abortPromise]):task);\n  }finally{\n    if(requestId)activeWebMCPOperations.delete(requestId);\n  }"""
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one lifecycle block, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+          PY
+          rm .github/workflows/apply-preaborted-request-cleanup-fix.yml
+      - run: npm install --no-audit --no-fund --no-package-lock
+      - run: npm test
+      - run: npm run check
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Commit exact green tree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/runtime.js .github/workflows/apply-preaborted-request-cleanup-fix.yml
+          git commit -m "fix: release request IDs on pre-aborted WebMCP calls"
+          git push origin HEAD:fix/webmcp-preaborted-request-cleanup

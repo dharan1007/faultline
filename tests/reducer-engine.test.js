@@ -21,6 +21,14 @@ test('ddminReduce preserves protected units and the failing predicate', async ()
   assert.ok(result.trials.length > 0);
 });
 
+test('ddminReduce rejects when the trial budget cannot complete the search', async () => {
+  const units = ['required','noise-a','noise-b'];
+  await assert.rejects(
+    ddminReduce(units, async kept => kept.includes('required') ? 'FAIL' : 'PASS', { maxTrials:1 }),
+    /TRIAL_BUDGET_EXHAUSTED/
+  );
+});
+
 test('revision store rejects stale mutations and can restore snapshots', () => {
   const store = createRevisionStore({html:'A',css:'',js:''});
   const r1 = store.inspect().revision;

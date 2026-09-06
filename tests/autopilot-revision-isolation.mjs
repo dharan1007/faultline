@@ -28,7 +28,7 @@ try{
 
   const result=await page.evaluate(async expectedRevision=>{
     const autopilotTool=window.__webmcpTools.find(t=>t.name==='faultline_autopilot');
-    const pending=autopilotTool.execute({expectedRevision,maxTrialsPerAxis:12})
+    const pending=autopilotTool.execute({expectedRevision,requestId:'autopilot-revision-race',maxTrialsPerAxis:12})
       .then(value=>({ok:true,value}),error=>({ok:false,error:String(error?.message||error)}));
 
     await new Promise(r=>setTimeout(r,60));

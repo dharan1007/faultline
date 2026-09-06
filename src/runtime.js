@@ -225,15 +225,16 @@ async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {sign
 function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);const alreadyPinned=pins.has(key);if(alreadyPinned===pinned)return inspect();const before=snapshotCanonical();pinned?pins.add(key):pins.delete(key);const result=store.commit(value(),{kind:pinned?'pin':'unpin',axis:targetAxis,unitId},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});rememberExperiment({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:result.revision,at:new Date().toISOString()});persistMutation(before);render();return inspect(); }
 async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}={}, {signal}={}){
   store.assertRevision(expectedRevision);throwIfAborted(signal);
-  const source=value()[targetAxis], all=unitsFor(targetAxis,source);
+  const baseline=clone(value());
+  const source=baseline[targetAxis], all=unitsFor(targetAxis,source);
   if(!all.length) return {status:'NO_UNITS',before:source.length,after:source.length,reduction:0,trials:0,revision:revision()};
   const protectedItems=all.filter(u=>pins.has(pinKey(targetAxis,u.id)));
-  const reduced=await ddminReduce(all,async kept=>{throwIfAborted(signal);const keptIds=new Set(kept.map(u=>u.id));const removed=all.filter(u=>!keptIds.has(u.id));return (await runCase({...value(),[targetAxis]:removeUnits(source,removed)},{signal})).status;},{protectedItems,maxTrials});
+  const reduced=await ddminReduce(all,async kept=>{throwIfAborted(signal);const keptIds=new Set(kept.map(u=>u.id));const removed=all.filter(u=>!keptIds.has(u.id));return (await runCase({...baseline,[targetAxis]:removeUnits(source,removed)},{signal})).status;},{protectedItems,maxTrials});
   throwIfAborted(signal);
-  const keptIds=new Set(reduced.items.map(u=>u.id));const removed=all.filter(u=>!keptIds.has(u.id));const nextSource=removeUnits(source,removed);const final=await runCase({...value(),[targetAxis]:nextSource},{signal});
+  const keptIds=new Set(reduced.items.map(u=>u.id));const removed=all.filter(u=>!keptIds.has(u.id));const nextSource=removeUnits(source,removed);const final=await runCase({...baseline,[targetAxis]:nextSource},{signal});
   throwIfAborted(signal);if(final.status!=='FAIL')throw new Error('REDUCTION_LOST_FAILURE');
   const beforeLength=source.length,after=nextSource.length,before=snapshotCanonical();
-  const committed=store.commit({...value(),[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reduced.trialCount,removed:removed.length},expectedRevision);
+  const committed=store.commit({...baseline,[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reduced.trialCount,removed:removed.length},expectedRevision);
   rememberRevision(committed.revision,{value:clone(committed.value),pins:[...pins]});
   rememberExperiment({kind:'reduce',status:final.status,evidence:final.evidence||{},revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reduced.trialCount,removed:removed.length,reduction:beforeLength?1-after/beforeLength:0});
   persistMutation(before);render();renderPreview();renderHealth(final.status);

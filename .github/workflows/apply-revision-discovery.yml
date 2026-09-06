@@ -2,20 +2,22 @@ name: Apply revision discovery implementation
 
 on:
   push:
-    branches: [feat/recoverable-revision-discovery]
+    branches:
+      - feat/recoverable-revision-discovery
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.event.head_commit.message == 'chore: apply revision discovery implementation'
+    if: ${{ github.event.head_commit.message == 'chore: apply revision discovery implementation' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Patch runtime, UI, and central browser contract
+        shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -132,10 +134,10 @@ jobs:
                 row.style.background='#08090c';
 
                 const mutation=item.event?.kind?item.event.kind.replaceAll('_',' '):'initial state';
-                const axis=item.event?.axis?` · ${item.event.axis.toUpperCase()}`:'';
+                const mutationAxis=item.event?.axis?` · ${item.event.axis.toUpperCase()}`:'';
                 const meta=document.createElement('span');
                 meta.className='small';
-                meta.textContent=`${item.revision}${item.current?' · current':''} · ${mutation}${axis} · H${item.summary.htmlChars} C${item.summary.cssChars} J${item.summary.jsChars}`;
+                meta.textContent=`${item.revision}${item.current?' · current':''} · ${mutation}${mutationAxis} · H${item.summary.htmlChars} C${item.summary.cssChars} J${item.summary.jsChars}`;
                 row.append(meta);
 
                 if(!item.current){
@@ -193,6 +195,7 @@ jobs:
           PY
 
       - name: Commit implementation and remove one-off patch workflow
+        shell: bash
         run: |
           git config user.name "faultline-ci"
           git config user.email "actions@users.noreply.github.com"

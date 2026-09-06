@@ -1,0 +1,46 @@
+name: apply-webmcp-native-execution-signal-v5
+
+on:
+  push:
+    branches:
+      - fix/webmcp-native-execution-signal-20260906
+    paths:
+      - .github/workflows/apply-webmcp-native-execution-signal-v5.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply source and contract patch
+        run: |
+          node scripts-apply-webmcp-native-signal.mjs
+          rm -f .github/workflows/webmcp-native-execution-signal-red.yml
+          rm -f .github/workflows/apply-webmcp-native-execution-signal.yml
+          rm -f .github/workflows/apply-webmcp-native-execution-signal-v2.yml
+          rm -f .github/workflows/apply-webmcp-native-execution-signal-v3.yml
+          rm -f .github/workflows/apply-webmcp-native-execution-signal-v4.yml
+          rm -f .github/workflows/apply-webmcp-native-execution-signal-v5.yml
+          rm -f scripts-apply-webmcp-native-signal.mjs
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run check
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Commit exact green tree
+        run: |
+          rm -f package-lock.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix native WebMCP execution cancellation"
+          git push origin HEAD:fix/webmcp-native-execution-signal-20260906

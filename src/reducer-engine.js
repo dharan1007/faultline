@@ -42,7 +42,8 @@ export async function ddminReduce(items, evaluate, { protectedItems=[], maxTrial
   let trials = [];
   let count = 0;
   const run = async candidateRemovable => {
-    if (++count > maxTrials) return 'UNRESOLVED';
+    if (count >= maxTrials) throw new Error('TRIAL_BUDGET_EXHAUSTED');
+    count++;
     const kept = items.filter(x=>protectedSet.has(x) || candidateRemovable.includes(x));
     const status = await evaluate(kept);
     trials.push({ keptCount:kept.length, status });

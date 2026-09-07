@@ -122,7 +122,9 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
-          for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js; do
+          mapfile -t production_files < <(node scripts-build.mjs --list)
+          test "${#production_files[@]}" -gt 0
+          for file in "${production_files[@]}"; do
             if [ "$file" = "index.html" ]; then
               remote_path="/"
             else
@@ -141,10 +143,12 @@ jobs:
       - name: Verify public production alias serves exact tree
         run: |
           set -euo pipefail
+          mapfile -t production_files < <(node scripts-build.mjs --list)
+          test "${#production_files[@]}" -gt 0
           MATCHED=0
           for attempt in $(seq 1 18); do
             TREE_MATCHED=1
-            for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js; do
+            for file in "${production_files[@]}"; do
               if [ "$file" = "index.html" ]; then
                 remote_path="/"
               else

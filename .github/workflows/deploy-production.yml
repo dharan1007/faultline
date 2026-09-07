@@ -129,7 +129,7 @@ jobs:
               remote_path="/$file"
             fi
             output="/tmp/faultline-staged-${file//\//-}"
-            vercel curl "$remote_path" --deployment "$DEPLOYMENT_URL" --token="$VERCEL_TOKEN" > "$output"
+            vercel --token="$VERCEL_TOKEN" curl "$remote_path" --deployment "$DEPLOYMENT_URL" > "$output"
             cmp "$file" "$output"
           done
 

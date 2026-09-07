@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ProtocolError, type DebugSession, type MutationEnvelope } from '../../protocol/src/index.js';
+import { ProtocolError, type DebugSession, type MutationEnvelope } from '@faultline/protocol';
 import { MemorySessionRepository, SessionKernel } from '../src/index.js';
 
 const fixedTime = '2026-09-07T11:05:00.000Z';

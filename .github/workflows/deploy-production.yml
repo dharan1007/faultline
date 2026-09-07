@@ -118,6 +118,8 @@ jobs:
           echo "Staged exact verified tree at $DEPLOYMENT_URL"
 
       - name: Smoke-test staged deployment against verified source
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
           for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js; do
@@ -127,7 +129,7 @@ jobs:
               remote_path="/$file"
             fi
             output="/tmp/faultline-staged-${file//\//-}"
-            curl -fsSL --retry 12 --retry-delay 2 --retry-all-errors "$DEPLOYMENT_URL$remote_path" -o "$output"
+            vercel curl "$remote_path" --deployment "$DEPLOYMENT_URL" --token="$VERCEL_TOKEN" > "$output"
             cmp "$file" "$output"
           done
 

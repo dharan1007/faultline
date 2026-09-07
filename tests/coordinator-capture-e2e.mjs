@@ -4,6 +4,13 @@ import net from 'node:net';
 
 import {startCoordinatorServer} from '../apps/coordinator/server.mjs';
 
+let diagnosticStage='boot';
+const watchdog=setTimeout(()=>{
+  const handles=typeof process._getActiveHandles==='function'?process._getActiveHandles().map(handle=>handle?.constructor?.name||typeof handle):[];
+  console.error(`Coordinator capture watchdog: stage=${diagnosticStage} activeHandles=${handles.join(',')}`);
+  process.exit(124);
+},30000);
+
 function listen(server,host='127.0.0.1'){
   return new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,host,()=>resolve(server.address()));});
 }
@@ -69,12 +76,14 @@ const coordinator=await startCoordinatorServer({port:0,resolver,connector});
 const base=`http://127.0.0.1:${coordinator.address.port}`;
 
 try{
+  diagnosticStage='health';
   const health=await requestJson(`${base}/health`);
   assert.equal(health.status,200);
   assert.equal(health.body.status,'ok');
   assert.equal(health.body.bind,'127.0.0.1');
   assert.equal(coordinator.address.address,'127.0.0.1','coordinator must bind loopback by default');
 
+  diagnosticStage='host-header-defense';
   const rebindingProbe=await new Promise((resolve,reject)=>{
     const request=http.request({host:'127.0.0.1',port:coordinator.address.port,path:'/health',headers:{Host:'attacker.example'}},response=>{
       let text='';response.on('data',chunk=>text+=chunk);response.on('end',()=>resolve({status:response.statusCode,text}));
@@ -83,15 +92,18 @@ try{
   });
   assert.equal(rebindingProbe.status,421,'host-header DNS rebinding against the local coordinator must be refused');
 
+  diagnosticStage='create-primary-investigation';
   const created=await requestJson(`${base}/investigations`,{method:'POST',body:{targetUrl:`http://capture.faultline.test:${targetPort}/`}});
   assert.equal(created.status,201);
   assert.equal(created.body.investigation.target.mode,'public_url');
   assert.equal(created.body.investigation.revision,'r1');
 
+  diagnosticStage='capture-primary';
   const capture=await requestJson(`${base}/captures`,{method:'POST',body:{investigationId:created.body.investigation.id}});
   assert.equal(capture.status,202);
   const operation=await poll(base,capture.body.operationId);
   assert.equal(operation.status,'COMPLETED',JSON.stringify(operation.error||{}));
+  diagnosticStage='assert-primary-capture';
   const investigation=operation.result.investigation;
   assert.equal(investigation.capture.status,'CAPTURED');
   assert.equal(investigation.revision,'r2');
@@ -114,6 +126,7 @@ try{
   assert.ok(investigation.environment.userAgent);
   assert.equal(investigation.capture.redactionSummary.redacted,true);
 
+  diagnosticStage='private-redirect';
   const redirectInvestigation=await requestJson(`${base}/investigations`,{method:'POST',body:{targetUrl:`http://capture.faultline.test:${targetPort}/private-redirect`}});
   const redirectCapture=await requestJson(`${base}/captures`,{method:'POST',body:{investigationId:redirectInvestigation.body.investigation.id}});
   const redirectOperation=await poll(base,redirectCapture.body.operationId);
@@ -121,12 +134,14 @@ try{
   assert.equal(redirectOperation.error.code,'PRIVATE_ADDRESS_BLOCKED');
   assert.equal(secretHits,0,'browser proxy must refuse the private redirect before the target is connected');
 
+  diagnosticStage='capture-limit';
   const limitedInvestigation=await requestJson(`${base}/investigations`,{method:'POST',body:{targetUrl:`http://capture.faultline.test:${targetPort}/`}});
   const limitedCapture=await requestJson(`${base}/captures`,{method:'POST',body:{investigationId:limitedInvestigation.body.investigation.id,limits:{maxEvents:2}}});
   const limitedOperation=await poll(base,limitedCapture.body.operationId);
   assert.equal(limitedOperation.status,'FAILED');
   assert.equal(limitedOperation.error.code,'CAPTURE_LIMIT_REACHED','capture overflow must fail explicitly instead of silently dropping evidence');
 
+  diagnosticStage='cancellation';
   const slowInvestigation=await requestJson(`${base}/investigations`,{method:'POST',body:{targetUrl:`http://capture.faultline.test:${targetPort}/slow`}});
   const slowCapture=await requestJson(`${base}/captures`,{method:'POST',body:{investigationId:slowInvestigation.body.investigation.id}});
   const cancelled=await requestJson(`${base}/operations/${slowCapture.body.operationId}/cancel`,{method:'POST',body:{}});
@@ -134,8 +149,13 @@ try{
   const cancelledOperation=await poll(base,slowCapture.body.operationId);
   assert.equal(cancelledOperation.status,'CANCELLED');
 
+  diagnosticStage='assertions-complete';
   console.log('Coordinator capture PASS: real Chromium capture is hydrated, redacted, loopback-bound, proxy-pinned, redirect-safe, bounded, and cancellable.');
 } finally {
+  diagnosticStage='coordinator-close';
   await coordinator.close();
+  diagnosticStage='target-close';
   await close(target);
+  diagnosticStage='closed';
+  clearTimeout(watchdog);
 }

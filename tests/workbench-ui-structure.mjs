@@ -26,6 +26,12 @@ try{
     '1 Load / Edit Case','2 Define Oracle','3 Run / Reduce','4 Evidence / Export'
   ],'workflow labels must make the debugging sequence explicit');
 
+  assert.equal(await page.locator('.command-shell').count(),1,'product shell must expose one command header');
+  assert.equal(await page.locator('.workspace-overview').count(),1,'workbench must expose a compact overview before editing');
+  assert.equal(await page.locator('.workspace-stat').count(),3,'overview must surface exactly three high-signal runtime facts');
+  assert.equal(await page.locator('.workspace-rail').count(),1,'desktop workflow must expose a dedicated workspace rail');
+  assert.equal(await page.locator('.surface-kicker').count(),4,'each primary workflow stage must expose a visible stage kicker');
+
   for(const id of ['case-workspace','reduction-workspace','oracle-workspace','evidence-workspace','integration-workspace']){
     assert.equal(await page.locator(`#${id}`).count(),1,`${id} must exist as a distinct product region`);
   }
@@ -50,7 +56,7 @@ try{
   const mobileOrder=await page.evaluate(()=>['case-workspace','oracle-workspace','reduction-workspace','evidence-workspace','integration-workspace'].map(id=>({id,top:document.getElementById(id).getBoundingClientRect().top+scrollY})));
   assert(mobileOrder[0].top < mobileOrder[1].top && mobileOrder[1].top < mobileOrder[2].top && mobileOrder[2].top < mobileOrder[3].top,'mobile layout must follow case → oracle → reduction → evidence');
 
-  console.log('Workbench UI structure PASS: FAULTLINE exposes a guided four-step workflow, readable desktop hierarchy, visible focus, and overflow-safe mobile order.');
+  console.log('Workbench UI structure PASS: FAULTLINE exposes a guided four-step workflow, command hierarchy, readable desktop layout, visible focus, and overflow-safe mobile order.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

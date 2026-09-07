@@ -104,10 +104,10 @@ test('compare-and-swap permits exactly one concurrent mutation for one expected 
     env('r1', `idem-${id}`),
     'set_pin',
     { id },
-    async (session) => {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      return { next: { ...session, pins: { dimensionIds: [id] } }, result: { pinned: id } };
-    },
+    (session) => ({
+      next: { ...session, pins: { dimensionIds: [id] } },
+      result: { pinned: id },
+    }),
   ));
 
   const results = await Promise.allSettled(mutations);

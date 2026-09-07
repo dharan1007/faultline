@@ -24,12 +24,11 @@ test('production deployment parity verifies every shipped application file befor
   assert.match(workflow, /Verify public production alias serves exact tree/);
 });
 
-test('staged parity uses authenticated Vercel curl so deployment protection cannot replace app bytes', () => {
+test('staged parity authenticates Vercel curl through VERCEL_TOKEN environment only', () => {
   const stagedStep = workflow.match(/- name: Smoke-test staged deployment against verified source[\s\S]*?(?=\n      - name: Promote staged deployment to production)/)?.[0];
   assert.ok(stagedStep, 'staged parity workflow step must exist');
   assert.match(stagedStep, /VERCEL_TOKEN:\s*\$\{\{ secrets\.VERCEL_TOKEN \}\}/);
-  assert.match(stagedStep, /vercel\s+--token="\$VERCEL_TOKEN"\s+curl/);
-  assert.match(stagedStep, /--deployment[ ="]+"?\$DEPLOYMENT_URL"?/);
-  assert.doesNotMatch(stagedStep, /vercel\s+curl[^\n]*--token/);
+  assert.match(stagedStep, /vercel\s+curl\s+"\$remote_path"\s+--deployment\s+"\$DEPLOYMENT_URL"/);
+  assert.doesNotMatch(stagedStep, /vercel[^\n]*--token/);
   assert.doesNotMatch(stagedStep, /curl -fsSL/);
 });

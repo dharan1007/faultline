@@ -8,95 +8,59 @@ Implementation branch: `feat/faultline-v3-causal-platform`
 
 Baseline: verified production commit `8e8dacc4d6c142b9f6b583af5de69db7a95d4d46`.
 
-The partially implemented `feat/product-workspace-v2` branch is preserved as a historical checkpoint but is not the architecture to ship.
+The partial `feat/product-workspace-v2` branch remains a recoverable historical checkpoint and is not the architecture to ship.
 
 ## Decision
 
-FAULTLINE V3 is not an HTML/CSS/JavaScript reducer with framework adapters bolted on top.
+FAULTLINE V3 is a **local-first causal debugging platform**. Its canonical object is a revisioned debug session containing target identity, replayable actions, observations, controllable dimensions, experiments, causal evidence and exportable receipts.
 
-It is a local-first causal debugging platform whose canonical object is a **debug session** made of observations, replayable actions, controllable dimensions, experiments, causal evidence, and a revisioned result.
+The existing deterministic reducer, stale-revision guards, cancellation semantics, evidence lineage, sandbox policies and legacy WebMCP behavior remain valuable. Raw `html + css + js + oracle` reduction becomes the `legacy-case` adapter instead of the universal product model.
 
-The existing deterministic reducer, revision guards, cancellation semantics, evidence lineage, sandbox policies, and WebMCP work are retained as proven engine capabilities. Raw HTML/CSS/JS source reduction becomes one adapter/capability rather than the product model.
+## Why V2 is replaced
 
-## Why V2 is being replaced
+V2 improved navigation but preserved the wrong abstraction. A modern application can execute across React Server Components, client hydration, route transitions, server actions, route handlers, edge/server middleware, service workers, dynamic imports, APIs, third-party SDKs and distributed traces. A production debugger cannot truthfully flatten all of that into three source textareas.
 
-V2 improved navigation but retained the wrong abstraction:
-
-- a case was still exactly `html + css + js + oracle`;
-- execution still centered on rendering candidate source into an iframe;
-- JavaScript reduction remained statement/lexical rather than program/framework aware;
-- server execution, Server Components, server actions, edge middleware, route loaders, APIs, service workers, dynamic imports, framework state and distributed traces were outside the model;
-- integrations were still browser-runtime conveniences rather than first-class product surfaces;
-- multiple pages did not change how FAULTLINE actually understood a modern application.
-
-Modern applications routinely split behavior across browser, server, edge and external services. A production debugger therefore cannot truthfully map every failure back to three text boxes.
+V3 therefore reasons over **execution evidence plus executable interventions** rather than assuming source text is the only causal surface.
 
 ## Product promise
 
-Given a reproducible failure in a web application, FAULTLINE should answer:
+For a reproducible web failure FAULTLINE should answer:
 
-1. **What happened?**
-2. **Can the failure be reproduced deterministically?**
-3. **Which controllable parts of the execution are causally necessary for the failure?**
-4. **What is the smallest evidence-backed reproducer FAULTLINE can prove within the capabilities exposed by this target?**
-5. **What evidence proves that conclusion?**
-6. **How can a developer or agent consume and continue the investigation?**
+1. What happened?
+2. Can the failure be reproduced under a bound environment and target snapshot?
+3. Which controllable dimensions are necessary for the failure?
+4. What is the smallest reproducer FAULTLINE can prove within the active adapter capabilities?
+5. What evidence proves that result?
+6. How can a developer, CI system or agent continue the investigation?
 
-FAULTLINE must never claim global minimality or causal control over a dimension the active target adapter cannot observe and manipulate safely.
+FAULTLINE never claims global minimality or causal control over a dimension that an adapter cannot safely observe and intervene on.
 
-## Architectural principles
+# Core principles
 
-### 1. Execution evidence, not source-file assumptions
+1. **Evidence first.** DOM, actions, network requests, routes, storage, source units, framework events and server spans are possible evidence; none is universally canonical.
+2. **Capability negotiation.** Adapters declare exactly what they can observe, replay and mutate. The engine schedules only validated capabilities.
+3. **Replay before reduction.** No causal reduction begins until the configured oracle reproduces under the baseline stability policy.
+4. **Bound provenance.** Every experiment is bound to session, target, journey, oracle and adapter revisions.
+5. **Local-first mutation.** Credentials, private source and mutating experiments stay on the developer machine by default.
+6. **Safe degradation.** Generic browser capture remains the fallback when deep framework instrumentation is unavailable.
+7. **One protocol.** Web UI, local UI, CLI, SDK, MCP and optional WebMCP use the same versioned orchestration contract.
+8. **Correlation is not causation.** Observations can suggest experiments; authoritative causal edges require experiment provenance.
 
-DOM, source text, framework components, network requests, route transitions, feature flags, storage keys and server spans are all possible evidence or reduction dimensions. None is universally canonical.
+# Alternatives
 
-### 2. Capability negotiation
+## A — Keep V2 and add framework adapters
 
-Every adapter declares the capabilities it can actually provide. The engine only schedules experiments over declared, validated capabilities.
+Rejected as the primary architecture because it still forces modern applications into the old case model.
 
-### 3. Replay before reduction
+## B — Capability-driven causal session platform
 
-FAULTLINE never starts causal reduction until it has a baseline replay that reproduces the configured failure under the selected stability policy.
+Selected. It preserves proven reduction mechanics while making framework/runtime behavior adapter-specific instead of core-specific.
 
-### 4. Deterministic evidence lineage
+## C — Fully hosted observability platform
 
-Every observation and experiment is bound to a session revision, target snapshot, journey revision, oracle revision and adapter version.
+Deferred. Accounts, multitenant ingestion, cloud execution, billing, retention and data residency are unnecessary before the causal engine is proven.
 
-### 5. Local-first execution
-
-Private source, localhost applications, authenticated developer environments and destructive experiment controls stay on the developer's machine by default.
-
-The hosted web application may render and analyze portable artifacts, but it is not an arbitrary remote-code execution service or an SSRF proxy.
-
-### 6. Safe degradation
-
-Generic browser capture should work for nearly any standards-compliant web application. Framework-specific/server-specific capabilities are additive. Missing capabilities reduce what FAULTLINE can prove; they do not make the session dishonest.
-
-### 7. One protocol, many surfaces
-
-Human web UI, CLI, SDK, MCP and optional WebMCP use the same versioned orchestration contract.
-
-## Alternatives considered
-
-### A. Keep V2 and add framework adapters
-
-Rejected as the primary architecture. It is fast but forces modern frameworks back into an HTML/CSS/JS case model and leaves server/distributed failures fundamentally second-class.
-
-### B. Causal session platform with adapter capabilities — selected
-
-Retains the proven deterministic core while changing the canonical product model to execution evidence + controllable dimensions. Supports future frameworks without encoding framework internals into the core protocol.
-
-### C. Fully hosted observability/Sentry-style platform
-
-Deferred. It would require accounts, collectors, multitenant storage, ingestion billing, retention policy, data residency and a much larger security/compliance surface before the causal engine itself is proven.
-
-V3 keeps the architecture compatible with a future hosted control plane without requiring one for the first production release.
-
-# Canonical model
-
-## DebugSession
-
-A session is the authoritative investigation object.
+# Canonical session model
 
 ```ts
 interface DebugSession {
@@ -126,112 +90,62 @@ interface DebugSession {
 }
 ```
 
-The schema is versioned and validated at every external boundary.
+All external session data is runtime-schema validated. Unknown mutation capabilities are never executed.
 
-## TargetDescriptor
+## Targets
 
-Supported target classes:
+Initial target classes:
 
-- `local_url` — application running on localhost/LAN under explicit developer control;
-- `staging_url` — remote environment explicitly selected for experiments;
-- `live_url_capture` — remote URL capture/replay in read-only/safe mode by default;
-- `playwright_trace` — imported Playwright trace artifact;
-- `har` — imported HTTP Archive;
-- `ci_failure` — CI metadata + trace/artifacts;
-- `otel_trace` — OpenTelemetry trace bundle/collector handoff;
-- `legacy_case` — V2 `.faultline.json` compatibility adapter.
+- `local_url` — localhost/LAN application under developer control;
+- `staging_url` — explicitly approved remote environment;
+- `live_url_capture` — read-only/safe capture by default;
+- `playwright_trace`;
+- `har`;
+- `ci_failure`;
+- `otel_trace`;
+- `legacy_case`.
 
-A target contains identity and policy, not credentials. Credentials remain in the local secret provider and are referenced by opaque handles.
+Target objects contain policy and opaque credential references, not raw credentials.
 
-## EnvironmentSnapshot
+## Environment snapshot
 
-Captures inputs that can affect reproduction:
+A session binds relevant reproducibility inputs such as browser/version, viewport, locale, timezone, route, build/commit ID, framework/runtime versions when known, selected flags/storage snapshots and adapter versions.
 
-- browser family/version;
-- viewport/device/emulation;
-- locale/timezone;
-- user agent and relevant client hints;
-- route/URL;
-- build/commit identity when known;
-- framework/runtime versions when adapters can identify them;
-- selected feature flags;
-- permitted storage/cookie snapshot references;
-- server/edge deployment identifiers when instrumented;
-- adapter versions and capture policy.
+Secret values are redacted or represented by local opaque handles unless a user explicitly exports them.
 
-Secret values must be redacted or represented by opaque references unless the user explicitly exports them.
+## Reproduction journey
 
-## ReproductionJourney
+A journey is a revisioned sequence of semantic actions such as navigation, click, fill, select, key press, submit, file reference, wait-for-condition and adapter-defined actions.
 
-A journey is a revisioned sequence of semantic actions, not just Playwright source text.
+Journeys may come from interactive recording, Playwright traces/tests, CI artifacts, agents or manual editing.
 
-Action kinds initially include:
+## Failure oracle
 
-- navigate;
-- click;
-- fill;
-- select;
-- press;
-- submit;
-- wait-for-condition;
-- upload-file reference;
-- custom adapter action.
+Initial typed oracle classes:
 
-Each action stores a resilient selector/locator description, timing policy, input redaction metadata and captured pre/post observations.
-
-The journey can originate from:
-
-- interactive recorder;
-- Playwright trace import;
-- Playwright test import/adapter;
-- agent-created steps;
-- manually authored steps.
-
-## FailureOracle
-
-V3 keeps deterministic oracle semantics but generalizes the observation domain.
-
-Initial oracle kinds:
-
-- DOM exists/absent;
-- DOM property/attribute/text value;
-- computed style value;
-- console/runtime error signature;
-- unhandled rejection signature;
-- HTTP request/response status/payload predicate;
-- missing/unexpected request;
+- DOM existence/absence;
+- DOM property/attribute/text;
+- computed style;
+- runtime error or unhandled rejection signature;
+- request/response status or payload predicate;
+- expected/missing request;
 - navigation/route outcome;
-- screenshot/visual threshold where explicitly configured;
-- performance threshold with stability policy;
+- screenshot threshold when explicitly configured;
+- bounded performance threshold;
 - OpenTelemetry span status/error/attribute predicate;
 - adapter-defined typed oracle.
 
-An oracle is immutable once a reduction run begins. Changing it creates a new oracle revision and invalidates incompatible baseline claims.
+Changing an oracle creates a new oracle revision and invalidates incompatible baseline claims.
 
-## Observation
+## Observations
 
-Observations are immutable, timestamped and source-typed:
+Immutable observations include actions, DOM snapshots, console messages, runtime errors, network metadata, storage mutations, route transitions, performance events, screenshots, source/stack references, framework events, server/edge spans, OpenTelemetry references, and supported WebSocket/service-worker events.
 
-- journey action events;
-- DOM snapshots;
-- console messages;
-- page errors;
-- network request/response metadata;
-- storage mutations;
-- route/navigation events;
-- performance entries;
-- screenshots;
-- source map references;
-- framework adapter events;
-- server/edge spans;
-- OpenTelemetry spans/log references;
-- WebSocket/service-worker events when supported.
+Large artifacts are content-addressed and referenced by digest.
 
-Large bodies/screenshots/traces live as artifacts referenced by digest rather than copied into every event.
+## Causal dimensions
 
-## CausalDimension
-
-A dimension is something the active adapter can safely intervene on.
+A causal dimension is not merely something observed; it must have an executable intervention supplied by an adapter.
 
 ```ts
 interface CausalDimension {
@@ -249,31 +163,9 @@ interface CausalDimension {
 }
 ```
 
-Examples:
+Possible dimensions include journey steps, storage keys, requests/request fields, response fixtures, feature flags, third-party scripts, service workers, route middleware, instrumented server handlers/spans, framework route segments, controlled source modules and legacy structural units.
 
-- user journey step;
-- DOM subtree generated by a controlled fixture;
-- CSS rule/module;
-- JS bundle/chunk/module in a controlled local build;
-- React/Next route segment where adapter support exists;
-- network request;
-- request field/header/query parameter;
-- response fixture branch;
-- cookie/localStorage/IndexedDB key;
-- feature flag;
-- third-party script/SDK;
-- service worker;
-- route middleware;
-- server action/request handler/span in an instrumented application;
-- legacy HTML/CSS/JS structural unit.
-
-The engine never fabricates dimensions from observations alone. A dimension must include an executable intervention supplied by an adapter.
-
-# Capability system
-
-## Adapter contract
-
-Every adapter implements a common capability descriptor.
+# Adapter system
 
 ```ts
 interface FaultlineAdapter {
@@ -288,291 +180,184 @@ interface FaultlineAdapter {
 }
 ```
 
-Capabilities are independently versioned. Example capability IDs:
+Capabilities are independently versioned, for example `browser.capture.network`, `browser.replay.actions`, `browser.intervene.storage`, `artifact.playwright.trace.read`, `framework.next.server_error_context` and `source.reduce.legacy`.
 
-- `browser.capture.dom`
-- `browser.capture.console`
-- `browser.capture.network`
-- `browser.replay.actions`
-- `browser.intervene.storage`
-- `browser.intervene.request`
-- `source.reduce.legacy`
-- `framework.react.observe`
-- `framework.next.route_context`
-- `framework.next.server_error_context`
-- `runtime.node.otel`
-- `artifact.playwright.trace.read`
-- `artifact.har.read`
+Safety rules:
 
-## Safety rules
+- read-only targets never receive mutating interventions;
+- reversible interventions must return a restoration lease and pass restoration verification;
+- destructive interventions require explicit approval bound to target, session revision and exact plan;
+- adapter infrastructure failure yields `UNRESOLVED`, never a fabricated oracle PASS/FAIL;
+- network interception stays scoped to the selected browser context/target;
+- adapters receive only declared credential capabilities.
 
-- A read-only target may capture and analyze but cannot run mutating interventions.
-- Reversible interventions must return a restoration lease and pass restoration verification.
-- Destructive interventions require explicit user approval bound to session revision, target identity and intervention plan.
-- Network interception must be scoped to the selected browser context/target, not system-wide networking.
-- No adapter receives secret values it did not explicitly declare a need for.
-- Adapter failure never silently changes the oracle result to PASS/FAIL; infrastructure uncertainty yields `UNRESOLVED`.
+# Initial adapters
 
-# Initial adapter portfolio
+## Generic browser — required baseline
 
-## Generic browser adapter — required baseline
+Playwright is the first browser runner. It provides navigation/action replay, DOM snapshots, console/page errors, network events, screenshots and safe browser-state/request interventions where enabled.
 
-Implemented with Playwright/CDP where available.
+CDP-specific features are capability-gated rather than falsely advertised on all browsers.
 
-Provides:
+## Playwright trace — required
 
-- navigation and action replay;
-- DOM snapshots;
-- console/page errors;
-- network events;
-- screenshots;
-- browser storage observations;
-- request interception in controlled replay contexts;
-- journey-step interventions;
-- safe storage/request dimensions where explicitly enabled.
+Imports action history, DOM snapshots, console/network evidence, screenshots and available source metadata. Trace-only sessions are observational until attached to a replayable target.
 
-This is the universal fallback and must not require React/Next/Vue/Svelte.
+## HAR — required
 
-## Playwright trace adapter — required
+Provides network topology/evidence. HAR alone is read-only; intervention requires a replayable target.
 
-Imports trace artifacts and reconstructs:
+## Legacy case — required
 
-- actions;
-- DOM snapshots;
-- console events;
-- network traffic;
-- screenshots;
-- source locations/metadata where present.
+Wraps the existing HTML/CSS/JS reducer and preserves hierarchical reduction, sandbox execution, current oracles, revision guards, cancellation and evidence lineage. The UI labels this explicitly as `legacy-source`.
 
-Artifact-only sessions may analyze causal candidates but cannot claim intervention proof unless a replayable target is also attached.
+## React/Next — first deep framework adapter
 
-## HAR adapter — required
+Targets React 19 / Next.js 16 using public/stable instrumentation surfaces wherever possible: build/runtime metadata, route transitions, Next client instrumentation, server `instrumentation`/`onRequestError`, OpenTelemetry correlation, source maps/build manifests belonging to the user's project and optional FAULTLINE SDK hooks.
 
-Provides portable network evidence and request topology. HAR alone is observational. It becomes intervention-capable only when attached to a replayable browser target.
+Server Components and server actions are never inferred from browser DOM alone. Deeper dimensions appear only when the required instrumentation is installed and verified.
 
-## Legacy case adapter — required
+## Vue/Nuxt and SvelteKit
 
-Preserves existing V2 functionality and tests:
+The protocol is ready for dedicated adapters, but first-release depth may be generic-browser-only. The product must show exact capability coverage instead of pretending equal framework support.
 
-- HTML subtree reduction;
-- CSS hierarchical reduction;
-- statement-level JavaScript reduction;
-- iframe sandbox execution;
-- existing oracle compatibility;
-- existing revision/cancellation/evidence invariants.
+## OpenTelemetry
 
-Legacy support is explicitly labeled `legacy-source` in the UI and protocol.
-
-## React/Next adapter — first deep framework adapter
-
-V3's first framework-specific adapter targets React 19 + Next.js 16 patterns without depending on unstable private React internals as the only source of truth.
-
-It may consume:
-
-- framework version/build metadata;
-- client instrumentation events;
-- route transition events;
-- Next server `instrumentation`/`onRequestError` context;
-- OpenTelemetry spans;
-- source maps/build manifest metadata available to the user's own project;
-- optional FAULTLINE SDK instrumentation.
-
-It can expose deeper dimensions only when the application has installed/enabled the relevant instrumentation. Server Components and server actions are never inferred solely from the browser DOM.
-
-## Vue/Nuxt, SvelteKit, Vite adapters — protocol-ready, shipped incrementally
-
-The core protocol must not require code changes to support them. Each adapter follows the same detection/capability/intervention contract.
-
-Initial V3 production readiness does not require pretending all framework adapters have equal depth. The UI shows exact capability coverage per session.
-
-## OpenTelemetry adapter — required protocol, initially ingest-focused
-
-Maps span/trace identity into FAULTLINE observations and causal graph edges.
-
-Because browser OpenTelemetry instrumentation remains experimental, FAULTLINE treats browser OTel as an optional signal, not the universal browser capture mechanism.
+Initially ingest/correlation-focused. Browser OpenTelemetry remains optional because current browser instrumentation is not a universal stable capture layer.
 
 # Execution modes
 
-## Local Mode — primary developer path
+## Local full mode — primary developer path
 
-`faultline` CLI starts a local coordinator and browser worker.
+`faultline` CLI starts a loopback coordinator, browser worker and **locally served FAULTLINE UI**. This is the guaranteed path for localhost/private targets and does not depend on a public website being allowed to contact loopback.
 
 Responsibilities:
 
-- connect to localhost/staging targets;
-- launch/manage Playwright browser contexts;
-- store session database/artifacts locally;
-- load adapter plugins;
-- keep credentials in a local secret provider;
-- execute interventions/replay/reduction;
-- expose the versioned FAULTLINE protocol to UI/CLI/MCP.
+- launch/manage Playwright contexts;
+- connect to local/staging targets;
+- store session data and artifacts locally;
+- load adapters;
+- hold credential handles locally;
+- execute capture/replay/interventions/reduction;
+- expose the versioned protocol to local UI, CLI and MCP.
 
-The coordinator listens on loopback by default, uses an ephemeral pairing credential, validates `Host`/`Origin`, and rejects DNS-rebinding style origin confusion.
+The coordinator binds loopback by default, uses an ephemeral pairing/auth credential, validates Host/Origin, enforces request limits and rejects DNS-rebinding style origin confusion.
 
-## Artifact Mode — zero-install inspection
+## Hosted artifact mode
 
-The hosted web app can import portable session bundles, Playwright traces and HAR files for local-in-browser inspection when feasible.
+The existing Vercel application supports portable session, Playwright trace and HAR inspection/import. Artifact inspection is local-in-browser where practical and read-only unless paired with a coordinator.
 
-Artifacts are not uploaded by default merely to view them. Large browser-only parsing paths should use workers to avoid blocking the UI.
+Artifacts are not silently uploaded merely to view them.
 
-Artifact mode is read-only unless paired with a local coordinator/replay target.
+## Hosted-to-local pairing — optional convenience
 
-## Hosted control plane — future-compatible, not required for V3 first release
+The hosted HTTPS UI may pair with a local coordinator only after an explicit user action. Browsers can gate public-to-loopback/private requests with Local Network Access permissions, and enterprise/browser policy can deny that access. Therefore:
 
-The protocol permits a later authenticated remote coordinator, but V3 does not require multi-tenant cloud execution, persistent accounts or arbitrary remote-code execution.
+- hosted-to-local pairing must detect and explain permission denial;
+- it must never be the only local developer workflow;
+- local full mode must remain complete without the hosted site;
+- transports must not rely on an assumption that WebSocket/fetch loopback access is universally ungated;
+- the Integrations/Doctor surfaces must report browser-specific pairing limitations precisely.
+
+## Future hosted control plane
+
+The protocol can later support an authenticated remote coordinator, but V3 first release does not require multitenant cloud execution or arbitrary remote-code execution.
 
 # Coordinator architecture
 
 ```text
-Human UI / CLI / MCP / WebMCP
-            |
-            v
-     Protocol Gateway
-            |
-            v
-   Session Orchestrator
-      /      |       \
-     v       v        v
- Capture   Replay   Reduction
-     \       |       /
-      \      v      /
-       Adapter Host
-            |
-            v
- Browser / Framework / Trace / OTel / Legacy adapters
-            |
-            v
-     Target + Artifacts
+Local/Hosted UI | CLI | MCP | optional WebMCP
+                    |
+                    v
+             Protocol Gateway
+                    |
+                    v
+           Session Orchestrator
+            /       |        \
+           v        v         v
+       Capture    Replay    Reduction
+            \       |        /
+             \      v       /
+               Adapter Host
+                    |
+                    v
+      Browser / Framework / Artifacts / OTel / Legacy
 ```
 
-## Protocol Gateway
+## Protocol gateway
 
-- versioned request/response schemas;
-- authentication/pairing;
-- request IDs and idempotency keys;
-- cancellation;
-- event streaming;
-- error normalization;
-- MCP translation;
-- optional WebMCP translation.
+Owns runtime validation, authentication/pairing, request IDs, idempotency, cancellation, streaming, normalized errors and MCP/WebMCP translation.
 
-## Session Orchestrator
+## Session orchestrator
 
-- authoritative revisioned session state;
-- target snapshot binding;
-- baseline policy;
-- experiment leases;
-- causal graph updates;
-- evidence receipts;
-- crash recovery.
+Owns authoritative revisioned state, target snapshot binding, baseline policy, experiment leases, causal graph, receipts and crash recovery.
 
-## Capture service
+## Capture
 
-Captures observations without deciding causality.
+Records observations; it does not decide causality.
 
-## Replay service
+## Replay
 
-Replays a journey against a target snapshot and returns a typed oracle result plus evidence.
+Executes the bound journey against a bound target/environment and returns typed oracle result plus evidence.
 
-## Reduction service
+## Reduction
 
-Selects candidate dimensions, applies interventions through the adapter, replays, records results, restores target state and updates the causal graph.
+Selects dimensions, applies adapter interventions, replays, records result, restores target and updates the causal graph. Existing ddmin/hierarchical search becomes one strategy among several.
 
-The existing ddmin/hierarchical reducer becomes one reduction strategy rather than the entire system.
+# Baseline determinism
 
-# Reproduction and determinism
+Before reduction, deterministic functional failures default to at least two consecutive reproductions with identical oracle result, unchanged target snapshot and no unresolved infrastructure failures.
 
-Before causal reduction, FAULTLINE runs a configurable baseline stability gate.
+Bounded-variance oracles define an explicit sampling policy.
 
-Default policy for deterministic functional failures:
+Every baseline stores journey/oracle revisions, target/build identity, environment digest, adapter/capability versions, result and evidence digests. Changing any bound identity makes prior claims stale rather than silently reusable.
 
-- at least 2 consecutive reproductions;
-- identical oracle outcome;
-- target snapshot identity unchanged;
-- no unresolved infrastructure failure.
-
-For bounded-variance oracles such as performance thresholds, the oracle defines the repetition/sample policy explicitly.
-
-A baseline stores:
-
-- journey revision;
-- oracle revision;
-- target/build identity;
-- environment snapshot digest;
-- adapter/capability versions;
-- result;
-- evidence digests.
-
-If any bound identity changes, existing baseline/reduction claims become stale rather than silently reused.
-
-# Causal experiment lifecycle
+# Experiment lifecycle
 
 ```text
 plan
- -> validate capabilities + safety
- -> bind target/session/oracle/journey revisions
+ -> validate capability/safety
+ -> bind session/target/journey/oracle revisions
  -> acquire intervention lease
- -> apply intervention
+ -> apply
  -> verify intervention
- -> replay journey
+ -> replay
  -> evaluate oracle
  -> capture evidence
  -> restore
  -> verify restoration
- -> persist experiment receipt
+ -> persist receipt
  -> update causal graph
 ```
 
-A crash after intervention but before restoration is recoverable because the lease is durable and the adapter must support reconciliation for mutating capabilities.
-
-If exact restoration cannot be proven, the target is marked dirty and further experiments stop until the user resets/reconnects it.
+Mutating adapters must support reconciliation of durable leases. If restoration cannot be proven after a crash or adapter failure, the target becomes `dirty` and further experiments stop until reset/reconnection.
 
 # Causal graph
 
-The graph is evidence-backed, not an AI-generated explanation graph.
+Evidence-backed node classes include action, observation, dimension, oracle, experiment, artifact and runtime/span nodes.
 
-Node classes:
+Evidence-backed edge classes include occurred-before, triggered, observed-in, depends-on, intervened-on, preserved-failure, removed-failure, unresolved and derived-from.
 
-- journey action;
-- observation/event;
-- causal dimension;
-- oracle;
-- experiment;
-- artifact;
-- target/runtime span.
-
-Edge classes:
-
-- occurred-before;
-- triggered;
-- observed-in;
-- depends-on;
-- intervened-on;
-- preserved-failure;
-- removed-failure;
-- unresolved;
-- derived-from.
-
-LLMs/agents may summarize the graph, suggest candidate experiments and explain evidence, but they may not create authoritative causal edges without experiment/observation provenance.
+Agents/LLMs may summarize and propose experiments, but authoritative causal edges require stored provenance.
 
 # Repository architecture
 
-V3 migrates toward a TypeScript workspace while keeping the current production release deployable during development.
+V3 migrates to a strict TypeScript workspace while production remains deployable throughout migration.
 
 ```text
 apps/
-  web/                 product UI
-  cli/                 CLI entry point
-  bridge/              local coordinator/bridge process
+  web/                 Next.js product/artifact UI
+  cli/                 command-line client
+  bridge/              local coordinator + local UI host
 
 packages/
-  protocol/            schemas, errors, versioning, event types
-  session/             revisioned session state + persistence interfaces
+  protocol/            schemas, errors, versioning, events
+  session/             revisioned state + persistence interfaces
   engine/              reduction strategies + causal graph rules
   orchestrator/        capture/replay/experiment lifecycle
-  browser/             Playwright/CDP worker
-  sdk/                 application instrumentation SDK
-  mcp/                 MCP 2026 adapter
+  browser/             Playwright worker
+  sdk/                 optional app instrumentation
+  mcp/                 MCP adapter
   adapters/
     generic-web/
     playwright-trace/
@@ -590,45 +375,24 @@ fixtures/
   service-worker/
   websocket/
 
-apps/web/tests/
 integration-tests/
 ```
 
-## Technology choices
+All external schemas receive runtime validation; TypeScript types alone are not a trust boundary.
 
-### TypeScript
+The web UI may use Next.js 16/React 19, but the causal engine and protocol remain framework-independent and usable from CLI/MCP without the web application.
 
-All new protocol/orchestrator/adapter packages use strict TypeScript. Runtime schemas are validated at boundaries; TypeScript types alone are insufficient for imported artifacts or MCP/CLI requests.
+Local persistence uses transactional metadata storage plus content-addressed artifact storage behind an interface that can later support a remote backend.
 
-### Web application
+# UI / UX architecture
 
-The product UI may use Next.js 16/React 19 for routing/layout/server-capable documentation surfaces, but the debugging engine must not depend on React/Next internals. The local coordinator remains independently usable by CLI/MCP.
-
-### Browser automation
-
-Playwright is the first-class browser runner. CDP-specific features are capability-gated so Firefox/WebKit/generic browser support does not falsely claim Chromium-only functionality.
-
-### Persistence
-
-Local coordinator uses a durable embedded store with transactional semantics for session metadata and a content-addressed artifact directory for large artifacts.
-
-The storage interface is abstracted so a future remote store can be introduced without changing session protocol objects.
-
-# Product UI / UX
-
-The V3 UI is a real multi-page application. Each page is designed around one job and has different information density; it is not the same card grid repeated under different routes.
+V3 is a real multi-page product. Pages have different structures based on their job rather than repeating the same card grid.
 
 ## Global shell
 
-Desktop:
+Desktop uses a persistent product rail, compact command/status bar, task canvas and optional inspector. Near-black/black surfaces, white/neutral typography and restrained pink causal emphasis remain the visual identity. Dense data views use dividers, tables, timelines and panes rather than excessive bordered cards.
 
-- persistent left product rail;
-- compact top command/status bar;
-- main task canvas;
-- optional contextual inspector drawer;
-- connection/session indicator always visible.
-
-Primary rail:
+Primary navigation:
 
 - Home
 - New Session
@@ -636,7 +400,7 @@ Primary rail:
 - Integrations
 - Docs
 
-Session-scoped rail/context appears once a session is open:
+Session navigation:
 
 - Overview
 - Capture
@@ -645,201 +409,59 @@ Session-scoped rail/context appears once a session is open:
 - Reduce
 - Evidence
 
-Visual system:
-
-- near-black/black surfaces;
-- white/neutral typography;
-- restrained pink for selected/causal emphasis;
-- semantic result colors accompanied by explicit labels/icons;
-- minimal container chrome;
-- dividers and hierarchy instead of excessive cards;
-- mono typography only for IDs/source/evidence, not all UI copy;
-- high-density data views where appropriate;
-- full keyboard navigation and reduced-motion behavior.
+Mobile is task-oriented, not a compressed desktop workspace.
 
 ## Home
 
-Purpose: operational entry/dashboard.
-
-Contains:
-
-- local coordinator connection state;
-- recent sessions;
-- last reproduction result;
-- active/stale/dirty target state;
-- recent evidence receipts;
-- one clear `New session` action;
-- quick import of trace/HAR/session bundle.
-
-No source editor appears on Home.
+Operational dashboard: coordinator connection, recent sessions, target health, last reproduction state, recent receipts, New Session and artifact import. No source editor.
 
 ## New Session
 
-A focused wizard, not a dashboard.
+Three-stage wizard:
 
-Step 1 — source:
+1. target/artifact source — Local App, Staging/Live URL, Playwright Trace, HAR, CI Artifact, OTel Trace, Legacy Case;
+2. detect target/framework/adapters/capabilities and select safety mode;
+3. record/import journey, define oracle and establish baseline.
 
-- Local app
-- Staging/live URL
-- Playwright trace
-- HAR
-- CI failure/artifact
-- OpenTelemetry trace
-- Legacy case
-
-Step 2 — connection/capabilities:
-
-- target identity;
-- detected framework/runtime;
-- available adapters;
-- capability coverage;
-- permission/safety mode.
-
-Step 3 — reproduction setup:
-
-- record/import journey;
-- choose/create oracle;
-- run baseline.
-
-A session does not enter Reduce until baseline is valid.
+Reduction is unavailable until baseline is valid.
 
 ## Session Overview
 
-Shows the current truth of the investigation:
-
-- target/build/environment identity;
-- journey/oracle revisions;
-- baseline stability;
-- capability matrix;
-- latest result;
-- causal progress;
-- blockers such as dirty target or missing adapter.
+Target/build identity, environment, journey/oracle revisions, capability matrix, baseline stability, latest result, causal progress and blockers such as dirty target or missing capability.
 
 ## Capture
 
-Timeline-centric workspace.
-
-Main area:
-
-- filmstrip/screenshots when available;
-- action timeline;
-- DOM/navigation/runtime events;
-- network waterfall/table;
-- console/errors.
-
-Inspector:
-
-- selected event detail;
-- request/response metadata;
-- source/stack reference;
-- correlated span IDs;
-- redaction state.
-
-Capture can record a new journey or inspect imported artifacts.
+Timeline-centric workspace with filmstrip/screenshots, actions, DOM/navigation/runtime events, network waterfall/table and console/errors. The inspector shows request/response, stack/source refs, span correlation and redaction state.
 
 ## Reproduce
 
-Focused baseline builder.
-
-- journey editor/timeline;
-- oracle builder;
-- environment controls;
-- replay console;
-- repetition/stability indicator;
-- exact reasons for PASS/FAIL/UNRESOLVED.
-
-No causal reduction controls appear until the baseline gate passes.
+Journey editor, oracle builder, environment controls, replay console and explicit stability indicator. PASS/FAIL/UNRESOLVED explanations are visible.
 
 ## Fault Map
 
-Graph-centric investigation surface.
-
-- causal graph canvas;
-- filters by browser/network/framework/server/action/dimension;
-- evidence-backed edges only;
-- right inspector for node provenance and related experiments;
-- list fallback for accessibility and low-power/mobile contexts.
-
-The graph is never required to understand the result; evidence remains available as tables/timelines.
+Evidence-backed causal graph with filters and provenance inspector plus an accessible list/table fallback. The graph is not required to understand the evidence.
 
 ## Reduce
 
 Three-zone experimental workspace:
 
-Left:
-- candidate dimension groups;
-- capability/safety badges;
-- pins;
-- dependencies.
+- candidate dimensions, dependencies, pins and safety/capability badges;
+- active experiment/replay progress and frontier;
+- oracle outcome, intervention/restoration state and receipt provenance.
 
-Center:
-- active experiment/replay progress;
-- before/after journey evidence;
-- current reduction frontier;
-
-Right:
-- oracle outcome;
-- experiment receipt;
-- intervention/restoration status;
-- selected dimension provenance.
-
-Top command bar:
-- Run candidate
-- Autopilot
-- Pause/cancel
-- Pin
-- Save checkpoint
-
-Autopilot cannot bypass safety approvals or capability limits.
+Autopilot may propose/run permitted experiments but cannot bypass approvals or capability limits.
 
 ## Evidence
 
-Read-only report surface.
-
-Contains:
-
-- final/current oracle state;
-- target + build identity;
-- journey summary;
-- proven necessary dimensions;
-- dimensions proven unnecessary within tested frontier;
-- unresolved dimensions;
-- experiment count;
-- reduction metrics appropriate to each dimension class;
-- causal graph summary;
-- chronological receipts;
-- export actions.
-
-Never report a single misleading “87% reduced” metric across incomparable dimensions. Source-size reduction, journey-step reduction, request reduction and other classes are reported separately.
+Read-only report showing bound target/build, journey/oracle, necessary/unnecessary/unresolved dimensions, experiment receipts and exports. Metrics remain dimension-specific; FAULTLINE never combines unrelated dimensions into a misleading single reduction percentage.
 
 ## Integrations
 
-First-class setup hub:
-
-- CLI install/setup;
-- local coordinator status;
-- SDK integration;
-- Next/React instrumentation;
-- Playwright/CI integration;
-- HAR/trace import;
-- OpenTelemetry setup;
-- MCP endpoint/config;
-- optional WebMCP status;
-- adapter capability documentation.
-
-Each integration has:
-
-- Detect
-- Setup
-- Verify connection
-- Test capture
-- Troubleshoot
-
-The page shows actual connected state rather than documentation-only copy.
+Actual setup/verification hub for local coordinator, CLI, SDK, Next/React instrumentation, Playwright/CI, trace/HAR import, OTel, MCP and optional WebMCP. Each integration supports Detect, Setup, Verify, Test Capture and Troubleshoot states.
 
 ## Docs
 
-Documentation is separately routed and searchable. It contains protocol/schema reference, adapters, security model, tutorials and limitations.
+Separately routed/searchable protocol, schema, adapters, security, tutorials and limitations.
 
 # CLI
 
@@ -856,305 +478,190 @@ faultline inspect
 faultline reduce
 faultline export
 faultline mcp serve
+faultline ui
 ```
 
-Commands emit structured JSON with `--json` for agents/CI.
-
-CLI output never claims success without a persisted receipt/session revision.
+`--json` provides structured machine/agent output. Success is not reported without a persisted receipt/session revision where the operation mutates authoritative state.
 
 # SDK
 
-The SDK is optional. Generic browser sessions do not require application code changes.
+The SDK is optional. Generic browser sessions need no application changes.
 
-SDK responsibilities:
+The SDK can register framework/runtime metadata, custom observations, feature flags, safe controllable dimensions, browser/server correlation IDs, redaction hooks, Next instrumentation helpers and OTel correlation.
 
-- framework/runtime identification;
-- custom observation events;
-- feature flag registration;
-- safe controllable-dimension registration;
-- correlation IDs across browser/server;
-- redaction hooks;
-- Next/server instrumentation helpers;
-- OpenTelemetry correlation.
+Server mutations require explicit application registration; installing the SDK never grants arbitrary server-state mutation.
 
-SDK intervention APIs require explicit registration by application code; FAULTLINE cannot mutate arbitrary server state merely because the SDK is installed.
+# MCP 2026
 
-# MCP 2026 interface
+MCP translates the same protocol gateway. Stateful investigations use explicit `sessionId`, revision and operation handles rather than hidden transport session state.
 
-MCP is a translation over the same protocol gateway, not a separate engine.
+Tool groups cover sessions, targets/capabilities, capture, journey, oracle, reproduce, dimensions, experiments, reduction and evidence/export.
 
-The server follows the current stateless MCP model. Stateful investigations use explicit `sessionId`/revision handles in tool arguments rather than hidden protocol sessions.
+Mutation tools include expected revision/plan identity. Long-running tasks expose operation IDs, status and cancellation.
 
-Tool groups:
+Optional WebMCP exposes only browser-appropriate subsets backed by the same handles.
 
-- sessions: create/list/inspect/import;
-- targets: detect/connect/capabilities;
-- capture: start/stop/events;
-- journey: inspect/update;
-- oracle: define/test;
-- reproduce: run/baseline;
-- dimensions: list/inspect/pin;
-- experiments: plan/run/cancel;
-- reduction: run/status;
-- evidence: graph/history/export.
+# Protocol semantics
 
-Mutation tools require expected revision/plan identity. Long-running work returns explicit operation IDs and supports cancellation/status rather than holding implicit browser state.
+Every mutation includes request ID, session ID, expected revision, target snapshot when relevant, capability/version binding and idempotency key where retries could duplicate effects.
 
-Optional WebMCP exposes the subset that is meaningful inside the FAULTLINE web UI, backed by the same session handles.
+Normalized operation outcomes include `ok`, `conflict`, `invalid_request`, `capability_missing`, `safety_approval_required`, `target_dirty`, `unresolved`, `cancelled` and `internal_error`.
 
-# API/protocol semantics
-
-Every mutation request includes:
-
-- request ID;
-- idempotency key where replay could duplicate effects;
-- session ID;
-- expected session revision;
-- target snapshot identity when target mutation is possible;
-- adapter capability/version binding.
-
-Normalized result classes:
-
-- `ok`;
-- `conflict`;
-- `invalid_request`;
-- `capability_missing`;
-- `safety_approval_required`;
-- `target_dirty`;
-- `unresolved`;
-- `cancelled`;
-- `internal_error`.
-
-Oracle result remains separately typed as `PASS | FAIL | UNRESOLVED` and is never conflated with transport/operation success.
+Oracle result remains separately typed as `PASS | FAIL | UNRESOLVED` and is never conflated with transport success.
 
 # Security model
 
-## Local bridge
+## Bridge
 
-- binds loopback by default;
+- loopback by default;
 - ephemeral pairing/auth token;
-- strict Host and Origin validation;
-- CORS allowlist;
-- anti-DNS-rebinding checks;
+- strict Host/Origin/CORS validation;
+- Local Network Access-aware hosted pairing;
+- DNS-rebinding protections;
 - no unauthenticated mutation endpoints;
 - session-scoped capabilities;
 - request size/rate limits;
-- token rotation on restart/pairing reset.
+- pairing/token rotation.
 
-## Target safety
+## Targets
 
-- default remote/live mode is capture/read-only;
-- mutating experiments require user-controlled local/staging target or an explicitly approved target policy;
-- destructive adapter capability requires exact-plan approval;
-- restoration verification required after reversible interventions;
-- target marked dirty when reconciliation fails.
+- live/third-party target defaults to capture/read-only;
+- mutation requires developer-controlled local/staging target or explicit target policy;
+- destructive capability requires exact-plan approval;
+- reversible intervention requires verified restoration;
+- uncertainty marks target dirty.
 
 ## Secrets
 
-- never written into portable session JSON by default;
-- represented by opaque local secret handles;
-- redaction occurs before portable artifact/export boundaries;
-- no secret exposure to MCP tool descriptions/results unless explicitly requested by an authorized user and allowed by policy.
+Secrets stay in local providers by default and portable sessions contain opaque handles/redacted values. Secret material is never written into client source or MCP descriptions/results by default.
 
 ## Imported artifacts
 
-- treat as untrusted;
-- bounded decompression/size limits;
-- archive path traversal protection;
-- no execution of imported source;
-- parse in isolated workers/processes where practical;
-- sanitize rendered text/HTML.
+Treat archives/traces/HAR as untrusted: bounded size/decompression, traversal protection, no execution of imported source, isolated parsing where practical and sanitized rendering.
 
-## Browser execution
+## Browser isolation
 
-The existing sandboxed legacy runner remains isolated. Real target replay uses a dedicated browser context and explicit target policy. Captured page content never gains privileges in the FAULTLINE UI origin.
+Legacy iframe experiments remain sandboxed. Real-target replay uses dedicated browser contexts and captured page content never receives FAULTLINE UI-origin privileges.
 
 # Durability and recovery
 
-Local session metadata is transactionally persisted.
+Session metadata is transactionally persisted. Long-running operations and intervention leases are durable.
 
-Long-running experiments use durable operation records and intervention leases.
+Restart recovery reconciles unfinished operations, verifies restoration and marks uncertain targets dirty before any further reduction. Receipts bind digests of session, target, journey, oracle and adapter versions.
 
-On restart:
+# Migration
 
-1. recover incomplete operations;
-2. reconcile outstanding intervention leases with adapters;
-3. verify target restoration;
-4. mark session/target dirty if uncertain;
-5. do not resume reduction until safety state is known.
+Preserve:
 
-Evidence receipts include digests of bound session/oracle/journey/target revisions and adapter version.
-
-# Compatibility and future-proofing
-
-The core engine knows capability IDs and typed observations/dimensions, not framework internals.
-
-A new framework adapter should be addable without changing:
-
-- session schema fundamentals;
-- experiment lifecycle;
-- oracle result semantics;
-- evidence receipt rules;
-- UI page architecture;
-- MCP session/revision model.
-
-Protocol evolution uses explicit schema versions and capability versions.
-
-Unknown optional observation types are preserved when safely possible; unknown mutation/intervention capabilities are never executed.
-
-# Migration from current FAULTLINE
-
-## Preserve
-
-- revision store and stale-mutation rejection;
-- deterministic ddmin/hierarchical strategy;
-- legacy structural units;
-- FAIL/PASS/UNRESOLVED oracle semantics;
-- experiment sandbox policy;
+- revision/stale-mutation rejection;
+- ddmin/hierarchical reduction;
+- FAIL/PASS/UNRESOLVED semantics;
+- sandbox policy;
 - cancellation cleanup;
-- operation result revision lineage;
-- bounded recovery concepts;
-- production exact-tree deployment gates;
-- current legacy WebMCP behavior through compatibility adapter while the V3 MCP surface is introduced.
+- result revision lineage;
+- recovery concepts;
+- exact-tree deployment gates;
+- legacy behavior through `legacy-case`.
 
-## Replace
+Replace:
 
-- `html/css/js/oracle` as universal canonical case;
-- one static browser runtime as the only execution host;
-- source-only reduction frontier;
-- integration as a hidden browser feature;
-- UI organized around source textareas;
+- `html/css/js/oracle` as universal session model;
+- single browser runtime as only execution host;
+- source-only frontier;
+- hidden integration panel;
+- textarea-centric main UI;
 - hard-coded framework assumptions.
 
-## V2 branch
+The V2 branch is not merged wholesale. Proven pieces are selectively ported into V3.
 
-`feat/product-workspace-v2` remains untouched as a recoverable checkpoint. V3 implementation starts from production baseline and selectively ports proven pieces rather than merging the rejected architecture wholesale.
+# Testing
 
-# Testing strategy
+## Unit/contract
 
-## Unit
+Schema/versioning, revision conflict, graph invariants, capability negotiation, lease state machines, receipt binding, redaction and adapter conformance.
 
-- schema validation/versioning;
-- revision/conflict rules;
-- causal graph invariants;
-- capability negotiation;
-- intervention lease state machine;
-- receipt digest/binding;
-- adapter contract conformance;
-- redaction.
-
-## Contract
-
-Every adapter runs the same conformance suite:
-
-- detect without mutation;
-- report stable capability IDs;
-- capture typed observations;
-- replay or explicitly declare no replay;
-- intervention/restore semantics;
-- cancellation;
-- dirty-target behavior;
-- malformed target/artifact handling.
+Every adapter must prove detect-without-mutation, stable capability reporting, typed capture, replay declaration, intervention/restore behavior, cancellation, dirty-target handling and malformed input handling.
 
 ## Fixture matrix
 
-Required integration fixtures:
+Required fixtures:
 
 - vanilla DOM/CSS/JS;
 - React + Vite SPA;
-- Next.js 16 App Router with Server + Client Components, route handlers and server action/error instrumentation;
-- Vue/Vite SPA generic fallback;
+- Next.js 16 App Router with Server/Client Components, route handler and server-action/error instrumentation;
+- Vue/Vite generic fallback;
 - SvelteKit generic fallback;
-- service worker caching failure;
+- service-worker cache failure;
 - WebSocket/event-driven failure;
-- third-party script/request failure;
-- imported Playwright trace;
-- imported HAR;
-- OpenTelemetry-correlated server error;
-- legacy `.faultline.json` case.
+- third-party request/script failure;
+- Playwright trace import;
+- HAR import;
+- OTel-correlated server error;
+- legacy case.
 
-Frameworks without deep adapters must still pass generic-browser capture/replay tests and clearly report capability limitations.
+Frameworks lacking deep adapters must still pass generic capture/replay and explicitly report limitations.
 
-## Browser/UI
+## UI/browser
 
-Real Chromium tests cover:
+Real-browser tests cover multi-page routing, New Session, local/hosted connection states, Local Network Access denial handling, capability matrix, Capture, baseline gate, Fault Map list fallback, Reduce safety/cancel, read-only Evidence, Integrations verification, keyboard/ARIA/reduced motion and 390px mobile overflow.
 
-- multi-page route architecture;
-- New Session wizard;
-- coordinator pairing state;
-- capability matrix;
-- Capture timeline;
-- baseline gate;
-- Fault Map keyboard/list fallback;
-- Reduce safety/cancel flows;
-- read-only Evidence;
-- Integrations verification;
-- 390px mobile overflow/navigation;
-- keyboard/focus/ARIA/reduced motion.
+## End-to-end release gate
 
-Cross-browser replay is added where capabilities exist; Chromium-only CDP features are never treated as universal.
+A V3 production candidate must demonstrate:
 
-## End-to-end
-
-At minimum, production release gates must prove:
-
-1. create/connect a local fixture session;
-2. record/import a journey;
+1. connect a real fixture without converting it to source text;
+2. record/import journey;
 3. define oracle;
-4. establish deterministic baseline;
-5. enumerate real adapter dimensions;
-6. run an intervention;
-7. restore target;
+4. establish baseline;
+5. enumerate adapter dimensions;
+6. apply an intervention;
+7. verify restoration;
 8. reduce a frontier;
-9. persist/reload session;
+9. persist/reload;
 10. inspect via CLI;
-11. inspect/run through MCP;
-12. export and re-import portable evidence;
-13. preserve legacy case behavior.
+11. inspect/run via MCP;
+12. export/re-import evidence;
+13. preserve legacy-case behavior.
 
 # Release architecture
 
-The existing single `faultline-webmcp` Vercel project remains the only production web project unless the user explicitly changes that decision.
+The existing `faultline-webmcp` Vercel project remains the sole production web project unless the user explicitly changes that decision.
 
-V3 web deployment continues exact-tree staging/parity/promotion verification. If the shipped asset model changes from the current static manifest, the replacement build manifest must still enumerate every deployable artifact and verify staged/public parity.
+Migrating the web app from the current static build to Next.js must preserve exact source/deployment provenance. The release workflow may change build mechanics, but it must still bind the candidate Git SHA/tree, stage into the same Vercel project, verify the deployed artifact/build identity, promote only a green candidate and advance `production` only after live verification.
 
-CLI/bridge packages require reproducible package builds, checksums and provenance before being called production-ready.
+Because Next/Vercel may produce framework-generated assets rather than byte-identical source files, the V3 release gate will compare a deterministic build manifest containing content digests and build/source metadata rather than pretending raw source-file parity still proves the deployed runtime. Legacy static releases retain the existing byte-parity path until migration.
 
-No release is promoted merely because UI tests pass; protocol, adapter, bridge, security and end-to-end fixture gates are release blockers.
+CLI/bridge packages require reproducible builds, checksums and provenance before production-ready claims.
 
-# Implementation decomposition
+# Ordered implementation sub-projects
 
-This architecture is too large to implement safely as one undifferentiated patch. Implementation is divided into ordered sub-projects that share this spec.
-
-## V3.1 — Protocol + session kernel + legacy compatibility
+## V3.1 — Protocol/session kernel + legacy compatibility
 
 - TypeScript workspace foundation;
-- versioned schemas;
+- runtime schemas/versioning;
 - revisioned DebugSession store;
-- protocol errors/cancellation/idempotency;
+- protocol errors/idempotency/cancellation;
 - causal graph core;
 - legacy-case adapter wrapping current engine;
-- tests proving current legacy behavior remains available.
+- legacy regression suite.
 
-No UI migration is required to declare V3.1 complete.
+## V3.2 — Local coordinator + generic browser
 
-## V3.2 — Local coordinator + generic browser capture/replay
-
-- CLI/bridge;
-- pairing/security boundary;
-- Playwright browser worker;
-- generic browser observations;
-- journey recorder/replay;
+- CLI/bridge + local UI serving;
+- pairing/security/LNA-aware optional hosted pairing;
+- Playwright worker;
+- browser observations;
+- journey record/replay;
 - baseline gate;
 - durable operations/intervention leases;
 - local/staging target policy.
 
 ## V3.3 — Product UI
 
-- Next.js 16/React 19 application shell;
+- Next.js 16/React 19 shell;
 - Home;
 - New Session;
-- Session Overview;
+- Sessions/Overview;
 - Capture;
 - Reproduce;
 - Fault Map;
@@ -1162,77 +669,73 @@ No UI migration is required to declare V3.1 complete.
 - Evidence;
 - Integrations;
 - Docs;
-- responsive/accessibility test matrix.
+- responsive/accessibility matrix.
 
-## V3.4 — Portable artifact adapters
+## V3.4 — Artifact adapters
 
 - Playwright trace;
 - HAR;
-- portable session bundle;
-- artifact-mode UI;
-- export/import provenance.
+- portable session bundles;
+- artifact-mode UX and provenance.
 
 ## V3.5 — React/Next + OTel deep integration
 
 - SDK;
-- Next client/server instrumentation helpers;
+- client/server instrumentation helpers;
 - route/error/span correlation;
-- additional causal dimensions where intervention can be proven;
+- adapter-backed deeper dimensions;
 - Next fixture matrix.
 
-## V3.6 — MCP 2026 + CI integration
+## V3.6 — MCP 2026 + CI
 
-- stateless MCP adapter over protocol gateway;
-- explicit session handles;
-- operation IDs/cancellation;
-- CI commands/artifact upload/download hooks;
-- structured JSON output;
-- optional WebMCP compatibility surface.
+- stateless MCP translation;
+- explicit session/operation handles;
+- CI commands/artifacts;
+- structured JSON;
+- optional WebMCP compatibility.
 
 ## V3.7 — Additional framework adapters
 
 - Nuxt/Vue;
 - SvelteKit;
-- framework-specific depth driven by stable public instrumentation surfaces;
-- generic adapter remains fallback.
+- deeper support only through stable public instrumentation surfaces;
+- generic browser remains fallback.
 
-Each sub-project gets its own implementation plan and must leave production deployable.
+Each sub-project gets its own implementation plan and must leave production recoverable.
 
-# Production-readiness acceptance criteria
+# Production-readiness acceptance
 
-FAULTLINE V3 may be described as production-ready for its declared capability set only when all are true:
+V3 is production-ready only for its explicitly declared capability set when:
 
-- a real local React/Vite and Next.js target can be connected without manually converting it to raw source text;
-- capture records browser actions, console/runtime errors, network and DOM evidence;
-- replay reproduces at least one fixture failure deterministically;
-- baseline stability is enforced before reduction;
-- at least journey/network/storage/legacy source dimensions can be experimentally intervened on where supported;
-- interventions are restored and verified;
-- crash/restart cannot silently leave a target mutation untracked;
-- Evidence is generated entirely from receipts/provenance;
-- imported traces/HAR are handled as untrusted artifacts;
-- CLI works with structured JSON output;
-- MCP operates using explicit session handles and revision guards;
-- Web UI exposes multiple task-specific pages, not one giant workbench;
-- all capability limitations are shown explicitly;
-- full unit/contract/integration/browser/security suites pass;
-- exact deployed web tree is verified in the existing Vercel project;
-- a recoverable verified source checkpoint exists for the deployed release.
+- real React/Vite and Next targets connect without manual source conversion;
+- capture records action, DOM, console/runtime and network evidence;
+- replay establishes a deterministic fixture failure;
+- reduction cannot start without baseline;
+- supported journey/network/storage/legacy dimensions can be intervened on;
+- restoration is verified;
+- crash recovery cannot silently lose a target mutation;
+- evidence is receipt/provenance-derived;
+- trace/HAR input is treated as untrusted;
+- CLI structured output works;
+- MCP uses explicit session/revision handles;
+- web/local UI is truly multi-page/task-specific;
+- capability limits are visible;
+- full test/security suites pass;
+- deployment is verified in the same Vercel project;
+- a recoverable verified source checkpoint is created.
 
-# Explicit non-goals for first V3 production release
+# Explicit first-release non-goals
 
-- automatic arbitrary server-code mutation without SDK/adapter support;
+- arbitrary server-code mutation without SDK/adapter support;
 - universal AST reduction for every language/framework;
-- production mutation of third-party sites;
-- hidden credential harvesting;
-- multi-tenant cloud execution;
-- billing/accounts/team collaboration;
-- replacing Sentry/Datadog/OpenTelemetry as an observability backend;
-- claiming causality from correlation alone;
-- claiming global minimality across incomparable causal dimensions.
+- mutating third-party production sites;
+- credential harvesting;
+- multitenant cloud execution;
+- billing/accounts/collaboration;
+- replacing observability backends;
+- claiming causality from correlation;
+- claiming a global minimum across incomparable dimensions.
 
-# Final architectural invariant
+# Final invariant
 
-FAULTLINE V3's core must remain truthful under technology change.
-
-If a future framework changes how it renders, routes, streams, hydrates or executes server functions, FAULTLINE should need a new/updated adapter capability—not a rewrite of the session, experiment, evidence, UI or agent architecture.
+FAULTLINE V3 must remain truthful when technology changes. A future framework should require a new or updated adapter capability—not a rewrite of the session, experiment, evidence, UI or agent architecture.

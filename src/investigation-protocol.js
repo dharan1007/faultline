@@ -1,6 +1,6 @@
 const TARGET_MODES=new Set(['public_url','current_tab','trace_import','complex_demo','legacy_source']);
 const ORACLE_OUTCOMES=new Set(['PASS','FAIL','UNRESOLVED']);
-const clone=value=>structuredClone?structuredClone(value):JSON.parse(JSON.stringify(value));
+const clone=value=>typeof structuredClone==='function'?structuredClone(value):JSON.parse(JSON.stringify(value));
 
 function requireObject(value,code){if(!value||typeof value!=='object'||Array.isArray(value))throw new Error(code);return value;}
 function requireString(value,code){if(typeof value!=='string'||!value.trim())throw new Error(code);return value;}

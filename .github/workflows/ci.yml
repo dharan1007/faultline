@@ -12,7 +12,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: npx -y tsx@4.23.13 --test packages/protocol/test/toolchain.test.ts
+      - run: npx -y tsx@4.23.13 --test packages/protocol/test/*.test.ts
       - run: npm test
       - run: npm run check
       - run: npm run build

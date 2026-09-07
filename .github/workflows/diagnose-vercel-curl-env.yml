@@ -1,0 +1,52 @@
+name: Diagnose Vercel curl env auth
+
+on:
+  push:
+    branches: [fix/vercel-curl-env-auth]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-protected-staged-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: team_APBZJjf6iizHCTuseqHosFnU
+      VERCEL_PROJECT_ID: prj_XtQdMYG2kOufYTrZ1SDj61VEExDM
+      STAGED_URL: https://faultline-webmcp-jml58xihr-tejs-projects-70bb4568.vercel.app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require exact staged source lineage
+        run: |
+          set -euo pipefail
+          git diff --exit-code 7097797f1586b378b8245499cc366eac449e7b1b -- index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js
+
+      - name: Require Vercel credential
+        run: test -n "${VERCEL_TOKEN:-}"
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Bind exact existing project
+        run: |
+          set -euo pipefail
+          mkdir -p .vercel
+          printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
+
+      - name: Verify protected staged tree with env-only authentication
+        run: |
+          set -euo pipefail
+          for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js; do
+            if [ "$file" = "index.html" ]; then
+              remote_path="/"
+            else
+              remote_path="/$file"
+            fi
+            output="/tmp/faultline-diagnostic-${file//\//-}"
+            vercel curl "$remote_path" --deployment "$STAGED_URL" > "$output"
+            cmp "$file" "$output"
+          done

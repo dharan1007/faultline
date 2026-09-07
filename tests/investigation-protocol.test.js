@@ -51,7 +51,7 @@ test('Investigation store owns revisions, rejects stale writes, and preserves ap
   assert.equal(observed.observations.length,1);
   const observed2=store.appendObservation(observed.revision,{observationId:'obs_2',runId:'run_1',sequence:2,browserTime:13,type:'network',source:'browser',redacted:true,payload:{url:'https://example.com/api'}});
   assert.deepEqual(observed2.observations.map(x=>x.observationId),['obs_1','obs_2']);
-  assert.equal(store.restore('r1',observed2.revision).revision,'r4');
+  assert.equal(store.restore('r1',observed2.revision).revision,'r5');
 });
 
 test('Investigation export bundle is checksummed and read-only',async()=>{

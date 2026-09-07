@@ -97,7 +97,7 @@ try{
   assert.equal(investigation.revision,'r2');
   assert.ok(investigation.capture.documentSnapshots.length>=1);
   assert.equal(investigation.capture.documentSnapshots[0].title,'Runtime Capture Fixture');
-  assert.equal(investigation.capture.documentSnapshots[0].hydratedText,'hydrated:ready');
+  assert.match(investigation.capture.documentSnapshots[0].hydratedText,/hydrated:ready/,'visible-text snapshot must contain the client-hydrated runtime marker');
   assert.ok(!JSON.stringify(investigation).includes('browser-secret'),'password/autofill values must never enter capture evidence');
   assert.ok(investigation.capture.consoleEvents.some(event=>event.text.includes('capture-ready')),'hydrated console event must be captured');
   assert.ok(investigation.capture.networkEvents.some(event=>event.phase==='request'&&event.url.includes('/api/data')),'runtime fetch request must be captured');

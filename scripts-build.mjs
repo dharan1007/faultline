@@ -1,12 +1,27 @@
 import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { dirname } from 'node:path';
 
-const productionFiles = [
+export const productionFiles = [
   'index.html',
+  'workbench.html',
+  'evidence.html',
+  'connect.html',
+  'src/ui.css',
+  'src/ui-shell.js',
+  'src/ui-start.js',
+  'src/ui-workbench.js',
+  'src/ui-evidence.js',
+  'src/ui-connect.js',
   'src/runtime.js',
   'src/ui.js',
   'src/reducer-engine.js',
   'src/sandbox-policy.js'
 ];
+
+if (process.argv.includes('--list')) {
+  process.stdout.write(`${productionFiles.join('\n')}\n`);
+  process.exit(0);
+}
 
 for (const file of productionFiles) {
   if (!existsSync(file)) {
@@ -16,10 +31,10 @@ for (const file of productionFiles) {
 }
 
 rmSync('public', { recursive: true, force: true });
-mkdirSync('public/src', { recursive: true });
-
 for (const file of productionFiles) {
-  copyFileSync(file, `public/${file}`);
+  const destination = `public/${file}`;
+  mkdirSync(dirname(destination), { recursive: true });
+  copyFileSync(file, destination);
 }
 
-console.log('static production tree verified and staged in public/');
+console.log(`static production tree verified and staged in public/ (${productionFiles.length} files)`);

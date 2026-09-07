@@ -15,7 +15,10 @@ async function reproduce(page){
   await page.locator('label.toggle').click();
   assert.equal(await page.getByLabel('Enable advanced delivery').isChecked(),true,'visible toggle must update the underlying checkbox');
   await page.getByRole('button',{name:'Save configuration'}).click();
-  await page.getByText('Configuration saved',{exact:true}).waitFor({state:'visible'});
+  await page.waitForTimeout(750);
+  const transition=await page.evaluate(()=>({state:window.__FAULTLINE_DEMO__?.bugState(),text:document.body.innerText,buttons:[...document.querySelectorAll('button')].map(button=>button.textContent?.trim()).filter(Boolean)}));
+  assert.equal(transition.state?.saveSucceeded,true,`async save transition did not commit: ${JSON.stringify({state:transition.state,buttons:transition.buttons})}`);
+  assert.match(transition.text,/Configuration saved/,`success toast missing after committed save: ${JSON.stringify(transition.state)}`);
   await page.waitForFunction(()=>window.__FAULTLINE_DEMO__?.bugState().blocked===true);
   const state=await page.evaluate(()=>window.__FAULTLINE_DEMO__.bugState());
   assert.equal(state.saveSucceeded,true,'mocked async save must actually resolve');

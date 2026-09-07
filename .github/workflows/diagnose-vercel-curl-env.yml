@@ -19,6 +19,8 @@ jobs:
       STAGED_URL: https://faultline-webmcp-jml58xihr-tejs-projects-70bb4568.vercel.app
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Require exact staged source lineage
         run: |

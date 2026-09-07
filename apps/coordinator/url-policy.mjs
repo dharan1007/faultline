@@ -18,7 +18,7 @@ for(const [network,prefix] of [
   ['203.0.113.0',24],['224.0.0.0',4],['240.0.0.0',4]
 ])blocked.addSubnet(network,prefix,'ipv4');
 for(const [network,prefix] of [
-  ['::',128],['::1',128],['::ffff:0:0',96],['64:ff9b::',96],['100::',64],['2001::',23],['2001:2::',48],
+  ['::',128],['::1',128],['64:ff9b::',96],['100::',64],['2001::',23],['2001:2::',48],
   ['2001:db8::',32],['2002::',16],['fc00::',7],['fe80::',10],['ff00::',8]
 ])blocked.addSubnet(network,prefix,'ipv6');
 
@@ -38,6 +38,10 @@ function isPublicAddress(address){
   const normalized=normalizeHostname(address);
   const family=isIP(normalized);
   if(!family)return false;
+  // Node BlockList internally represents IPv4 as IPv4-mapped IPv6. Adding
+  // ::ffff:0:0/96 to the shared list would therefore block every IPv4 host.
+  // Reject explicit mapped IPv6 literals separately instead.
+  if(family===6&&normalized.startsWith('::ffff:'))return false;
   return !blocked.check(normalized,family===6?'ipv6':'ipv4');
 }
 function normalizeAnswers(value){

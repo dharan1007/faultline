@@ -32,7 +32,6 @@ try{
   assert.equal(response?.status(),200,'complex demo must be shipped at /demo/');
   await page.waitForFunction(()=>window.__FAULTLINE_DEMO__?.version);
 
-  assert.equal(await page.locator('[data-demo="modern-ops"]'),await page.locator('[data-demo="modern-ops"]'),'demo locator must resolve');
   assert.equal(await page.locator('[data-demo="modern-ops"]').count(),1,'demo must identify its real application root');
   for(const selector of ['[data-surface="sidebar"]','[data-surface="command-search"]','[data-surface="health-cards"]','svg[data-surface="usage-chart"]','[data-surface="deployments-table"]','[data-surface="activity-feed"]']){
     assert.equal(await page.locator(selector).count(),1,`${selector} must exist in the modern demo`);

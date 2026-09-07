@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>FAULTLINE — Connect</title>
+<meta name="description" content="Connect developers and agents to FAULTLINE through the live Browser API and WebMCP manifest.">
+<meta name="theme-color" content="#050507">
+<link rel="stylesheet" href="./src/ui.css">
+</head>
+<body>
+<div data-product-header></div>
+<main id="main" class="page page-narrow">
+  <section class="page-hero" aria-labelledby="connect-title">
+    <div>
+      <p class="eyebrow">Developer + agent integration</p>
+      <h1 id="connect-title">Connect to the same deterministic engine the UI uses.</h1>
+      <p class="lede">FAULTLINE exposes one canonical local state through `window.faultline` and a live WebMCP manifest. The tool catalog below is generated from the runtime, not maintained as stale documentation.</p>
+    </div>
+    <div class="metric-grid" style="grid-template-columns:1fr 1fr">
+      <div class="metric-card"><span>WebMCP</span><strong data-connect-webmcp>Checking…</strong></div>
+      <div class="metric-card"><span>Registered tools</span><strong data-connect-tool-count>—</strong></div>
+      <div class="metric-card"><span>Revision</span><strong data-connect-revision>—</strong></div>
+      <div class="metric-card"><span>Persistence</span><strong>Local-first</strong></div>
+    </div>
+  </section>
+
+  <section class="surface" aria-labelledby="agent-flow-title">
+    <div class="surface-header"><div><p class="eyebrow">WebMCP</p><h2 id="agent-flow-title" class="surface-title">Recommended agent flow</h2><p class="surface-copy">Inspect revision first, mutate through guarded tools, and keep long-running work cancellable.</p></div></div>
+    <div class="surface-body">
+      <pre id="agent-flow" class="code-block">faultline_inspect
+  ↓
+faultline_load_case / faultline_apply_source
+  ↓
+faultline_define_oracle
+  ↓
+faultline_run
+  ↓
+faultline_units
+  ↓
+faultline_probe / faultline_pin
+  ↓
+faultline_reduce / faultline_autopilot
+  ↓
+faultline_history / faultline_export</pre>
+      <div class="copy-row"><button class="btn" id="copy-agent-flow" type="button">Copy flow</button></div>
+    </div>
+  </section>
+
+  <section class="surface" aria-labelledby="browser-api-title" style="margin-top:12px">
+    <div class="surface-header"><div><p class="eyebrow">Browser API</p><h2 id="browser-api-title" class="surface-title">Use `window.faultline` directly</h2><p class="surface-copy">The browser API and WebMCP tools operate on the same revision-guarded canonical state.</p></div></div>
+    <div class="surface-body">
+      <pre id="browser-example" class="code-block">const state = window.faultline.inspect();
+
+const frontier = window.faultline.units({ targetAxis: 'html' });
+
+await window.faultline.probe({
+  expectedRevision: state.revision,
+  targetAxis: 'html',
+  unitId: frontier.units[0].id
+});</pre>
+      <div class="copy-row"><button class="btn" id="copy-browser-example" type="button">Copy Browser API example</button></div>
+    </div>
+  </section>
+
+  <section class="surface" aria-labelledby="tools-title" style="margin-top:12px">
+    <div class="surface-header"><div><p class="eyebrow">Live manifest</p><h2 id="tools-title" class="surface-title">Available WebMCP tools</h2><p class="surface-copy">Generated at runtime from `window.faultline.manifest()`.</p></div><span class="status-pill" data-tool-catalog-count>0 tools</span></div>
+    <div class="surface-body"><div id="tool-catalog" class="tool-grid"></div></div>
+  </section>
+
+  <section class="surface" aria-labelledby="case-handoff-title" style="margin-top:12px">
+    <div class="surface-header"><div><p class="eyebrow">Case handoff</p><h2 id="case-handoff-title" class="surface-title">Portable case contract</h2><p class="surface-copy">A complete case contains HTML, CSS, JavaScript, and exactly one deterministic oracle.</p></div></div>
+    <div class="surface-body">
+      <pre id="case-schema-example" class="code-block">{
+  "html": "<main>...</main>",
+  "css": "main { ... }",
+  "js": "...",
+  "oracle": {
+    "kind": "dom_exists",
+    "selector": "main",
+    "equals": true,
+    "action": { "kind": "none" }
+  }
+}</pre>
+      <div class="copy-row"><button class="btn" id="copy-case-schema" type="button">Copy case example</button></div>
+      <div class="error-box" data-ui-error hidden></div>
+    </div>
+  </section>
+</main>
+<script type="module" src="./src/ui-connect.js"></script>
+</body>
+</html>

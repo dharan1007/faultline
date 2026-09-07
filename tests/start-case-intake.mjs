@@ -37,6 +37,7 @@ try{
     assert.equal(await page.locator(`#${id}`).count(),1,`${id} must exist on Start`);
   }
 
+  await page.locator('details:has(#case-json) > summary').click();
   const beforeInvalid=await page.evaluate(()=>window.faultline.inspect().revision);
   await page.locator('#case-json').fill('{"html":"only-one-field"}');
   await page.locator('#import-json').click();

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>FAULTLINE — Workbench</title>
+<meta name="description" content="Deterministically reproduce, probe, pin, and reduce a browser failure while preserving causal evidence.">
+<meta name="theme-color" content="#050507">
+<link rel="stylesheet" href="./src/ui.css">
+</head>
+<body>
+<div data-product-header></div>
+<main id="main" class="page">
+  <section class="command-bar" aria-label="Workbench commands">
+    <div class="command-left">
+      <span class="command-title">Active debugging session</span>
+      <span class="status-pill" data-workbench-result data-state="READY">READY</span>
+      <span class="status-pill">Revision <span data-workbench-revision>r1</span></span>
+    </div>
+    <div class="command-right">
+      <button id="run-case" class="btn" type="button">Run oracle</button>
+      <button id="autopilot-case" class="btn primary" type="button">Autopilot</button>
+      <a class="btn" href="./evidence.html">Evidence</a>
+      <button id="export-reproducer" class="btn" type="button">Export</button>
+    </div>
+  </section>
+
+  <div class="workspace">
+    <aside class="workspace-rail" aria-label="Session and source controls">
+      <section class="surface" aria-labelledby="session-rail-title">
+        <div class="surface-header"><div><p class="eyebrow">Session</p><h1 id="session-rail-title" class="surface-title">Canonical case</h1><p class="surface-copy">One local revision history backs humans, browser API, and WebMCP agents.</p></div></div>
+        <div class="surface-body">
+          <div class="axis-tabs" role="tablist" aria-label="Source axis">
+            <button class="axis-tab" data-axis="html" role="tab" aria-selected="true" type="button">HTML</button>
+            <button class="axis-tab" data-axis="css" role="tab" aria-selected="false" type="button">CSS</button>
+            <button class="axis-tab" data-axis="js" role="tab" aria-selected="false" type="button">JS</button>
+          </div>
+          <div class="notice-box" style="margin-top:9px"><strong data-source-summary>Source loading…</strong><p class="small" style="margin:5px 0 0">Edits are optimistic-revision guarded.</p></div>
+          <div class="btn-row" style="margin-top:9px"><a class="btn" href="./index.html">Replace case</a><button id="reset-case" class="btn ghost" type="button">Reset fixture</button></div>
+        </div>
+      </section>
+
+      <section class="surface" aria-labelledby="revisions-title">
+        <div class="surface-header"><div><p class="eyebrow">Recovery</p><h2 id="revisions-title" class="surface-title">Retained revisions</h2><p class="surface-copy">Restore a retained checkpoint as a new revision.</p></div></div>
+        <div class="surface-body"><div id="revision-list" class="unit-list" role="list" aria-label="Recoverable revisions"></div></div>
+      </section>
+    </aside>
+
+    <section class="workspace-center" aria-label="Source and reduction workspace">
+      <section class="surface" aria-labelledby="editor-title">
+        <div class="surface-header">
+          <div><p class="eyebrow">Source editor</p><h2 id="editor-title" class="surface-title">Edit the active axis</h2><p class="surface-copy">The current canonical source is the only editable source of truth.</p></div>
+          <span class="status-pill" data-active-axis>HTML</span>
+        </div>
+        <div class="surface-body">
+          <label class="sr-only" for="source-editor">Canonical source editor</label>
+          <textarea id="source-editor" class="editor" spellcheck="false"></textarea>
+          <div class="editor-meta"><span data-editor-count>0 chars</span><span>Revision-guarded write</span></div>
+          <div class="btn-row" style="margin-top:10px"><button id="apply-source" class="btn primary" type="button">Apply source</button><button id="copy-source" class="btn" type="button">Copy source</button></div>
+          <div class="error-box" data-ui-error hidden></div>
+        </div>
+      </section>
+
+      <section class="surface" aria-labelledby="frontier-title">
+        <div class="surface-header">
+          <div><p class="eyebrow">Reduction frontier</p><h2 id="frontier-title" class="surface-title">Semantic units</h2><p class="surface-copy">Probe one candidate removal, protect invariants, or reduce the current axis deterministically.</p></div>
+          <span class="status-pill" data-unit-count>0 units</span>
+        </div>
+        <div class="surface-body">
+          <div class="btn-row" style="margin-bottom:9px"><button id="reduce-axis" class="btn primary" type="button">Reduce HTML</button><button id="refresh-units" class="btn" type="button">Refresh units</button></div>
+          <div id="unit-list" class="unit-list" role="listbox" aria-label="Semantic reduction units"></div>
+          <div id="unit-actions" class="context-actions" hidden>
+            <button id="probe-unit" class="btn" type="button">Probe removal</button>
+            <button id="pin-unit" class="btn" type="button">Pin</button>
+            <button id="copy-unit-id" class="btn" type="button">Copy unit ID</button>
+            <button id="inspect-unit" class="btn ghost" type="button">Inspect source</button>
+          </div>
+          <div id="selected-unit-detail" class="notice-box" hidden style="margin-top:9px"></div>
+        </div>
+      </section>
+    </section>
+
+    <aside class="workspace-inspector" aria-label="Preview and oracle inspector">
+      <section class="surface" aria-labelledby="preview-title">
+        <div class="surface-header"><div><p class="eyebrow">Isolated preview</p><h2 id="preview-title" class="surface-title">Canonical rendering</h2><p class="surface-copy">Visible preview does not execute candidate JavaScript.</p></div></div>
+        <div class="surface-body">
+          <div class="preview-shell">
+            <div class="preview-toolbar" aria-hidden="true"><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-label">network disabled</span></div>
+            <iframe id="preview" sandbox="allow-scripts" csp="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; worker-src 'none'; child-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" title="FAULTLINE isolated canonical preview"></iframe>
+          </div>
+        </div>
+      </section>
+
+      <section class="surface" aria-labelledby="oracle-title">
+        <div class="surface-header"><div><p class="eyebrow">Failure oracle</p><h2 id="oracle-title" class="surface-title">Define what broken means</h2><p class="surface-copy">Choose intent first; only required fields are exposed.</p></div></div>
+        <div class="surface-body">
+          <label for="oracle-intent">Failure type</label>
+          <select id="oracle-intent">
+            <option value="exists">Element exists / does not exist</option>
+            <option value="property">Property has failure value</option>
+            <option value="style">Computed style has failure value</option>
+            <option value="runtime">JavaScript throws / rejects</option>
+          </select>
+          <div id="oracle-selector-field"><label for="oracle-selector">Target selector</label><input id="oracle-selector" autocomplete="off"></div>
+          <div id="oracle-property-field"><label for="oracle-property">Property</label><input id="oracle-property" autocomplete="off"></div>
+          <div id="oracle-value-field"><label for="oracle-value">Failure value</label><input id="oracle-value" autocomplete="off"></div>
+          <div class="field-grid">
+            <div><label for="oracle-action">Before measurement</label><select id="oracle-action"><option value="none">No action</option><option value="click">Click element</option></select></div>
+            <div id="oracle-action-selector-field"><label for="oracle-action-selector">Action selector</label><input id="oracle-action-selector" autocomplete="off"></div>
+          </div>
+          <div class="btn-row" style="margin-top:10px"><button id="lock-oracle" class="btn" type="button">Lock oracle</button><button id="test-oracle" class="btn primary" type="button">Test oracle</button></div>
+          <div id="oracle-result" class="result-banner" data-state="READY" style="margin-top:10px" aria-live="polite"><strong>Not tested</strong><span>Run the deterministic oracle before reduction.</span></div>
+        </div>
+      </section>
+    </aside>
+  </div>
+</main>
+<script type="module" src="./src/ui-workbench.js"></script>
+</body>
+</html>

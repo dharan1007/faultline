@@ -127,7 +127,7 @@ jobs:
               remote_path="/$file"
             fi
             output="/tmp/faultline-staged-${file//\//-}"
-            curl -fsS --retry 8 --retry-delay 2 "$DEPLOYMENT_URL$remote_path" -o "$output"
+            curl -fsSL --retry 12 --retry-delay 2 --retry-all-errors "$DEPLOYMENT_URL$remote_path" -o "$output"
             cmp "$file" "$output"
           done
 
@@ -149,7 +149,7 @@ jobs:
                 remote_path="/$file"
               fi
               output="/tmp/faultline-live-${file//\//-}"
-              if ! curl -fsS "$VERCEL_PRODUCTION_URL$remote_path" -o "$output" || ! cmp -s "$file" "$output"; then
+              if ! curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors "$VERCEL_PRODUCTION_URL$remote_path" -o "$output" || ! cmp -s "$file" "$output"; then
                 TREE_MATCHED=0
                 break
               fi

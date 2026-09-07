@@ -8,6 +8,12 @@ const root=path.join(process.cwd(),'public');
 const server=spawn(process.execPath,['-e',`const http=require('http'),fs=require('fs'),path=require('path');const root=${JSON.stringify(root)};http.createServer((req,res)=>{let p=req.url.split('?')[0];if(p==='/'||p==='/demo'||p==='/demo/')p=p.startsWith('/demo')?'/demo/index.html':'/index.html';const f=path.resolve(root,'.'+p);if(!f.startsWith(root)){res.statusCode=403;return res.end('forbidden')}fs.readFile(f,(e,b)=>{if(e){res.statusCode=404;return res.end('not found')}const ext=path.extname(f);if(ext==='.js')res.setHeader('content-type','application/javascript');if(ext==='.css')res.setHeader('content-type','text/css');if(ext==='.html')res.setHeader('content-type','text/html; charset=utf-8');if(ext==='.svg')res.setHeader('content-type','image/svg+xml');res.end(b)})}).listen(${port},'127.0.0.1')`],{stdio:'inherit'});
 await new Promise(r=>setTimeout(r,700));
 
+async function statusIncludes(page,text){
+  const status=page.getByRole('status');
+  await status.waitFor({state:'visible'});
+  assert.match((await status.textContent())||'',new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
+}
+
 async function reproduce(page){
   await page.getByRole('button',{name:'Open edge-api deployment'}).click();
   await page.getByRole('button',{name:'Configure deployment'}).click();
@@ -16,9 +22,9 @@ async function reproduce(page){
   assert.equal(await page.getByLabel('Enable advanced delivery').isChecked(),true,'visible toggle must update the underlying checkbox');
   await page.getByRole('button',{name:'Save configuration'}).click();
   await page.waitForTimeout(750);
-  const transition=await page.evaluate(()=>({state:window.__FAULTLINE_DEMO__?.bugState(),text:document.body.innerText,buttons:[...document.querySelectorAll('button')].map(button=>button.textContent?.trim()).filter(Boolean)}));
+  const transition=await page.evaluate(()=>({state:window.__FAULTLINE_DEMO__?.bugState(),buttons:[...document.querySelectorAll('button')].map(button=>button.textContent?.trim()).filter(Boolean)}));
   assert.equal(transition.state?.saveSucceeded,true,`async save transition did not commit: ${JSON.stringify({state:transition.state,buttons:transition.buttons})}`);
-  assert.match(transition.text,/Configuration saved/,`success toast missing after committed save: ${JSON.stringify(transition.state)}`);
+  await statusIncludes(page,'Configuration saved');
   await page.waitForFunction(()=>window.__FAULTLINE_DEMO__?.bugState().blocked===true);
   const state=await page.evaluate(()=>window.__FAULTLINE_DEMO__.bugState());
   assert.equal(state.saveSucceeded,true,'mocked async save must actually resolve');
@@ -52,7 +58,7 @@ try{
   await page.waitForFunction(()=>window.__FAULTLINE_DEMO__.bugState().blocked===false);
   const dashboardButton=page.getByRole('button',{name:'Create deployment'});
   await dashboardButton.click();
-  await page.getByText('New deployment draft opened',{exact:true}).waitFor({state:'visible'});
+  await statusIncludes(page,'New deployment draft opened');
 
   await page.getByRole('button',{name:'Reset scenario'}).click({force:true});
   const second=await reproduce(page);

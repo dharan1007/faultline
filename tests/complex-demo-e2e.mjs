@@ -12,7 +12,8 @@ async function reproduce(page){
   await page.getByRole('button',{name:'Open edge-api deployment'}).click();
   await page.getByRole('button',{name:'Configure deployment'}).click();
   await page.getByLabel('Environment').selectOption('staging');
-  await page.getByLabel('Enable advanced delivery').check();
+  await page.locator('label.toggle').click();
+  assert.equal(await page.getByLabel('Enable advanced delivery').isChecked(),true,'visible toggle must update the underlying checkbox');
   await page.getByRole('button',{name:'Save configuration'}).click();
   await page.getByText('Configuration saved',{exact:true}).waitFor({state:'visible'});
   await page.waitForFunction(()=>window.__FAULTLINE_DEMO__?.bugState().blocked===true);

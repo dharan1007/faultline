@@ -1,7 +1,16 @@
 import { semanticUnits, removeUnits, ddminReduce, createRevisionStore } from './reducer-engine.js';
 import { navigationRisk } from './sandbox-policy.js';
 
-const $ = id => document.getElementById(id);
+const detachedUi = new Map();
+const $ = id => {
+  const mounted=document.getElementById(id);
+  if(mounted)return mounted;
+  if(detachedUi.has(id))return detachedUi.get(id);
+  const sink=document.createElement('div');
+  sink.dataset.faultlineDetachedUi=id;
+  detachedUi.set(id,sink);
+  return sink;
+};
 const clone = v => JSON.parse(JSON.stringify(v));
 const STORAGE_KEY = 'faultline-prod-v3';
 const LEGACY_STORAGE_KEY = 'faultline-prod-v2';

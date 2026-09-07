@@ -12,8 +12,9 @@ jobs:
         with:
           node-version: 24
       - run: npm install --no-audit --no-fund
-      - run: npx tsx --test packages/protocol/test/*.test.ts packages/session/test/*.test.ts
       - run: npx tsc -b packages/protocol
+      - run: npx tsx --test packages/protocol/test/*.test.ts packages/session/test/*.test.ts
+      - run: npx tsc -b packages/session
       - run: npm test
       - run: npm run check
       - run: npm run build

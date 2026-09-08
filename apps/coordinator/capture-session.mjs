@@ -124,6 +124,7 @@ export async function capturePublicTarget({targetUrl,captureId,resolver,connecto
   const deadlineTimer=setTimeout(()=>deadlineController.abort(new CaptureLimitError('duration',limits.maxDurationMs+1,limits.maxDurationMs)),limits.maxDurationMs);
   const combinedSignal=signal?AbortSignal.any([signal,deadlineController.signal]):deadlineController.signal;
   let browser;
+  let browserLaunchPromise;
   let context;
   let page;
   const pending=new Set();
@@ -144,10 +145,11 @@ export async function capturePublicTarget({targetUrl,captureId,resolver,connecto
   const check=()=>{if(combinedSignal.aborted)throw abortReason(combinedSignal);if(proxy.policyError)throw proxy.policyError;if(limitError)throw limitError;};
 
   try{
-    browser=await raceSignal(chromium.launch({
-      headless:true,proxy:{server:proxy.url},
+    browserLaunchPromise=chromium.launch({
+      headless:true,proxy:{server:proxy.url},timeout:limits.navigationTimeoutMs,
       args:['--disable-background-networking','--disable-component-update','--disable-default-apps','--disable-extensions','--disable-sync','--disable-quic']
-    }),combinedSignal);
+    });
+    browser=await raceSignal(browserLaunchPromise,combinedSignal);
     context=await browser.newContext({acceptDownloads:false,permissions:[],serviceWorkers:'block'});
     page=await context.newPage();
     page.on('download',download=>{record('runtimeEvents',{at:now(),type:'download_blocked',suggestedFilename:redactText(download.suggestedFilename())});download.cancel().catch(()=>{});});
@@ -195,6 +197,10 @@ export async function capturePublicTarget({targetUrl,captureId,resolver,connecto
     if(page&&!page.isClosed())await page.close().catch(()=>{});
     if(context)await context.close().catch(()=>{});
     if(browser)await browser.close().catch(()=>{});
+    else if(browserLaunchPromise){
+      const lateBrowser=await browserLaunchPromise.catch(()=>null);
+      if(lateBrowser)await lateBrowser.close().catch(()=>{});
+    }
     await proxy.close().catch(()=>{});
   }
 }

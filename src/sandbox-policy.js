@@ -170,8 +170,7 @@ function containsExecutableMemberCall(source,roots,target){
         if(c==='{'){braces++;i++;continue;}
         if(c==='}'){
           if(braces===0){i++;return false;}
-          braces--;i++;continue;
-        }
+          braces--;i++;continue;}
       }
       i++;
     }
@@ -222,8 +221,24 @@ function isBlockedImageSource(source){
 
 function srcsetContainsBlockedSource(source){
   const srcset=String(source??'').trim();
-  if(!srcset)return false;
-  return srcset.split(',').some(candidate=>isBlockedImageSource(candidate.trim().split(/\s+/,1)[0]));
+  let i=0;
+  while(i<srcset.length){
+    while(i<srcset.length&&(srcset[i]===','||/\s/.test(srcset[i])))i++;
+    if(i>=srcset.length)break;
+    const start=i;
+    while(i<srcset.length&&!/\s/.test(srcset[i]))i++;
+    let url=srcset.slice(start,i);
+    let endedAtSeparator=false;
+    while(url.endsWith(',')){
+      url=url.slice(0,-1);
+      endedAtSeparator=true;
+    }
+    if(isBlockedImageSource(url))return true;
+    if(endedAtSeparator)continue;
+    while(i<srcset.length&&srcset[i]!==',')i++;
+    if(srcset[i]===',')i++;
+  }
+  return false;
 }
 
 function containsExternalImage(source){

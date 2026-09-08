@@ -1,4 +1,5 @@
 import './runtime.js';
+import { navigationRisk } from './sandbox-policy.js';
 
 const actionIds=['apply','run','probe','pin','reduce','autopilot','lock','reset'];
 const axisTabs=[...document.querySelectorAll('[role="tab"][data-axis]')];
@@ -209,9 +210,27 @@ function installRevisionRecovery(){
   return refresh;
 }
 
+function installPreviewNavigationGuard(){
+  const button=document.getElementById('preview-run');
+  const execute=button?.onclick;
+  if(!button||typeof execute!=='function')return;
+  button.onclick=event=>{
+    const risk=navigationRisk(window.faultline.inspect().case);
+    if(risk){
+      const health=document.getElementById('health');
+      const summary=document.getElementById('summary');
+      if(health){health.textContent='UNRESOLVED';health.dataset.state='UNRESOLVED';}
+      if(summary)summary.textContent=`UNSAFE_NAVIGATION · ${risk.axis} · ${risk.capability}`;
+      return undefined;
+    }
+    return execute.call(button,event);
+  };
+}
+
 installCaseImport();
 installCaseJsonExport();
 installRevisionRecovery();
+installPreviewNavigationGuard();
 
 function syncAxisTabStops(activeTab=axisTabs.find(tab=>tab.getAttribute('aria-selected')==='true')){
   for(const tab of axisTabs)tab.tabIndex=tab===activeTab?0:-1;

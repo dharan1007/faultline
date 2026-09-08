@@ -8,7 +8,7 @@ const manifest='faultline-release-files.txt';
 
 test('production deployment parity is driven by the complete built release manifest',()=>{
   assert.match(pkg.scripts.build,/node scripts-release-manifest\.mjs/,'build must generate a release manifest after all production assets are built');
-  assert.ok((workflow.split(`public/${manifest}`).length-1)>=2,'staged and live parity must both read the built release manifest');
+  assert.match(workflow,new RegExp(`RELEASE_MANIFEST:\\s*public/${manifest.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`),'workflow must bind the built release manifest once');
   assert.match(workflow,/Smoke-test staged deployment against verified source/);
   assert.match(workflow,/Verify public production alias serves exact tree/);
 
@@ -17,6 +17,7 @@ test('production deployment parity is driven by the complete built release manif
   assert.ok(stagedStep&&liveStep,'both parity steps must exist');
   for(const step of [stagedStep,liveStep]){
     assert.match(step,/while IFS= read -r file/,'parity must iterate every manifest entry rather than a hard-coded shortlist');
+    assert.match(step,/done < "\$RELEASE_MANIFEST"/,'each parity step must consume the complete release manifest');
     assert.match(step,/public\/\$file/,'parity must compare the exact built public artifact');
   }
 });

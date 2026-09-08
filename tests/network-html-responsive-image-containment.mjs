@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 const appPort=4229;
 const sinkPort=4230;
 let imageHits=0;
-const pixel=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z1gAAAABJRU5ErkJggg==','base64');
+const pixelBase64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z1gAAAABJRU5ErkJggg==';
+const pixel=Buffer.from(pixelBase64,'base64');
 const sink=http.createServer((req,res)=>{
   if(req.url?.startsWith('/responsive.png'))imageHits++;
   res.setHeader('content-type','image/png');
@@ -48,7 +49,21 @@ try {
   const summary=await page.locator('#summary').textContent();
   assert.match(summary||'',/UNSAFE_NETWORK · html · external-image/,'blocked responsive preview dependency must be visible to the user');
 
-  console.log('Responsive image-network containment PASS: blocked srcset dependencies become deterministic unsafe-network evidence in runner and preview.');
+  const safeState=await page.evaluate(({pixelBase64})=>{
+    const current=window.faultline.inspect();
+    const dataUrl=`data:image/png;base64,${pixelBase64}`;
+    return window.faultline.loadCase({expectedRevision:current.revision,case:{
+      html:`<img id="safe-asset" src="${dataUrl}" srcset="${dataUrl} 1x" alt="embedded responsive dependency">`,
+      css:'',
+      js:'',
+      oracle:{kind:'dom_property',selector:'#safe-asset',property:'naturalWidth',equals:1,action:{kind:'none'},delayMs:120}
+    }});
+  },{pixelBase64});
+  const safeResult=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:safeState.revision});
+  assert.equal(safeResult.status,'FAIL','CSP-allowed data: srcset candidates must execute normally instead of being rejected as unsafe network evidence');
+  assert.notEqual(safeResult.evidence?.reason,'UNSAFE_NETWORK','safe embedded responsive images must not be classified as network dependencies');
+
+  console.log('Responsive image-network containment PASS: blocked srcset dependencies are explicit while CSP-allowed data: srcset remains executable.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

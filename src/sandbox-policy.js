@@ -220,21 +220,29 @@ function isBlockedImageSource(source){
   return Boolean(src)&&!/^(?:data|blob):/i.test(src);
 }
 
+function srcsetContainsBlockedSource(source){
+  const srcset=String(source??'').trim();
+  if(!srcset)return false;
+  return srcset.split(',').some(candidate=>isBlockedImageSource(candidate.trim().split(/\s+/,1)[0]));
+}
+
 function containsExternalImage(source){
   const html=String(source??'');
   if(typeof DOMParser==='function'){
     const doc=new DOMParser().parseFromString(html,'text/html');
-    for(const image of doc.querySelectorAll('img[src]')){
-      if(isBlockedImageSource(image.getAttribute('src')))return true;
+    for(const image of doc.querySelectorAll('img[src],img[srcset],source[srcset]')){
+      if(isBlockedImageSource(image.getAttribute('src'))||srcsetContainsBlockedSource(image.getAttribute('srcset')))return true;
     }
     return false;
   }
   const withoutComments=html.replace(/<!--[\s\S]*?-->/g,'');
-  for(const match of withoutComments.matchAll(/<img\b[^>]*>/gi)){
+  for(const match of withoutComments.matchAll(/<(?:img|source)\b[^>]*>/gi)){
     const tag=match[0];
     const src=tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const srcset=tag.match(/\bsrcset\s*=\s*(?:"([^"]*)"|'([^']*)'|([^>]+))/i);
     const srcValue=String(src?.[1]??src?.[2]??src?.[3]??'').trim();
-    if(isBlockedImageSource(srcValue))return true;
+    const srcsetValue=String(srcset?.[1]??srcset?.[2]??srcset?.[3]??'').trim();
+    if(isBlockedImageSource(srcValue)||srcsetContainsBlockedSource(srcsetValue))return true;
   }
   return false;
 }

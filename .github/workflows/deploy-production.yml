@@ -21,6 +21,7 @@ jobs:
       VERCEL_PROJECT_ID: prj_XtQdMYG2kOufYTrZ1SDj61VEExDM
       VERCEL_PRODUCTION_BRANCH: production
       VERCEL_PRODUCTION_URL: https://faultline-webmcp.vercel.app
+      RELEASE_MANIFEST: public/faultline-release-files.txt
     steps:
       - name: Check out exact production candidate
         uses: actions/checkout@v4
@@ -49,6 +50,15 @@ jobs:
 
       - name: Verify production tree
         run: npm run build
+
+      - name: Verify complete release manifest
+        run: |
+          set -euo pipefail
+          test -s "$RELEASE_MANIFEST"
+          while IFS= read -r file; do
+            test -n "$file"
+            test -f "public/$file"
+          done < "$RELEASE_MANIFEST"
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
@@ -122,7 +132,9 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
-          for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js; do
+          test -s "$RELEASE_MANIFEST"
+          while IFS= read -r file; do
+            test -n "$file"
             if [ "$file" = "index.html" ]; then
               remote_path="/"
             else
@@ -130,8 +142,8 @@ jobs:
             fi
             output="/tmp/faultline-staged-${file//\//-}"
             vercel curl "$remote_path" --deployment "$DEPLOYMENT_URL" > "$output"
-            cmp "$file" "$output"
-          done
+            cmp "public/$file" "$output"
+          done < "$RELEASE_MANIFEST"
 
       - name: Promote staged deployment to production
         env:
@@ -141,21 +153,23 @@ jobs:
       - name: Verify public production alias serves exact tree
         run: |
           set -euo pipefail
+          test -s "$RELEASE_MANIFEST"
           MATCHED=0
           for attempt in $(seq 1 18); do
             TREE_MATCHED=1
-            for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js; do
+            while IFS= read -r file; do
+              test -n "$file"
               if [ "$file" = "index.html" ]; then
                 remote_path="/"
               else
                 remote_path="/$file"
               fi
               output="/tmp/faultline-live-${file//\//-}"
-              if ! curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors "$VERCEL_PRODUCTION_URL$remote_path" -o "$output" || ! cmp -s "$file" "$output"; then
+              if ! curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors "$VERCEL_PRODUCTION_URL$remote_path" -o "$output" || ! cmp -s "public/$file" "$output"; then
                 TREE_MATCHED=0
                 break
               fi
-            done
+            done < "$RELEASE_MANIFEST"
             if [ "$TREE_MATCHED" = 1 ]; then
               MATCHED=1
               break
@@ -163,7 +177,7 @@ jobs:
             sleep 5
           done
           test "$MATCHED" = 1 || {
-            echo "::error::Production alias did not converge to the complete verified source tree"
+            echo "::error::Production alias did not converge to the complete verified built tree"
             exit 1
           }
 

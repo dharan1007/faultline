@@ -203,29 +203,57 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  const runtimeErrors=[];
  const navigationAttempts=[];
  const nativeFormSubmit=HTMLFormElement.prototype.submit;
+ const nativeFormRequestSubmit=HTMLFormElement.prototype.requestSubmit;
  const captureRuntimeError=value=>runtimeErrors.push(String(value));
  const latestNavigationAttempt=()=>navigationAttempts.at(-1)||null;
  const reportNavigationAttempt=risk=>{
+  const previous=latestNavigationAttempt();
+  if(previous?.axis===risk.axis&&previous?.capability===risk.capability)return;
   navigationAttempts.push(risk);
   ${previewOnly?`parent.postMessage({type:'faultline:preview-navigation-blocked',bootstrapId:${JSON.stringify(bootstrapId)},risk},'*');`:''}
  };
- const captureNavigationAttempt=event=>{
-  const target=event.target?.closest?.('a[href],area[href]');
-  if(!target)return;
-  const href=String(target.getAttribute('href')??'').trim();
-  if(!href||href.startsWith('#'))return;
-  event.preventDefault();
-  reportNavigationAttempt({axis:'html',capability:'anchor-navigation'});
+ const formCanNavigate=(form,submitter)=>{
+  if(!form||String(form.getAttribute?.('method')||form.method||'').toLowerCase()==='dialog')return false;
+  return Boolean(form.noValidate||submitter?.formNoValidate||form.matches?.(':valid'));
  };
- const isDialogForm=form=>String(form?.getAttribute?.('method')||form?.method||'').toLowerCase()==='dialog';
- const captureFormNavigationAttempt=event=>{
-  const form=event.target;
-  if(!(form instanceof HTMLFormElement)||isDialogForm(form))return;
+ const isSubmitControl=element=>{
+  if(!element)return false;
+  const tag=element.tagName;
+  const type=String(element.getAttribute?.('type')||(tag==='BUTTON'?'submit':'')).toLowerCase();
+  return tag==='BUTTON'?type==='submit':tag==='INPUT'&&(type==='submit'||type==='image');
+ };
+ const captureNavigationAttempt=event=>{
+  const anchor=event.target?.closest?.('a[href],area[href]');
+  if(anchor){
+   const href=String(anchor.getAttribute('href')??'').trim();
+   if(href&&!href.startsWith('#')){
+    event.preventDefault();
+    reportNavigationAttempt({axis:'html',capability:'anchor-navigation'});
+    return;
+   }
+  }
+  const submitter=event.target?.closest?.('button,input');
+  const form=submitter?.form;
+  if(!isSubmitControl(submitter)||!formCanNavigate(form,submitter))return;
   event.preventDefault();
   reportNavigationAttempt({axis:'html',capability:'form-navigation'});
  };
+ const captureFormNavigationAttempt=event=>{
+  const form=event.target;
+  if(!(form instanceof HTMLFormElement)||!formCanNavigate(form,event.submitter))return;
+  event.preventDefault();
+  reportNavigationAttempt({axis:'html',capability:'form-navigation'});
+ };
+ HTMLFormElement.prototype.requestSubmit=function(submitter){
+  if(String(this.getAttribute?.('method')||this.method||'').toLowerCase()==='dialog')return nativeFormRequestSubmit.call(this,submitter);
+  const before=navigationAttempts.length;
+  const canNavigate=formCanNavigate(this,submitter);
+  const result=nativeFormRequestSubmit.call(this,submitter);
+  if(canNavigate&&navigationAttempts.length===before)reportNavigationAttempt({axis:'html',capability:'form-navigation'});
+  return result;
+ };
  HTMLFormElement.prototype.submit=function(){
-  if(isDialogForm(this))return nativeFormSubmit.call(this);
+  if(String(this.getAttribute?.('method')||this.method||'').toLowerCase()==='dialog')return nativeFormSubmit.call(this);
   reportNavigationAttempt({axis:'html',capability:'form-navigation'});
  };
  const blockedNavigation=sendResult=>{const risk=latestNavigationAttempt();if(!risk)return false;sendResult({status:'UNRESOLVED',evidence:{reason:'UNSAFE_NAVIGATION',...risk}});return true;};

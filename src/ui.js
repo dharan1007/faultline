@@ -219,8 +219,9 @@ function installPreviewNavigationGuard(){
     if(risk){
       const health=document.getElementById('health');
       const summary=document.getElementById('summary');
+      const reason=risk.reason||'UNSAFE_NAVIGATION';
       if(health){health.textContent='UNRESOLVED';health.dataset.state='UNRESOLVED';}
-      if(summary)summary.textContent=`UNSAFE_NAVIGATION · ${risk.axis} · ${risk.capability}`;
+      if(summary)summary.textContent=`${reason} · ${risk.axis} · ${risk.capability}`;
       return undefined;
     }
     return execute.call(button,event);

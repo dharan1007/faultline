@@ -10,6 +10,7 @@ const watchdog=setTimeout(()=>{
   console.error(`Coordinator capture watchdog: stage=${diagnosticStage} activeHandles=${handles.join(',')}`);
   process.exit(124);
 },30000);
+watchdog.unref();
 
 function listen(server,host='127.0.0.1'){
   return new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,host,()=>resolve(server.address()));});
@@ -157,5 +158,4 @@ try{
   diagnosticStage='target-close';
   await close(target);
   diagnosticStage='closed';
-  clearTimeout(watchdog);
 }

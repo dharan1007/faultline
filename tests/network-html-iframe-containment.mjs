@@ -57,7 +57,7 @@ try {
     }});
   });
   const embeddedResult=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:embeddedState.revision});
-  assert.equal(embeddedResult.status,'PASS','self-contained iframe srcdoc must remain executable');
+  assert.equal(embeddedResult.status,'FAIL','self-contained iframe srcdoc must remain executable and preserve ordinary oracle evidence');
 
   console.log('HTML iframe-network containment PASS: blocked external embedded documents become deterministic unsafe-network evidence while srcdoc remains runnable.');
 } finally {

@@ -215,6 +215,30 @@ function containsExternalStylesheet(source){
   return false;
 }
 
+function isBlockedImageSource(source){
+  const src=String(source??'').trim();
+  return Boolean(src)&&!/^(?:data|blob):/i.test(src);
+}
+
+function containsExternalImage(source){
+  const html=String(source??'');
+  if(typeof DOMParser==='function'){
+    const doc=new DOMParser().parseFromString(html,'text/html');
+    for(const image of doc.querySelectorAll('img[src]')){
+      if(isBlockedImageSource(image.getAttribute('src')))return true;
+    }
+    return false;
+  }
+  const withoutComments=html.replace(/<!--[\s\S]*?-->/g,'');
+  for(const match of withoutComments.matchAll(/<img\b[^>]*>/gi)){
+    const tag=match[0];
+    const src=tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const srcValue=String(src?.[1]??src?.[2]??src?.[3]??'').trim();
+    if(isBlockedImageSource(srcValue))return true;
+  }
+  return false;
+}
+
 function computedGlobalRisk(source){
   const text=String(source??'');
   const roots=new Set(['window','self','globalThis','document','parent','top','frames','this']);
@@ -307,6 +331,7 @@ export function navigationRisk(candidate){
   const html=String(candidate?.html??'');
   if(containsExternalScript(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-script'};
   if(containsExternalStylesheet(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-stylesheet'};
+  if(containsExternalImage(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-image'};
   if(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(?:["']?refresh["']?\b))[^>]*>/i.test(html))return {axis:'html',capability:'meta-refresh'};
   return null;
 }

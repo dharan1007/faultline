@@ -16,6 +16,8 @@ let browser;
 try {
   browser=await chromium.launch({headless:true});
   const page=await browser.newPage();
+  const submitEvents=[];
+  page.on('console',message=>{if(message.text()==='FAULTLINE_FORM_SUBMIT_EVENT')submitEvents.push(message.text());});
   await page.goto(`http://127.0.0.1:${appPort}/`,{waitUntil:'networkidle'});
   await page.waitForFunction(()=>window.faultline);
 
@@ -41,7 +43,9 @@ try {
     assert.equal(result.evidence?.capability,'form-navigation','form navigation must identify its capability');
   };
 
-  await assertContained(await loadFormCase("document.querySelector('#escape-form').requestSubmit()"));
+  await assertContained(await loadFormCase("window.addEventListener('submit',()=>console.log('FAULTLINE_FORM_SUBMIT_EVENT'));document.querySelector('#escape-form').requestSubmit()"));
+  assert.equal(submitEvents.length,0,'the sandbox blocks requestSubmit before a submit event becomes observable; containment must hook the imperative API itself');
+
   const directSubmitState=await loadFormCase("document.querySelector('#escape-form').submit()");
   await assertContained(directSubmitState);
 

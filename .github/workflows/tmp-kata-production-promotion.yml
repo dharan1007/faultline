@@ -97,7 +97,7 @@ jobs:
           set -euo pipefail
           for base in "$DEPLOYMENT_URL" "$CANONICAL_URL"; do
             for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-              if curl -fsS --retry 2 --retry-all-errors --retry-delay 2 "$base/release.json" > /tmp/release.json && \
+              if curl -fsSL --retry 2 --retry-all-errors --retry-delay 2 "$base/release.json" > /tmp/release.json && \
                  KATA_SHA="$KATA_SHA" node --input-type=module -e "import fs from 'node:fs'; const r=JSON.parse(fs.readFileSync('/tmp/release.json','utf8')); if(r.source?.sha!==process.env.KATA_SHA||r.source?.provenance!=='source-bound'||r.source?.repository!=='dharan1007/kata') process.exit(1);"; then
                 break
               fi
@@ -107,9 +107,9 @@ jobs:
               fi
               sleep 5
             done
-            curl -fsS "$base/api/health" > /tmp/health.json
-            curl -fsS "$base/api/capabilities" > /tmp/capabilities.json
-            curl -fsS "$base/api/openapi" > /tmp/openapi.json
-            curl -fsS "$base/integrity.json" > /tmp/integrity.json
+            curl -fsSL "$base/api/health" > /tmp/health.json
+            curl -fsSL "$base/api/capabilities" > /tmp/capabilities.json
+            curl -fsSL "$base/api/openapi" > /tmp/openapi.json
+            curl -fsSL "$base/integrity.json" > /tmp/integrity.json
             node --input-type=module -e "import fs from 'node:fs'; const h=JSON.parse(fs.readFileSync('/tmp/health.json','utf8')); const c=JSON.parse(fs.readFileSync('/tmp/capabilities.json','utf8')); const o=JSON.parse(fs.readFileSync('/tmp/openapi.json','utf8')); const i=JSON.parse(fs.readFileSync('/tmp/integrity.json','utf8')); const required=['kata_search_research','kata_plan_triage','kata_diagnose_web_interop','kata_apply_command','kata_compile_workflow','kata_execute_program','kata_preview_automation','kata_run_automation']; const tools=c.capabilities?.tools; if(h.ok!==true) throw new Error('KATA health failed'); if(!Array.isArray(tools)) throw new Error('KATA capabilities tools missing'); const names=tools.map(t=>t?.name).filter(Boolean); if(new Set(names).size!==names.length) throw new Error('KATA duplicate tool names'); const missing=required.filter(n=>!names.includes(n)); if(missing.length) throw new Error('KATA required tools missing: '+missing.join(', ')); if(!o.paths?.['/api/mcp']?.post) throw new Error('KATA MCP OpenAPI path missing'); if(!Array.isArray(i.assets)||i.assets.length<7) throw new Error('KATA integrity manifest incomplete');"
           done

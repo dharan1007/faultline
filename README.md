@@ -1,67 +1,193 @@
 # FAULTLINE
 
-FAULTLINE is a local-first causal web failure reducer for deterministic HTML/CSS/JavaScript reproductions. Instead of exposing DOM clicks to an agent, it exposes semantic experiments through WebMCP: inspect a case, define a failure oracle, probe one intervention, run bounded reduction, pin invariants, inspect causal history, restore revisions, and export a standalone reproducer.
+**Reduce a broken HTML/CSS/JavaScript page to a smaller standalone reproducer while preserving the failure you actually care about.**
 
+FAULTLINE is a local-first causal debugging workbench. You load a deterministic web failure, define an oracle, probe removals, run bounded delta reduction, pin important units, inspect revision/evidence history, restore earlier states and export a standalone HTML reproducer.
 
-## Hierarchical reduction semantics
+[**Try FAULTLINE**](https://faultline-webmcp-tejs-projects-70bb4568.vercel.app/) · [Security](docs/SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
 
-Faultline does not minimize overlapping parent/child syntax units in one ddmin set. HTML is reduced by depth: retained coarse element subtrees are minimized first, then Faultline descends into their surviving children. CSS is reduced in two frontiers: whole rules first, then declarations inside retained rules. JavaScript statements are already non-overlapping and use a single frontier. A pinned descendant implicitly protects its ancestor chain.
+[![ci](https://github.com/dharan1007/faultline/actions/workflows/ci.yml/badge.svg)](https://github.com/dharan1007/faultline/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Each frontier is independently ddmin-reduced, including evaluation of the empty subset, so Faultline can prove that an entire frontier contributes nothing to the failure. The resulting claim is therefore **1-minimal within each tested non-overlapping structural frontier**, not a proof of globally smallest source text.
+## The outcome
 
-## Why it exists
+```text
+large failing page
+HTML + CSS + JS
+      ↓
+define deterministic failure oracle
+      ↓
+probe individual semantic units
+      ↓
+bounded ddmin reduction
+      ↓
+re-run the failure after every candidate change
+      ↓
+smaller source that still FAILS
+      ↓
+standalone reproducer + evidence/revision history
+```
 
-Large browser bugs are hard to reason about because most of the page is irrelevant to the failure. FAULTLINE repeatedly removes structure and executes deterministic counterfactuals. A reduction is accepted only when the configured failure oracle still returns `FAIL`.
+FAULTLINE does not ask an agent to click around the DOM until something looks fixed. The core unit is a **counterfactual experiment**: remove a bounded source unit, execute the case inside the sandbox, evaluate the configured oracle, and keep the change only when the failure remains.
 
-## Current production nucleus
+## Why this exists
 
-- deterministic `PASS / FAIL / UNRESOLVED` experiment contract
-- ddmin-style 1-minimal reduction core
-- structural HTML subtree units
-- CSS rule and declaration units
-- bounded JavaScript statement units
-- pinned semantic units
-- stale revision rejection
-- isolated sandbox document with network-disabled CSP
-- lexical execution-budget instrumentation that ignores strings/comments, supports nested loop conditions, and rejects unsafe unbraced loops as `UNRESOLVED`
-- DOM-property, DOM-existence, computed-style, and runtime-error oracles
-- immutable experiment/revision ledger
-- causal suspicion ranking from passing/failing interventions
-- IndexedDB persistence
-- standalone reproducible HTML export
-- nine native `document.modelContext.registerTool(...)` WebMCP tools
-- zero runtime dependencies
+Browser failures are often buried inside much more code than is relevant to the bug. Manually deleting markup, CSS and JavaScript to build a minimal reproduction is slow and error-prone, especially when every deletion can accidentally change the failure itself.
+
+FAULTLINE makes the preservation condition explicit.
+
+| Debugging problem | FAULTLINE mechanism |
+|---|---|
+| "Does this code matter?" | Probe a unit without mutating canonical state |
+| "Remove everything irrelevant" | Bounded ddmin reduction over semantic source units |
+| "This piece must stay" | Pin the unit before reduction |
+| "Did the failure change?" | Deterministic PASS / FAIL / UNRESOLVED oracle result |
+| "Undo a bad reduction" | Revision snapshots and guarded restore |
+| "Why was this kept/removed?" | Experiment/evidence ledger |
+| "Give me a bug report" | Export a standalone HTML reproducer |
+| "Let an agent help" | Native WebMCP tools use the same canonical runtime |
+
+## Try the built-in case
+
+Open the live workbench and use the built-in dialog/button case. The canonical case contains HTML, CSS, JavaScript and an oracle. You can:
+
+1. run the baseline and confirm it returns `FAIL`,
+2. inspect semantic units for HTML/CSS/JS,
+3. probe a candidate removal,
+4. pin a unit that must remain,
+5. reduce one axis or run Autopilot across selected axes,
+6. inspect the evidence/revision trail,
+7. export the resulting standalone case.
+
+No signup or hosted project workspace is required for the current product path.
+
+## Current reduction semantics — precise claim
+
+The production browser runtime currently imports `semanticUnits`, `removeUnits` and `ddminReduce` from `src/reducer-engine.js` and reduces **one source axis at a time**.
+
+For a given axis, FAULTLINE:
+
+1. extracts the current candidate semantic units,
+2. protects pinned units,
+3. verifies the baseline still fails,
+4. repeatedly tests subsets within the configured trial budget,
+5. commits the reduced source only after the final candidate still returns `FAIL`.
+
+The resulting reduction is **1-minimal relative to the tested candidate-unit set and trial semantics**, not a proof of the globally shortest HTML/CSS/JavaScript program. The current scanners are deliberately bounded structural heuristics rather than standards-complete language parsers. This distinction matters and is part of the product contract.
+
+A separate experimental/legacy domain implementation contains depth-aware frontier concepts, but the public production claim follows the runtime actually imported by `src/runtime.js`. Future hierarchical/AST-backed work must land in the canonical runtime and tests before it changes this claim.
+
+## Failure oracles
+
+The current runtime supports these oracle classes:
+
+- `dom_property`
+- `dom_exists`
+- `computed_style`
+- `runtime_error`
+
+An optional click action can be part of the oracle before measurement. Results are always one of:
+
+```text
+PASS
+FAIL
+UNRESOLVED
+```
+
+`UNRESOLVED` is important: unsafe navigation, unsupported execution constructs, timeouts or inability to evaluate the oracle are not silently converted into PASS/FAIL.
+
+## Browser containment boundary
+
+Candidate code executes inside an iframe with:
+
+```html
+sandbox="allow-scripts"
+```
+
+and without `allow-same-origin`. The experiment document is protected by a restrictive CSP that disables network connections and other capability classes. FAULTLINE also detects/rejects navigation-risk cases and instruments supported loop forms with execution budgets.
+
+This is **browser-side hostile-code containment, not a VM boundary**. Pathological recursion or expensive native operations can still consume renderer resources before the host timeout recovers. A service accepting arbitrary third-party artifacts at scale should add process/VM isolation.
+
+Read [`docs/SECURITY.md`](docs/SECURITY.md) before treating the sandbox as a trust boundary.
+
+## Local-first state and reproducibility
+
+The workbench maintains canonical revisioned case state in the browser, including:
+
+- source and oracle,
+- pinned units,
+- revision snapshots,
+- bounded experiment/evidence history,
+- IndexedDB/local persistence and recovery behavior.
+
+State-changing operations use expected-revision checks so stale actions fail rather than overwriting a newer canonical case.
+
+## WebMCP
+
+FAULTLINE exposes its debugging operations through the browser's experimental `document.modelContext.registerTool()` API when available. The tool surface includes inspection, unit discovery, case loading/reset, run, cancellation, oracle/source changes, probe, reduction, pinning, revision/history operations, Autopilot and export behavior as defined by the canonical runtime.
+
+Long-running WebMCP operations support cancellation. Agent tools call the same canonical workbench functions rather than a separate privileged debugging implementation.
+
+WebMCP remains experimental; the human workbench remains usable without it.
 
 ## Run locally
 
 ```bash
+git clone https://github.com/dharan1007/faultline.git
+cd faultline
+npm install
+npm test
+npm run check
+npm run build
 python3 -m http.server 8765
 ```
 
 Open `http://127.0.0.1:8765/`.
 
+The current application has no production runtime npm dependency; Playwright is a development dependency for real-browser verification.
+
 ## Verification
+
+Fast repository contract:
 
 ```bash
 npm test
 npm run check
 npm run build
+```
 
-# Real Chromium/CDP gate (local origin when policy permits)
+Real browser/CDP gate:
+
+```bash
 npm run test:browser
+```
 
-# Or validate an HTTPS deployment
+Or against an HTTPS deployment:
+
+```bash
 FAULTLINE_E2E_URL=https://your-deployment.example npm run test:browser
 ```
 
-The project intentionally has no install step and no external application backend.
+The browser suite covers sandbox/navigation containment, WebMCP cancellation, oracle behavior, revision lineage, persistence, exports, UI contracts and other real-browser boundaries. A launch should not claim browser readiness from syntax/unit checks alone.
 
-## Security boundary
+## Contributing
 
-The experiment iframe uses `sandbox="allow-scripts"`, does not receive `allow-same-origin`, and receives a restrictive CSP with network, frames, workers, objects, base URLs and form actions disabled. Source is local-first and persisted only in IndexedDB by the app.
+The highest-value contributions are reproducible browser failures, new oracle regression cases, source-unit/reducer improvements, sandbox tests and integrations that make it easier to turn real test failures into standalone reproducers.
 
-This is still browser-side hostile-code containment rather than a VM boundary. See `docs/SECURITY.md` for the remaining limits.
+Start with [`CONTRIBUTING.md`](CONTRIBUTING.md), [`good first issue`](https://github.com/dharan1007/faultline/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) or [`help wanted`](https://github.com/dharan1007/faultline/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
 
-## Reduction semantics
+## Roadmap
 
-FAULTLINE claims 1-minimality only relative to the candidate set supplied to a `ddmin` run. HTML parent/child subtree units and CSS rule/declaration units can overlap, so the current domain reducer must not be interpreted as a global syntactic minimum across mixed structural granularities. A hierarchical non-overlapping reduction frontier is the next reducer milestone.
+See [`ROADMAP.md`](ROADMAP.md). The main technical direction is to improve semantic-unit quality, corpus/benchmark evidence and integration into real browser-test workflows before making stronger minimality claims.
+
+## Related projects
+
+- [PACT](https://github.com/dharan1007/pact) — transactional safety for consequential agent actions.
+- [KATA](https://github.com/dharan1007/kata) — reusable deterministic research workflows.
+- [SPOOL](https://github.com/dharan1007/spool) — deterministic local-first data migration.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
+
+If automatic browser-failure reduction would save you debugging time, star FAULTLINE to follow the project and help other web developers discover it.

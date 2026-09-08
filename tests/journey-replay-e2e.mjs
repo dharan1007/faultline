@@ -19,7 +19,7 @@ const journey=[
   createJourneyStep({id:'save',kind:'click',target:{role:'button',accessibleName:'Save configuration'}}),
   createJourneyStep({id:'settle',kind:'wait',value:750,timeoutMs:1500})
 ];
-const oracle={type:'clickability',selector:{role:'button',accessibleName:'Create deployment'},expected:true};
+const oracle={type:'clickability',selector:{role:'button',accessibleName:'Open auth-gateway deployment'},expected:true};
 
 let browser;
 try{
@@ -32,7 +32,7 @@ try{
   assert.equal(first.operationStatus,'COMPLETED');
   assert.equal(first.oracleOutcome,'FAIL');
   assert.equal(first.oracle.type,'clickability');
-  assert.equal(first.oracle.observed,false,'stale backdrop must make the otherwise enabled Create deployment control physically unclickable');
+  assert.equal(first.oracle.observed,false,'stale backdrop must make a deployment-table action physically unclickable');
   assert.ok(first.steps.every(step=>step.status==='COMPLETED'));
   assert.match(page.url(),/deployment=edge-api/,'replay must preserve the route transition produced by the canonical journey');
 

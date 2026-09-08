@@ -262,6 +262,32 @@ function containsExternalImage(source){
   return false;
 }
 
+function isBlockedFrameSource(source){
+  const src=String(source??'').trim();
+  return Boolean(src)&&!/^about:blank(?:[?#]|$)/i.test(src);
+}
+
+function containsExternalFrame(source){
+  const html=String(source??'');
+  if(typeof DOMParser==='function'){
+    const doc=new DOMParser().parseFromString(html,'text/html');
+    for(const frame of doc.querySelectorAll('iframe[src]')){
+      if(frame.hasAttribute('srcdoc'))continue;
+      if(isBlockedFrameSource(frame.getAttribute('src')))return true;
+    }
+    return false;
+  }
+  const withoutComments=html.replace(/<!--[\s\S]*?-->/g,'');
+  for(const match of withoutComments.matchAll(/<iframe\b[^>]*>/gi)){
+    const tag=match[0];
+    if(/\bsrcdoc\s*=/i.test(tag))continue;
+    const src=tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const srcValue=String(src?.[1]??src?.[2]??src?.[3]??'').trim();
+    if(isBlockedFrameSource(srcValue))return true;
+  }
+  return false;
+}
+
 function containsExternalStylesheetImport(source){
   const css=String(source??'');
   let i=0;
@@ -411,6 +437,7 @@ export function navigationRisk(candidate){
   if(containsExternalScript(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-script'};
   if(containsExternalStylesheet(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-stylesheet'};
   if(containsExternalImage(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-image'};
+  if(containsExternalFrame(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-frame'};
   if(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(?:["']?refresh["']?\b))[^>]*>/i.test(html))return {axis:'html',capability:'meta-refresh'};
   return null;
 }

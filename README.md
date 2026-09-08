@@ -4,7 +4,7 @@
 
 FAULTLINE is a local-first causal debugging workbench. You load a deterministic web failure, define an oracle, probe removals, run bounded delta reduction, pin important units, inspect revision/evidence history, restore earlier states and export a standalone HTML reproducer.
 
-[**Run locally**](#run-locally) · [Security](docs/SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
+[**Live Demo**](https://faultline-webmcp.vercel.app/) · [Run locally](#run-locally) · [Security](docs/SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
 
 [![ci](https://github.com/dharan1007/faultline/actions/workflows/ci.yml/badge.svg)](https://github.com/dharan1007/faultline/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -49,7 +49,7 @@ FAULTLINE makes the preservation condition explicit.
 
 ## Try the built-in case
 
-Run the workbench locally and use the built-in dialog/button case. The canonical case contains HTML, CSS, JavaScript and an oracle. You can:
+Open the [public FAULTLINE workbench](https://faultline-webmcp.vercel.app/) or run it locally, then use the built-in dialog/button case. The canonical case contains HTML, CSS, JavaScript and an oracle. You can:
 
 1. run the baseline and confirm it returns `FAIL`,
 2. inspect semantic units for HTML/CSS/JS,
@@ -59,7 +59,7 @@ Run the workbench locally and use the built-in dialog/button case. The canonical
 6. inspect the evidence/revision trail,
 7. export the resulting standalone case.
 
-No signup or hosted project workspace is required for the current product path. The current Vercel deployment is access-protected, so this README intentionally does not present that protected deployment as a public demo.
+No signup or hosted project workspace is required for the current product path. The canonical Vercel production alias is promoted only after FAULTLINE's repository verification and exact-tree production check succeed.
 
 ## Current reduction semantics — precise claim
 

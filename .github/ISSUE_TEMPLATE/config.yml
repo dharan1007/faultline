@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private security reporting policy
+    url: https://github.com/dharan1007/faultline/security/policy
+    about: Sandbox, navigation, result-channel, persistence-isolation and WebMCP boundary vulnerabilities must not be disclosed publicly.
+  - name: Technical security boundary
+    url: https://github.com/dharan1007/faultline/blob/main/docs/SECURITY.md
+    about: Review current browser containment controls and known limits before opening a security-design issue.

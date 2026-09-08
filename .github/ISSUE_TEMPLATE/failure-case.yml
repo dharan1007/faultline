@@ -1,0 +1,44 @@
+name: Browser failure / corpus case
+description: Contribute a synthetic deterministic failure that can improve the public reduction corpus
+title: "[Case]: "
+labels:
+  - help wanted
+body:
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Failure symptom
+      description: What browser behavior should the oracle preserve?
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Synthetic HTML/CSS/JS
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: oracle
+    attributes:
+      label: Deterministic oracle
+      description: Provide oracle kind, selector/property/equals/action as relevant.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected reduction behavior
+      description: What should clearly be removable, pinned, or remain relevant?
+    validations:
+      required: true
+  - type: checkboxes
+    id: public
+    attributes:
+      label: Public corpus confirmation
+      options:
+        - label: The case is synthetic/anonymized and contains no confidential/customer data.
+          required: true
+        - label: I am comfortable with it being redistributed in the public MIT-licensed repository.
+          required: true

@@ -1,0 +1,39 @@
+name: Oracle proposal
+description: Propose a deterministic failure oracle or normalization improvement
+title: "[Oracle]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: failure
+    attributes:
+      label: Failure class
+      description: What real browser failure cannot be represented reliably by the current oracles?
+    validations:
+      required: true
+  - type: textarea
+    id: observation
+    attributes:
+      label: Deterministic observation
+      description: What browser-observable value/event should decide PASS, FAIL or UNRESOLVED?
+    validations:
+      required: true
+  - type: textarea
+    id: action
+    attributes:
+      label: Optional action / timing
+      description: If interaction is required, describe the bounded action and measurement timing.
+  - type: textarea
+    id: unresolved
+    attributes:
+      label: UNRESOLVED cases
+      description: When must the oracle refuse to classify the case?
+    validations:
+      required: true
+  - type: textarea
+    id: fixture
+    attributes:
+      label: Minimal synthetic example
+      render: text
+    validations:
+      required: true

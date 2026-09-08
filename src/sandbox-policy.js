@@ -239,6 +239,60 @@ function containsExternalImage(source){
   return false;
 }
 
+function containsExternalStylesheetImport(source){
+  const css=String(source??'');
+  let i=0;
+  const skipComment=()=>{
+    i+=2;
+    while(i<css.length&&!(css[i]==='*'&&css[i+1]==='/'))i++;
+    i=Math.min(css.length,i+2);
+  };
+  const skipTrivia=()=>{
+    while(i<css.length){
+      if(/\s/.test(css[i])){i++;continue;}
+      if(css[i]==='/'&&css[i+1]==='*'){skipComment();continue;}
+      break;
+    }
+  };
+  const readQuoted=quote=>{
+    i++;
+    let value='';
+    while(i<css.length){
+      if(css[i]==='\\'){
+        if(i+1<css.length)value+=css[i+1];
+        i+=2;
+        continue;
+      }
+      if(css[i]===quote){i++;return value;}
+      value+=css[i++];
+    }
+    return value;
+  };
+  while(i<css.length){
+    const c=css[i];
+    if(c==='/'&&css[i+1]==='*'){skipComment();continue;}
+    if(c==="'"||c==='"'){readQuoted(c);continue;}
+    if(c==='@'&&css.slice(i+1,i+7).toLowerCase()==='import'&&!/[-\w]/.test(css[i+7]||'')){
+      i+=7;
+      skipTrivia();
+      if(css[i]==="'"||css[i]==='"')return Boolean(readQuoted(css[i]).trim());
+      if(css.slice(i,i+3).toLowerCase()==='url'&&!/[-\w]/.test(css[i+3]||'')){
+        i+=3;
+        skipTrivia();
+        if(css[i]!=='(')continue;
+        i++;
+        skipTrivia();
+        if(css[i]==="'"||css[i]==='"')return Boolean(readQuoted(css[i]).trim());
+        const start=i;
+        while(i<css.length&&css[i]!==')')i++;
+        return Boolean(css.slice(start,i).trim());
+      }
+    }
+    i++;
+  }
+  return false;
+}
+
 function computedGlobalRisk(source){
   const text=String(source??'');
   const roots=new Set(['window','self','globalThis','document','parent','top','frames','this']);
@@ -328,6 +382,8 @@ export function navigationRisk(candidate){
   if(containsExecutableMemberCall(js,['window','self','globalThis','parent','top'],'open'))return {axis:'js',capability:'popup-navigation'};
   const computed=computedGlobalRisk(js);
   if(computed)return {axis:'js',capability:computed.property==='open'?'popup-navigation':'computed-global',...computed};
+  const css=String(candidate?.css??'');
+  if(containsExternalStylesheetImport(css))return {reason:'UNSAFE_NETWORK',axis:'css',capability:'external-stylesheet-import'};
   const html=String(candidate?.html??'');
   if(containsExternalScript(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-script'};
   if(containsExternalStylesheet(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-stylesheet'};

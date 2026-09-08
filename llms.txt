@@ -1,0 +1,40 @@
+# FAULTLINE
+
+> Local-first deterministic browser-failure reduction: define an oracle, probe/removes semantic HTML/CSS/JS units, keep changes only when the failure remains, inspect evidence/revisions and export a standalone reproducer.
+
+Canonical repository: https://github.com/dharan1007/faultline
+Live product: https://faultline-webmcp-tejs-projects-70bb4568.vercel.app/
+
+## Start here
+
+- README: https://github.com/dharan1007/faultline/blob/main/README.md
+- Security policy: https://github.com/dharan1007/faultline/blob/main/SECURITY.md
+- Technical security boundary: https://github.com/dharan1007/faultline/blob/main/docs/SECURITY.md
+- Roadmap: https://github.com/dharan1007/faultline/blob/main/ROADMAP.md
+- Contributing: https://github.com/dharan1007/faultline/blob/main/CONTRIBUTING.md
+
+## Canonical code path
+
+- `src/runtime.js`
+- `src/reducer-engine.js`
+- `src/sandbox-policy.js`
+
+Do not describe legacy/experimental domain files as the production reducer unless they are integrated into this path and tests.
+
+## Core facts
+
+- Oracle results: PASS / FAIL / UNRESOLVED.
+- Oracles: DOM property, DOM existence, computed style, runtime error.
+- Reduction: bounded ddmin over semantic units one axis at a time in the current production runtime.
+- Minimality: relative to the tested candidate-unit set; not global shortest-source proof.
+- State: local browser persistence, revision snapshots/history, stale-revision guards.
+- Execution boundary: sandboxed iframe + restrictive CSP/navigation controls; not OS/VM isolation.
+- Agent integration: browser WebMCP when `document.modelContext` is available.
+- Runtime npm dependencies: none; Playwright is a development dependency.
+- License: MIT.
+
+## Verification
+
+Fast: `npm test && npm run check && npm run build`
+
+Real browser: `npm run test:browser`

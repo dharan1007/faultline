@@ -19,33 +19,39 @@ try {
   await page.goto(`http://127.0.0.1:${appPort}/`,{waitUntil:'networkidle'});
   await page.waitForFunction(()=>window.faultline);
 
-  const state=await page.evaluate(({sinkPort})=>{
+  const loadFormCase=async js=>page.evaluate(({sinkPort,js})=>{
     const current=window.faultline.inspect();
     return window.faultline.loadCase({
       expectedRevision:current.revision,
       case:{
         html:`<main id="payload">contained</main><form id="escape-form" action="http://127.0.0.1:${sinkPort}/form-escape" method="post"><button type="submit">Submit</button></form>`,
         css:'',
-        js:"document.querySelector('#escape-form').requestSubmit()",
+        js,
         oracle:{kind:'dom_exists',selector:'#payload',equals:true,action:{kind:'none'},delayMs:0}
       }
     });
-  },{sinkPort});
+  },{sinkPort,js});
 
-  const result=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:state.revision});
-  await page.waitForTimeout(150);
-  assert.equal(sinkHits,0,'form navigation must never leave the experiment sandbox');
-  assert.equal(result.status,'UNRESOLVED','a blocked form navigation attempt must not be reported as ordinary oracle evidence');
-  assert.equal(result.evidence?.reason,'UNSAFE_NAVIGATION','form navigation rejection must be explicit and machine-readable');
-  assert.equal(result.evidence?.capability,'form-navigation','form navigation must identify its capability');
+  const assertContained=async state=>{
+    const result=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:state.revision});
+    await page.waitForTimeout(120);
+    assert.equal(sinkHits,0,'form navigation must never leave the experiment sandbox');
+    assert.equal(result.status,'UNRESOLVED','a blocked form navigation attempt must not be reported as ordinary oracle evidence');
+    assert.equal(result.evidence?.reason,'UNSAFE_NAVIGATION','form navigation rejection must be explicit and machine-readable');
+    assert.equal(result.evidence?.capability,'form-navigation','form navigation must identify its capability');
+  };
+
+  await assertContained(await loadFormCase("document.querySelector('#escape-form').requestSubmit()"));
+  const directSubmitState=await loadFormCase("document.querySelector('#escape-form').submit()");
+  await assertContained(directSubmitState);
 
   await page.locator('#preview-run').click();
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(180);
   assert.equal(sinkHits,0,'explicit preview execution must not submit the form onto the network');
   const summary=await page.locator('#summary').textContent();
-  assert.match(summary||'',/UNSAFE_NAVIGATION/,'blocked form navigation in preview must be visible to the user');
+  assert.match(summary||'',/UNSAFE_NAVIGATION/,'blocked direct form navigation in preview must be visible to the user');
 
-  console.log('Form-navigation containment PASS: form submissions are blocked and surfaced consistently across deterministic and preview execution.');
+  console.log('Form-navigation containment PASS: requestSubmit and direct submit are blocked and surfaced consistently across deterministic and preview execution.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

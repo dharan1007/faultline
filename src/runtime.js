@@ -184,7 +184,7 @@ function restoreLocal(){
   }catch{}
 }
 
-function buildSandboxDocument(c,bootstrapId,{previewOnly=false}={}){
+function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=false}={}){
   const safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');
   const candidateSource=JSON.stringify(String(c.js)).replace(/</g,'\\u003c');
   const oracle=JSON.stringify(c.oracle).replace(/</g,'\\u003c');
@@ -214,7 +214,7 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false}={}){
    sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected,kind:o.kind,selector:o.selector,property:o.property}})
   }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},Number(o.delayMs)||0)
  }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},0);
- const start=()=>{${previewOnly?'':'executeCandidate();'}if(send)measure(send)};
+ const start=()=>{${previewOnly&&!executePreview?'':'executeCandidate();'}if(send)measure(send)};
  if(resultChannel)parent.postMessage({type:'faultline:ready',bootstrapId:${JSON.stringify(bootstrapId)}},'*',[resultChannel.port2]);
  if(document.readyState==='loading')addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
@@ -357,7 +357,22 @@ function renderHealth(status){$('health').textContent=status;$('health').dataset
 function renderTrace(){const list=$('trace');list.innerHTML='';for(const e of [...experimentLedger].reverse().slice(0,50)){const li=document.createElement('li');li.innerHTML=`<strong>${e.kind.toUpperCase()} · ${e.status}</strong><span>${e.revision} · ${new Date(e.at).toLocaleTimeString()}</span><code>${escapeHtml(JSON.stringify(e.evidence||{}))}</code>`;list.appendChild(li)}$('summary').textContent=experimentLedger.length?`${experimentLedger.length} evidence events · latest ${experimentLedger.at(-1).status}`:'No experiments yet.';}
 function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 function renderUnits(){const list=$('units'),units=unitsFor();list.innerHTML='';selectedUnitId=null;for(const unit of units){const row=document.createElement('button');row.type='button';row.className='unit';row.dataset.unitId=unit.id;row.setAttribute('aria-pressed','false');const pinned=pins.has(pinKey(axis,unit.id));row.innerHTML=`<span>${escapeHtml(unit.text.trim().replace(/\s+/g,' ').slice(0,120))}</span><small>${unit.kind}${pinned?' · pinned':''}</small>`;row.onclick=()=>{document.querySelectorAll('.unit').forEach(x=>x.setAttribute('aria-pressed','false'));row.setAttribute('aria-pressed','true');selectedUnitId=unit.id;$('probe').disabled=false;$('pin').disabled=false;};list.appendChild(row)}$('unit-count').textContent=`${units.length} units`;}
-function renderPreview(){const preview=$('preview');if(!preview)return;preview.srcdoc=buildSandboxDocument(value(),'canonical-preview',{previewOnly:true});}
+function renderPreview(executePreview=false){const preview=$('preview');if(!preview)return;preview.srcdoc=buildSandboxDocument(value(),'canonical-preview',{previewOnly:true,executePreview});}
+function installPreviewRunner(){
+  const toolbar=document.querySelector('.preview-toolbar');
+  if(!toolbar||$('preview-run'))return;
+  const button=document.createElement('button');
+  button.id='preview-run';
+  button.type='button';
+  button.className='btn ghost';
+  button.textContent='Run preview JS';
+  button.setAttribute('aria-label','Run canonical JavaScript in isolated preview');
+  button.style.marginLeft='auto';
+  const label=toolbar.querySelector('.preview-label');
+  if(label)label.style.marginLeft='0';
+  button.onclick=()=>renderPreview(true);
+  toolbar.appendChild(button);
+}
 function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';renderUnits();renderTrace();persistBestEffort();}
 
 const REVISION_PROPERTY={expectedRevision:{type:'string',pattern:'^r[1-9]\\d*$'}};
@@ -396,4 +411,4 @@ $('autopilot').onclick=()=>autopilot().then(()=>renderHealth('COMPLETE')).catch(
 $('lock').onclick=()=>defineOracle({oracle:{kind:$('oracle-kind').value,selector:$('oracle-selector').value,property:$('oracle-property').value,equals:normalizeExpected($('oracle-equals').value),action:{kind:$('action-kind').value,selector:$('action-selector').value},delayMs:0}});
 $('export').onclick=()=>{const a=document.createElement('a'),blob=new Blob([exportCase()],{type:'text/html'});a.href=URL.createObjectURL(blob);a.download='faultline-reproducer.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $('reset').onclick=()=>resetCase({expectedRevision:revision()});
-restoreLocal();rememberRevision(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();renderPreview();registerWebMCP();
+restoreLocal();rememberRevision(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();renderPreview();installPreviewRunner();registerWebMCP();

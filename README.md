@@ -4,7 +4,7 @@
 
 FAULTLINE is a local-first causal debugging workbench. You load a deterministic web failure, define an oracle, probe removals, run bounded delta reduction, pin important units, inspect revision/evidence history, restore earlier states and export a standalone HTML reproducer.
 
-[**Try FAULTLINE**](https://faultline-webmcp-tejs-projects-70bb4568.vercel.app/) · [Security](docs/SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
+[**Run locally**](#run-locally) · [Security](docs/SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
 
 [![ci](https://github.com/dharan1007/faultline/actions/workflows/ci.yml/badge.svg)](https://github.com/dharan1007/faultline/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -49,7 +49,7 @@ FAULTLINE makes the preservation condition explicit.
 
 ## Try the built-in case
 
-Open the live workbench and use the built-in dialog/button case. The canonical case contains HTML, CSS, JavaScript and an oracle. You can:
+Run the workbench locally and use the built-in dialog/button case. The canonical case contains HTML, CSS, JavaScript and an oracle. You can:
 
 1. run the baseline and confirm it returns `FAIL`,
 2. inspect semantic units for HTML/CSS/JS,
@@ -59,7 +59,7 @@ Open the live workbench and use the built-in dialog/button case. The canonical c
 6. inspect the evidence/revision trail,
 7. export the resulting standalone case.
 
-No signup or hosted project workspace is required for the current product path.
+No signup or hosted project workspace is required for the current product path. The current Vercel deployment is access-protected, so this README intentionally does not present that protected deployment as a public demo.
 
 ## Current reduction semantics — precise claim
 

@@ -125,6 +125,18 @@ function computedGlobalRisk(source){
   return null;
 }
 
+function anchorNavigationRisk(source){
+  const html=String(source??'').replace(/<!--[\s\S]*?-->/g,'');
+  const anchor=/<(?:a|area)\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
+  let match;
+  while((match=anchor.exec(html))){
+    const href=String(match[1]??match[2]??match[3]??'').trim();
+    if(href.startsWith('#'))continue;
+    return {axis:'html',capability:'anchor-navigation'};
+  }
+  return null;
+}
+
 export function navigationRisk(candidate){
   const js=String(candidate?.js??'');
   if(containsExecutableIdentifier(js,'location'))return {axis:'js',capability:'location'};
@@ -132,5 +144,7 @@ export function navigationRisk(candidate){
   if(computed)return {axis:'js',capability:'computed-global',...computed};
   const html=String(candidate?.html??'');
   if(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(?:["']?refresh["']?\b))[^>]*>/i.test(html))return {axis:'html',capability:'meta-refresh'};
+  const anchorRisk=anchorNavigationRisk(html);
+  if(anchorRisk)return anchorRisk;
   return null;
 }

@@ -193,6 +193,28 @@ function containsExternalScript(source){
   return /<script\b(?=[^>]*\bsrc\s*=\s*(?:"[^"]+"|'[^']+'|[^\s>]+))[^>]*>/i.test(withoutComments);
 }
 
+function containsExternalStylesheet(source){
+  const html=String(source??'');
+  if(typeof DOMParser==='function'){
+    const doc=new DOMParser().parseFromString(html,'text/html');
+    for(const link of doc.querySelectorAll('link[href]')){
+      const rel=String(link.getAttribute('rel')??'').toLowerCase().split(/\s+/).filter(Boolean);
+      if(rel.includes('stylesheet')&&String(link.getAttribute('href')??'').trim())return true;
+    }
+    return false;
+  }
+  const withoutComments=html.replace(/<!--[\s\S]*?-->/g,'');
+  for(const match of withoutComments.matchAll(/<link\b[^>]*>/gi)){
+    const tag=match[0];
+    const rel=tag.match(/\brel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const href=tag.match(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const relValue=String(rel?.[1]??rel?.[2]??rel?.[3]??'').toLowerCase().split(/\s+/).filter(Boolean);
+    const hrefValue=String(href?.[1]??href?.[2]??href?.[3]??'').trim();
+    if(relValue.includes('stylesheet')&&hrefValue)return true;
+  }
+  return false;
+}
+
 function computedGlobalRisk(source){
   const text=String(source??'');
   const roots=new Set(['window','self','globalThis','document','parent','top','frames','this']);
@@ -284,6 +306,7 @@ export function navigationRisk(candidate){
   if(computed)return {axis:'js',capability:computed.property==='open'?'popup-navigation':'computed-global',...computed};
   const html=String(candidate?.html??'');
   if(containsExternalScript(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-script'};
+  if(containsExternalStylesheet(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-stylesheet'};
   if(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(?:["']?refresh["']?\b))[^>]*>/i.test(html))return {axis:'html',capability:'meta-refresh'};
   return null;
 }

@@ -31,6 +31,7 @@ let pins = new Set();
 let selectedUnitId = null;
 let experimentLedger = [];
 let experimentQueue = Promise.resolve();
+let previewBootstrapId = null;
 const activeWebMCPOperations = new Map();
 const CANCELLABLE_WEBMCP_TOOLS = new Set(['faultline_run','faultline_probe','faultline_reduce','faultline_autopilot']);
 const revisions = new Map([['r1',{value:clone(fixture),pins:[]}]]);
@@ -200,13 +201,30 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  const resultPort=resultChannel?.port1||null;
  const send=resultPort?resultPort.postMessage.bind(resultPort):null;
  const runtimeErrors=[];
+ const navigationAttempts=[];
  const captureRuntimeError=value=>runtimeErrors.push(String(value));
+ const latestNavigationAttempt=()=>navigationAttempts.at(-1)||null;
+ const captureNavigationAttempt=event=>{
+  const target=event.target?.closest?.('a[href],area[href]');
+  if(!target)return;
+  const href=String(target.getAttribute('href')??'').trim();
+  if(!href||href.startsWith('#'))return;
+  event.preventDefault();
+  const risk={axis:'html',capability:'anchor-navigation'};
+  navigationAttempts.push(risk);
+  ${previewOnly?`parent.postMessage({type:'faultline:preview-navigation-blocked',bootstrapId:${JSON.stringify(bootstrapId)},risk},'*');`:''}
+ };
+ const blockedNavigation=sendResult=>{const risk=latestNavigationAttempt();if(!risk)return false;sendResult({status:'UNRESOLVED',evidence:{reason:'UNSAFE_NAVIGATION',...risk}});return true;};
+ addEventListener('click',captureNavigationAttempt,true);
  addEventListener('error',e=>{captureRuntimeError(e.error?.message??e.message??e.error??'runtime error');e.preventDefault()});
  addEventListener('unhandledrejection',e=>{captureRuntimeError(e.reason?.message??e.reason??'unhandled rejection');e.preventDefault()});
  const executeCandidate=()=>{try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e)}};
  const measure=sendResult=>schedule(()=>{try{
+  if(blockedNavigation(sendResult))return;
   if(o.action?.kind==='click'){const target=querySelector(o.action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click()}
-  schedule(()=>{try{let actual;
+  schedule(()=>{try{
+   if(blockedNavigation(sendResult))return;
+   let actual;
    if(o.kind==='runtime_error'){const expectedRuntime=o.equals!==undefined?String(o.equals):undefined;actual=expectedRuntime===undefined?(runtimeErrors.at(-1)??null):(runtimeErrors.find(message=>same(message,expectedRuntime))??runtimeErrors.at(-1)??null)}
    else {const el=querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='computed_style')actual=el?readComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
    const expected=o.kind==='computed_style'?String(o.equals):o.kind==='runtime_error'&&o.equals!==undefined?String(o.equals):o.equals;
@@ -357,7 +375,7 @@ function renderHealth(status){$('health').textContent=status;$('health').dataset
 function renderTrace(){const list=$('trace');list.innerHTML='';for(const e of [...experimentLedger].reverse().slice(0,50)){const li=document.createElement('li');li.innerHTML=`<strong>${e.kind.toUpperCase()} · ${e.status}</strong><span>${e.revision} · ${new Date(e.at).toLocaleTimeString()}</span><code>${escapeHtml(JSON.stringify(e.evidence||{}))}</code>`;list.appendChild(li)}$('summary').textContent=experimentLedger.length?`${experimentLedger.length} evidence events · latest ${experimentLedger.at(-1).status}`:'No experiments yet.';}
 function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 function renderUnits(){const list=$('units'),units=unitsFor();list.innerHTML='';selectedUnitId=null;for(const unit of units){const row=document.createElement('button');row.type='button';row.className='unit';row.dataset.unitId=unit.id;row.setAttribute('aria-pressed','false');const pinned=pins.has(pinKey(axis,unit.id));row.innerHTML=`<span>${escapeHtml(unit.text.trim().replace(/\s+/g,' ').slice(0,120))}</span><small>${unit.kind}${pinned?' · pinned':''}</small>`;row.onclick=()=>{document.querySelectorAll('.unit').forEach(x=>x.setAttribute('aria-pressed','false'));row.setAttribute('aria-pressed','true');selectedUnitId=unit.id;$('probe').disabled=false;$('pin').disabled=false;};list.appendChild(row)}$('unit-count').textContent=`${units.length} units`;}
-function renderPreview(executePreview=false){const preview=$('preview');if(!preview)return;preview.srcdoc=buildSandboxDocument(value(),'canonical-preview',{previewOnly:true,executePreview});}
+function renderPreview(executePreview=false){const preview=$('preview');if(!preview)return;previewBootstrapId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;preview.srcdoc=buildSandboxDocument(value(),previewBootstrapId,{previewOnly:true,executePreview});}
 function installPreviewRunner(){
   const toolbar=document.querySelector('.preview-toolbar');
   if(!toolbar||$('preview-run'))return;
@@ -373,6 +391,14 @@ function installPreviewRunner(){
   button.onclick=()=>renderPreview(true);
   toolbar.appendChild(button);
 }
+function handlePreviewNavigationMessage(event){
+  const preview=$('preview');
+  if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-navigation-blocked'||event.data.bootstrapId!==previewBootstrapId)return;
+  const risk=event.data.risk||{};
+  renderHealth('UNRESOLVED');
+  $('summary').textContent=`UNSAFE_NAVIGATION · ${risk.axis||'html'} · ${risk.capability||'navigation'}`;
+}
+addEventListener('message',handlePreviewNavigationMessage);
 function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';renderUnits();renderTrace();persistBestEffort();}
 
 const REVISION_PROPERTY={expectedRevision:{type:'string',pattern:'^r[1-9]\\d*$'}};

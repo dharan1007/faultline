@@ -259,6 +259,7 @@ function computedGlobalRisk(source){
 
 export function navigationRisk(candidate){
   const js=String(candidate?.js??'');
+  if(containsExecutableMemberCall(js,['navigator'],'sendBeacon'))return {reason:'UNSAFE_NETWORK',axis:'js',capability:'sendbeacon'};
   if(containsExecutableCall(js,'EventSource')||containsExecutableMemberCall(js,['window','self','globalThis'],'EventSource'))return {reason:'UNSAFE_NETWORK',axis:'js',capability:'eventsource'};
   if(containsExecutableCall(js,'WebSocket')||containsExecutableMemberCall(js,['window','self','globalThis'],'WebSocket'))return {reason:'UNSAFE_NETWORK',axis:'js',capability:'websocket'};
   if(containsExecutableCall(js,'XMLHttpRequest')||containsExecutableMemberCall(js,['window','self','globalThis'],'XMLHttpRequest'))return {reason:'UNSAFE_NETWORK',axis:'js',capability:'xmlhttprequest'};

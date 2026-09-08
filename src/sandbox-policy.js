@@ -180,6 +180,19 @@ function containsExecutableMemberCall(source,roots,target){
   return scanCode(false);
 }
 
+function containsExternalScript(source){
+  const html=String(source??'');
+  if(typeof DOMParser==='function'){
+    const doc=new DOMParser().parseFromString(html,'text/html');
+    for(const script of doc.querySelectorAll('script[src]')){
+      if(String(script.getAttribute('src')??'').trim())return true;
+    }
+    return false;
+  }
+  const withoutComments=html.replace(/<!--[\s\S]*?-->/g,'');
+  return /<script\b(?=[^>]*\bsrc\s*=\s*(?:"[^"]+"|'[^']+'|[^\s>]+))[^>]*>/i.test(withoutComments);
+}
+
 function computedGlobalRisk(source){
   const text=String(source??'');
   const roots=new Set(['window','self','globalThis','document','parent','top','frames','this']);
@@ -270,6 +283,7 @@ export function navigationRisk(candidate){
   const computed=computedGlobalRisk(js);
   if(computed)return {axis:'js',capability:computed.property==='open'?'popup-navigation':'computed-global',...computed};
   const html=String(candidate?.html??'');
+  if(containsExternalScript(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-script'};
   if(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(?:["']?refresh["']?\b))[^>]*>/i.test(html))return {axis:'html',capability:'meta-refresh'};
   return null;
 }

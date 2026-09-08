@@ -27,12 +27,23 @@ try {
   });
 
   await page.waitForTimeout(100);
-  const previewFrame=page.frames().find(frame=>frame!==page.mainFrame()&&frame.url()==='about:srcdoc');
+  let previewFrame=page.frames().find(frame=>frame!==page.mainFrame()&&frame.url()==='about:srcdoc');
   assert.ok(previewFrame,'visible preview frame must exist');
   await previewFrame.locator('#preview-js').waitFor();
-  assert.equal(await previewFrame.locator('#preview-js').textContent(),'after','visible preview must execute canonical JavaScript inside the existing sandbox');
+  assert.equal(await previewFrame.locator('#preview-js').textContent(),'before','canonical JavaScript must not auto-run merely because source was rendered');
 
-  console.log('Interactive preview JS gate PASS: the visible isolated preview executes canonical JavaScript.');
+  const runPreview=page.locator('#preview-run');
+  await runPreview.waitFor();
+  assert.equal(await runPreview.getAttribute('aria-label'),'Run canonical JavaScript in isolated preview');
+  await runPreview.click();
+  await page.waitForTimeout(100);
+
+  previewFrame=page.frames().find(frame=>frame!==page.mainFrame()&&frame.url()==='about:srcdoc');
+  assert.ok(previewFrame,'interactive preview frame must remain isolated');
+  await previewFrame.locator('#preview-js').waitFor();
+  assert.equal(await previewFrame.locator('#preview-js').textContent(),'after','explicit preview execution must run canonical JavaScript inside the existing sandbox');
+
+  console.log('Interactive preview JS gate PASS: static preview stays inert by default and explicit execution runs canonical JavaScript in the isolated preview.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

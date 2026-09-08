@@ -84,9 +84,13 @@ try{
 
   const requestCountBeforeContainment=requests.length;
   await page.evaluate(()=>window.faultline.applySource({targetAxis:'js',source:"fetch('/__faultline_side_effect__').catch(()=>{});"}));
-  const containedRun=await page.evaluate(()=>window.faultline.run());assert.equal(containedRun.status,'FAIL');await page.waitForTimeout(150);
+  const containedRun=await page.evaluate(()=>window.faultline.run());
+  assert.equal(containedRun.status,'UNRESOLVED');
+  assert.equal(containedRun.evidence?.reason,'UNSAFE_NETWORK');
+  assert.equal(containedRun.evidence?.capability,'fetch');
+  await page.waitForTimeout(150);
   assert.equal(requests.slice(requestCountBeforeContainment).some(url=>url.includes('/__faultline_side_effect__')),false,'experiment source escaped the sandbox and reached the network');
 
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);assert.equal(await page.locator('#source').isVisible(),true);assert.equal(await page.locator('#preview').isVisible(),true);assert.equal(errors.length,0,errors.join('\n'));
-  console.log('Browser gate PASS: Chromium loaded UI, registered 16 spec-valid WebMCP tools with semantic-unit discovery, targeted cancellation, and revision guards on every canonical operation, serialized concurrent sandbox experiments, rejected stale source/oracle mutations, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, blocked experiment network side effects, and passed mobile overflow checks.');
+  console.log('Browser gate PASS: Chromium loaded UI, registered 16 spec-valid WebMCP tools with semantic-unit discovery, targeted cancellation, and revision guards on every canonical operation, serialized concurrent sandbox experiments, rejected stale source/oracle mutations, ran oracle, probed, reduced, persisted revisions across reload, restored a pre-reload snapshot, surfaced blocked fetch attempts as unsafe-network evidence, and passed mobile overflow checks.');
 } finally {if(browser)await browser.close();server.kill('SIGTERM');}

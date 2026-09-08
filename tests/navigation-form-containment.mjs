@@ -34,20 +34,23 @@ try {
     });
   },{sinkPort,js});
 
-  const assertContained=async state=>{
-    const result=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:state.revision});
-    await page.waitForTimeout(120);
+  const assertResultContained=result=>{
     assert.equal(sinkHits,0,'form navigation must never leave the experiment sandbox');
     assert.equal(result.status,'UNRESOLVED','a blocked form navigation attempt must not be reported as ordinary oracle evidence');
     assert.equal(result.evidence?.reason,'UNSAFE_NAVIGATION','form navigation rejection must be explicit and machine-readable');
     assert.equal(result.evidence?.capability,'form-navigation','form navigation must identify its capability');
   };
 
-  await assertContained(await loadFormCase("window.addEventListener('submit',()=>console.log('FAULTLINE_FORM_SUBMIT_EVENT'));document.querySelector('#escape-form').requestSubmit()"));
+  const requestSubmitState=await loadFormCase("window.addEventListener('submit',()=>console.log('FAULTLINE_FORM_SUBMIT_EVENT'));document.querySelector('#escape-form').requestSubmit()");
+  const requestSubmitResult=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:requestSubmitState.revision});
+  await page.waitForTimeout(120);
   assert.equal(submitEvents.length,0,'the sandbox blocks requestSubmit before a submit event becomes observable; containment must hook the imperative API itself');
+  assertResultContained(requestSubmitResult);
 
   const directSubmitState=await loadFormCase("document.querySelector('#escape-form').submit()");
-  await assertContained(directSubmitState);
+  const directSubmitResult=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:directSubmitState.revision});
+  await page.waitForTimeout(120);
+  assertResultContained(directSubmitResult);
 
   await page.locator('#preview-run').click();
   await page.waitForTimeout(180);

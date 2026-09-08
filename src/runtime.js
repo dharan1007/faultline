@@ -202,20 +202,35 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  const send=resultPort?resultPort.postMessage.bind(resultPort):null;
  const runtimeErrors=[];
  const navigationAttempts=[];
+ const nativeFormSubmit=HTMLFormElement.prototype.submit;
  const captureRuntimeError=value=>runtimeErrors.push(String(value));
  const latestNavigationAttempt=()=>navigationAttempts.at(-1)||null;
+ const reportNavigationAttempt=risk=>{
+  navigationAttempts.push(risk);
+  ${previewOnly?`parent.postMessage({type:'faultline:preview-navigation-blocked',bootstrapId:${JSON.stringify(bootstrapId)},risk},'*');`:''}
+ };
  const captureNavigationAttempt=event=>{
   const target=event.target?.closest?.('a[href],area[href]');
   if(!target)return;
   const href=String(target.getAttribute('href')??'').trim();
   if(!href||href.startsWith('#'))return;
   event.preventDefault();
-  const risk={axis:'html',capability:'anchor-navigation'};
-  navigationAttempts.push(risk);
-  ${previewOnly?`parent.postMessage({type:'faultline:preview-navigation-blocked',bootstrapId:${JSON.stringify(bootstrapId)},risk},'*');`:''}
+  reportNavigationAttempt({axis:'html',capability:'anchor-navigation'});
+ };
+ const isDialogForm=form=>String(form?.getAttribute?.('method')||form?.method||'').toLowerCase()==='dialog';
+ const captureFormNavigationAttempt=event=>{
+  const form=event.target;
+  if(!(form instanceof HTMLFormElement)||isDialogForm(form))return;
+  event.preventDefault();
+  reportNavigationAttempt({axis:'html',capability:'form-navigation'});
+ };
+ HTMLFormElement.prototype.submit=function(){
+  if(isDialogForm(this))return nativeFormSubmit.call(this);
+  reportNavigationAttempt({axis:'html',capability:'form-navigation'});
  };
  const blockedNavigation=sendResult=>{const risk=latestNavigationAttempt();if(!risk)return false;sendResult({status:'UNRESOLVED',evidence:{reason:'UNSAFE_NAVIGATION',...risk}});return true;};
  addEventListener('click',captureNavigationAttempt,true);
+ addEventListener('submit',captureFormNavigationAttempt,true);
  addEventListener('error',e=>{captureRuntimeError(e.error?.message??e.message??e.error??'runtime error');e.preventDefault()});
  addEventListener('unhandledrejection',e=>{captureRuntimeError(e.reason?.message??e.reason??'unhandled rejection');e.preventDefault()});
  const executeCandidate=()=>{try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e)}};

@@ -157,3 +157,23 @@ export async function replayJourney(page,journey,{oracle=null,signal}={}){
     return {operationStatus:'FAILED',oracleOutcome:'UNRESOLVED',steps,error:{code:error?.code||'REPLAY_FAILED',message:String(error?.message||'REPLAY_FAILED').slice(0,512)},oracle:null};
   }
 }
+
+export async function runReproducibilityGate({run,requiredMatches=2,allowUnstable=false}={}){
+  if(typeof run!=='function')throw new TypeError('REPRODUCIBILITY_RUN_REQUIRED');
+  if(!Number.isInteger(requiredMatches)||requiredMatches<2||requiredMatches>10)throw new RangeError('INVALID_REQUIRED_MATCHES');
+  const attempts=[];
+  for(let index=0;index<requiredMatches;index+=1){
+    attempts.push(clone(await run({attempt:index+1})));
+  }
+  const completed=attempts.every(attempt=>attempt?.operationStatus==='COMPLETED');
+  const outcomes=attempts.map(attempt=>attempt?.oracleOutcome||'UNRESOLVED');
+  const allFail=completed&&outcomes.every(outcome=>outcome==='FAIL');
+  if(allFail){
+    return Object.freeze({status:'REPRODUCIBLE',oracleOutcome:'FAIL',requiredMatches,attempts:Object.freeze(attempts.map(attempt=>Object.freeze(attempt))),stable:true,blocked:false,override:false});
+  }
+  const sameOutcome=completed&&outcomes.every(outcome=>outcome===outcomes[0]);
+  if(sameOutcome&&outcomes[0]==='PASS'){
+    return Object.freeze({status:'NOT_REPRODUCED',oracleOutcome:'PASS',requiredMatches,attempts:Object.freeze(attempts.map(attempt=>Object.freeze(attempt))),stable:true,blocked:true,override:false});
+  }
+  return Object.freeze({status:allowUnstable?'UNSTABLE_OVERRIDE':'UNSTABLE',oracleOutcome:'UNRESOLVED',requiredMatches,attempts:Object.freeze(attempts.map(attempt=>Object.freeze(attempt))),stable:false,blocked:!allowUnstable,override:Boolean(allowUnstable)});
+}

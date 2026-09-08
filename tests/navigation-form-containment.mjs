@@ -26,7 +26,7 @@ try {
     return window.faultline.loadCase({
       expectedRevision:current.revision,
       case:{
-        html:`<main id="payload">contained</main><form id="escape-form" action="http://127.0.0.1:${sinkPort}/form-escape" method="post"><button type="submit">Submit</button></form>`,
+        html:`<main id="payload">contained</main><form id="escape-form" action="http://127.0.0.1:${sinkPort}/form-escape" method="post"><button id="submitter" type="submit">Submit</button></form>`,
         css:'',
         js,
         oracle:{kind:'dom_exists',selector:'#payload',equals:true,action:{kind:'none'},delayMs:0}
@@ -34,6 +34,7 @@ try {
     });
   },{sinkPort,js});
 
+  const runCase=state=>page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:state.revision});
   const assertResultContained=result=>{
     assert.equal(sinkHits,0,'form navigation must never leave the experiment sandbox');
     assert.equal(result.status,'UNRESOLVED','a blocked form navigation attempt must not be reported as ordinary oracle evidence');
@@ -42,23 +43,37 @@ try {
   };
 
   const requestSubmitState=await loadFormCase("window.addEventListener('submit',()=>console.log('FAULTLINE_FORM_SUBMIT_EVENT'));document.querySelector('#escape-form').requestSubmit()");
-  const requestSubmitResult=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:requestSubmitState.revision});
+  const requestSubmitResult=await runCase(requestSubmitState);
   await page.waitForTimeout(120);
   assert.equal(submitEvents.length,0,'the sandbox blocks requestSubmit before a submit event becomes observable; containment must hook the imperative API itself');
   assertResultContained(requestSubmitResult);
 
   const directSubmitState=await loadFormCase("document.querySelector('#escape-form').submit()");
-  const directSubmitResult=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:directSubmitState.revision});
-  await page.waitForTimeout(120);
-  assertResultContained(directSubmitResult);
+  assertResultContained(await runCase(directSubmitState));
 
+  const submitClickState=await loadFormCase("document.querySelector('#submitter').click()");
+  assertResultContained(await runCase(submitClickState));
+
+  const invalidState=await page.evaluate(({sinkPort})=>{
+    const current=window.faultline.inspect();
+    return window.faultline.loadCase({expectedRevision:current.revision,case:{
+      html:`<main id="payload">contained</main><form id="invalid-form" action="http://127.0.0.1:${sinkPort}/invalid"><input required><button type="submit">Submit</button></form>`,
+      css:'',js:"document.querySelector('#invalid-form').requestSubmit()",
+      oracle:{kind:'dom_exists',selector:'#payload',equals:true,action:{kind:'none'},delayMs:0}
+    }});
+  },{sinkPort});
+  const invalidResult=await runCase(invalidState);
+  assert.equal(invalidResult.status,'FAIL','constraint validation that prevents submission must remain ordinary deterministic execution, not unsafe navigation');
+  assert.equal(sinkHits,0);
+
+  await loadFormCase("document.querySelector('#escape-form').submit()");
   await page.locator('#preview-run').click();
   await page.waitForTimeout(180);
   assert.equal(sinkHits,0,'explicit preview execution must not submit the form onto the network');
   const summary=await page.locator('#summary').textContent();
   assert.match(summary||'',/UNSAFE_NAVIGATION/,'blocked direct form navigation in preview must be visible to the user');
 
-  console.log('Form-navigation containment PASS: requestSubmit and direct submit are blocked and surfaced consistently across deterministic and preview execution.');
+  console.log('Form-navigation containment PASS: requestSubmit, direct submit, and submit-control clicks are surfaced without misclassifying invalid forms.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

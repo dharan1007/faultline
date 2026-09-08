@@ -259,6 +259,7 @@ function computedGlobalRisk(source){
 
 export function navigationRisk(candidate){
   const js=String(candidate?.js??'');
+  if(containsExecutableCall(js,'XMLHttpRequest')||containsExecutableMemberCall(js,['window','self','globalThis'],'XMLHttpRequest'))return {reason:'UNSAFE_NETWORK',axis:'js',capability:'xmlhttprequest'};
   if(containsExecutableCall(js,'fetch')||containsExecutableMemberCall(js,['window','self','globalThis'],'fetch'))return {reason:'UNSAFE_NETWORK',axis:'js',capability:'fetch'};
   if(containsExecutableIdentifier(js,'location'))return {axis:'js',capability:'location'};
   if(containsExecutableMemberCall(js,['window','self','globalThis','parent','top'],'open'))return {axis:'js',capability:'popup-navigation'};

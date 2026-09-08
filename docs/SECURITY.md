@@ -7,7 +7,7 @@
 - `default-src 'none'`
 - `connect-src 'none'`
 - no frames, workers, objects, base URI, media, fonts or form actions
-- blocked external script and stylesheet dependencies are surfaced as structured `UNSAFE_NETWORK` evidence instead of being allowed to produce ordinary oracle PASS/FAIL results
+- blocked external script, HTML stylesheet, CSS `@import`, and image dependencies are surfaced as structured `UNSAFE_NETWORK` evidence instead of being allowed to produce ordinary oracle PASS/FAIL results
 - lexical loop guards injected into braced `while`, `for`, `for await`, and `do...while` loops while ignoring strings/comments; executable unbraced loops are rejected before execution
 - host-side experiment timeout
 - WebMCP schemas are bounded and do not expose arbitrary DOM execution

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 
 const workflow=fs.readFileSync('.github/workflows/deploy-production.yml','utf8');
 const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));
-const manifest='.faultline-release-files';
+const manifest='faultline-release-files.txt';
 
 test('production deployment parity is driven by the complete built release manifest',()=>{
   assert.match(pkg.scripts.build,/node scripts-release-manifest\.mjs/,'build must generate a release manifest after all production assets are built');

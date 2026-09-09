@@ -246,7 +246,83 @@ export function removeUnits(source,units) {
   return out;
 }
 
+function hasStructuralHierarchy(items){
+  return items.length>0&&items.every(item=>item&&typeof item==='object'&&typeof item.id==='string'&&Number.isInteger(item.depth))&&items.some(item=>item.parentId!==null||item.depth>0);
+}
+
+async function hierarchicalDdminReduce(items,evaluate,{protectedItems,maxTrials}){
+  const byId=new Map(items.map(item=>[item.id,item]));
+  const protectedSet=new Set(protectedItems);
+  for(const item of protectedItems){
+    let cursor=item?.parentId?byId.get(item.parentId):null;
+    while(cursor){
+      protectedSet.add(cursor);
+      cursor=cursor.parentId?byId.get(cursor.parentId):null;
+    }
+  }
+
+  let active=new Set(items);
+  const trials=[];
+  let count=0;
+  const run=async candidateActive=>{
+    if(count>=maxTrials)throw new Error('TRIAL_BUDGET_EXHAUSTED');
+    count++;
+    const kept=items.filter(item=>candidateActive.has(item));
+    const status=await evaluate(kept);
+    trials.push({keptCount:kept.length,status});
+    return status;
+  };
+  if((await run(active))!=='FAIL')throw new Error('BASELINE_NOT_FAILING');
+
+  const descendantsById=new Map();
+  const descendantsOf=root=>{
+    if(descendantsById.has(root.id))return descendantsById.get(root.id);
+    const descendants=[];
+    for(const candidate of items){
+      let cursor=candidate.parentId?byId.get(candidate.parentId):null;
+      while(cursor){
+        if(cursor.id===root.id){descendants.push(candidate);break;}
+        cursor=cursor.parentId?byId.get(cursor.parentId):null;
+      }
+    }
+    descendantsById.set(root.id,descendants);
+    return descendants;
+  };
+
+  const maxDepth=items.reduce((max,item)=>Math.max(max,item.depth||0),0);
+  for(let depth=0;depth<=maxDepth;depth++){
+    let frontier=items.filter(item=>active.has(item)&&(item.depth||0)===depth&&!protectedSet.has(item));
+    if(!frontier.length)continue;
+    let n=2;
+    while(frontier.length){
+      const size=Math.ceil(frontier.length/n);
+      let changed=false;
+      for(let i=0;i<frontier.length;i+=size){
+        const chunk=frontier.slice(i,i+size);
+        const candidateActive=new Set(active);
+        for(const root of chunk){
+          candidateActive.delete(root);
+          for(const descendant of descendantsOf(root))candidateActive.delete(descendant);
+        }
+        if((await run(candidateActive))==='FAIL'){
+          active=candidateActive;
+          frontier=frontier.filter(item=>!chunk.includes(item)&&active.has(item));
+          n=Math.max(2,n-1);
+          changed=true;
+          break;
+        }
+      }
+      if(changed)continue;
+      if(n>=frontier.length)break;
+      n=Math.min(frontier.length,n*2);
+    }
+  }
+  return {items:items.filter(item=>active.has(item)),trials,trialCount:count};
+}
+
 export async function ddminReduce(items, evaluate, { protectedItems=[], maxTrials=100 }={}) {
+  if(hasStructuralHierarchy(items))return hierarchicalDdminReduce(items,evaluate,{protectedItems,maxTrials});
+
   const protectedSet = new Set(protectedItems);
   const protectedOrdered = items.filter(x=>protectedSet.has(x));
   let removable = items.filter(x=>!protectedSet.has(x));

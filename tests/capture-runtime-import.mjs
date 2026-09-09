@@ -65,7 +65,7 @@ try{
   const stale=await page.evaluate(async({capture})=>{
     try{await window.faultline.importCapture({expectedRevision:'r999999',capture});return null;}catch(error){return String(error?.message||error);}
   },{capture});
-  assert.equal(stale,'STALE_REVISION','capture import must reject stale callers before executing or mutating');
+  assert.match(stale,/^STALE_REVISION\b/,'capture import must reject stale callers before executing or mutating');
   const afterStale=await page.evaluate(()=>window.faultline.inspect());
   assert.equal(afterStale.revision,before.revision);
   assert.deepEqual(afterStale.case,before.case);

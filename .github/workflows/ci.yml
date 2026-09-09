@@ -6,7 +6,7 @@ permissions:
   contents: write
 jobs:
   capture-runtime-patch:
-    if: github.ref == 'refs/heads/feature/playwright-capture-ingestion-20260909' && github.event.head_commit.message == 'chore: patch canonical capture runtime'
+    if: "${{ github.ref == 'refs/heads/feature/playwright-capture-ingestion-20260909' && github.event.head_commit.message == 'chore: patch canonical capture runtime' }}"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

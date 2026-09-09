@@ -50,8 +50,8 @@ jobs:
       - name: Verify production tree
         run: npm run build
 
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install pinned Playwright Chromium
+        run: npx playwright install chromium
 
       - name: Verify real browser and WebMCP behavior
         run: npm run test:browser

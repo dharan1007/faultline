@@ -19,4 +19,5 @@ jobs:
       - run: node tests/playwright-capture-adapter.mjs
       - run: node tests/capture-runtime-import.mjs
       - run: node tests/human-capture-import.mjs
+      - run: node tests/playwright-capture-ingestion.mjs
       - run: npm run test:browser

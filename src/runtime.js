@@ -1,5 +1,6 @@
 import { semanticUnits, removeUnits, ddminReduce, createRevisionStore } from './reducer-engine.js';
 import { navigationRisk } from './sandbox-policy.js';
+import { CAPTURE_SCHEMA, normalizeCapture } from './capture.js';
 
 const $ = id => document.getElementById(id);
 const clone = v => JSON.parse(JSON.stringify(v));
@@ -35,9 +36,10 @@ let selectedUnitId = null;
 let experimentLedger = [];
 let experimentQueue = Promise.resolve();
 let previewBootstrapId = null;
+let captureProvenance = null;
 const activeWebMCPOperations = new Map();
-const CANCELLABLE_WEBMCP_TOOLS = new Set(['faultline_run','faultline_probe','faultline_reduce','faultline_autopilot']);
-const revisions = new Map([['r1',{value:clone(fixture),pins:[]}]]);
+const CANCELLABLE_WEBMCP_TOOLS = new Set(['faultline_run','faultline_probe','faultline_reduce','faultline_autopilot','faultline_import_capture']);
+const revisions = new Map([['r1',{value:clone(fixture),pins:[],captureProvenance:null}]]);
 
 function value(){ return store.inspect().value; }
 function revision(){ return store.inspect().revision; }
@@ -53,7 +55,7 @@ function trimRuntimeHistory(){
   }
   if(experimentLedger.length>MAX_EXPERIMENT_LEDGER) experimentLedger.splice(0,experimentLedger.length-MAX_EXPERIMENT_LEDGER);
 }
-function rememberRevision(rev,snapshot){ revisions.set(rev,clone(snapshot));trimRuntimeHistory(); }
+function rememberRevision(rev,snapshot){ const next=clone(snapshot);if(!Object.hasOwn(next,'captureProvenance'))next.captureProvenance=clone(captureProvenance);revisions.set(rev,next);trimRuntimeHistory(); }
 function rememberExperiment(entry){ experimentLedger.push(entry);trimRuntimeHistory();return entry; }
 function abortError(){ return new DOMException('WebMCP execution aborted','AbortError'); }
 function throwIfAborted(signal){ if(signal?.aborted)throw abortError(); }
@@ -147,18 +149,19 @@ function persistencePayload(profile=PERSISTENCE_PROFILES[0]){
   trimRuntimeHistory();
   const dumped=store.dump();
   const persistedStore={...dumped,snapshots:clone(dumped.snapshots.slice(-profile.storeSnapshots)),ledger:clone(dumped.ledger.slice(-profile.storeLedger))};
-  return {version:3,store:persistedStore,axis,pins:[...pins],experimentLedger:clone(experimentLedger.slice(-profile.experiments)),revisions:[...revisions.entries()].slice(-profile.runtimeRevisions).map(([rev,snapshot])=>[rev,clone(snapshot)])};
+  return {version:3,store:persistedStore,axis,pins:[...pins],captureProvenance:clone(captureProvenance),experimentLedger:clone(experimentLedger.slice(-profile.experiments)),revisions:[...revisions.entries()].slice(-profile.runtimeRevisions).map(([rev,snapshot])=>[rev,clone(snapshot)])};
 }
 function snapshotCanonical(){ return clone(persistencePayload(PERSISTENCE_PROFILES[0])); }
 function restoreCanonical(snapshot){
   store=createRevisionStore(fixture,snapshot.store);
   axis=['html','css','js'].includes(snapshot.axis)?snapshot.axis:'html';
   pins=new Set(Array.isArray(snapshot.pins)?snapshot.pins:[]);
+  captureProvenance=clone(snapshot.captureProvenance??null);
   experimentLedger=Array.isArray(snapshot.experimentLedger)?clone(snapshot.experimentLedger.slice(-MAX_EXPERIMENT_LEDGER)):[];
   revisions.clear();
   const maxRevision=Number(revision().slice(1));
   for(const entry of Array.isArray(snapshot.revisions)?snapshot.revisions.slice(-MAX_RUNTIME_REVISIONS):[]) if(validRevisionEntry(entry,maxRevision)) revisions.set(String(entry[0]),clone(entry[1]));
-  if(!revisions.has(revision())) revisions.set(revision(),{value:clone(value()),pins:[...pins]});
+  if(!revisions.has(revision())) revisions.set(revision(),{value:clone(value()),pins:[...pins],captureProvenance:clone(captureProvenance)});
   trimRuntimeHistory();
 }
 function isQuotaError(error){ return error?.name==='QuotaExceededError'||error?.name==='NS_ERROR_DOM_QUOTA_REACHED'||error?.code===22||error?.code===1014; }
@@ -186,11 +189,12 @@ function restoreLocal(){
       store=createRevisionStore(fixture,raw.store);
       axis=['html','css','js'].includes(raw.axis)?raw.axis:'html';
       pins=new Set(Array.isArray(raw.pins)?raw.pins:[]);
+      captureProvenance=clone(raw.captureProvenance??null);
       experimentLedger=Array.isArray(raw.experimentLedger)?raw.experimentLedger.slice(-MAX_EXPERIMENT_LEDGER):[];
       revisions.clear();
       const maxRevision=Number(revision().slice(1));
       for(const entry of Array.isArray(raw.revisions)?raw.revisions.slice(-MAX_RUNTIME_REVISIONS):[]) if(validRevisionEntry(entry,maxRevision)) revisions.set(String(entry[0]),clone(entry[1]));
-      if(!revisions.has(revision())) revisions.set(revision(),{value:clone(value()),pins:[...pins]});
+      if(!revisions.has(revision())) revisions.set(revision(),{value:clone(value()),pins:[...pins],captureProvenance:clone(captureProvenance)});
       trimRuntimeHistory();
       return;
     }
@@ -204,6 +208,7 @@ function restoreLocal(){
     store=createRevisionStore(fixture,{version:1,revision:legacyRevision,value:legacy.state.value,snapshots:[[currentRevision,legacy.state.value]],ledger:Array.isArray(legacy.state.history)?legacy.state.history:[]});
     axis=['html','css','js'].includes(legacy.axis)?legacy.axis:'html';
     pins=new Set(Array.isArray(legacy.pins)?legacy.pins:[]);
+    captureProvenance=null;
     experimentLedger=Array.isArray(legacy.experimentLedger)?legacy.experimentLedger.slice(-MAX_EXPERIMENT_LEDGER):[];
     revisions.clear();
     rememberRevision(currentRevision,{value:clone(value()),pins:[...pins]});
@@ -404,7 +409,7 @@ function runCase(c=value(),{signal}={}){
 
 function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},revision:revision(),at:new Date().toISOString(),...extra};rememberExperiment(entry);persistMutation(before);renderTrace();return entry; }
 async function run({expectedRevision=revision()}={}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const r=await runCase(value(),{signal});throwIfAborted(signal);record('run',r,{revision:testedRevision});renderHealth(r.status);return {...r,testedRevision}; }
-function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.value,pins:[...pins],unitCounts:{html:unitsFor('html',s.value.html).length,css:unitsFor('css',s.value.css).length,js:unitsFor('js',s.value.js).length},latest:experimentLedger.at(-1)||null,webmcp:!!document.modelContext}; }
+function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.value,captureProvenance:clone(captureProvenance),pins:[...pins],unitCounts:{html:unitsFor('html',s.value.html).length,css:unitsFor('css',s.value.css).length,js:unitsFor('js',s.value.js).length},latest:experimentLedger.at(-1)||null,webmcp:!!document.modelContext}; }
 function units({targetAxis=axis}={}){
   if(!['html','css','js'].includes(targetAxis))throw new Error('INVALID_AXIS');
   const s=store.inspect();
@@ -413,17 +418,31 @@ function units({targetAxis=axis}={}){
 function commitCase(next,event,expectedRevision=revision()){ const before=snapshotCanonical();const result=store.commit(next,event,expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();renderPreview();return inspect(); }
 function defineOracle({expectedRevision=revision(),oracle}){ validateOracle(oracle);return commitCase({...value(),oracle:clone(oracle)},{kind:'define_oracle'},expectedRevision); }
 function applySource({expectedRevision=revision(),targetAxis=axis,source}){ if(!['html','css','js'].includes(targetAxis))throw new Error('INVALID_AXIS'); return commitCase({...value(),[targetAxis]:String(source)},{kind:'source_edit',axis:targetAxis},expectedRevision); }
-function loadCase({expectedRevision=revision(),case:nextCase}){
+function commitLoadedCase({expectedRevision,nextCase,kind,provenance=null}){
   validateCase(nextCase);
   store.assertRevision(expectedRevision);
   const before=snapshotCanonical();
   pins.clear();
-  const result=store.commit(clone(nextCase),{kind:'case_load'},expectedRevision);
-  rememberRevision(result.revision,{value:clone(result.value),pins:[]});
+  captureProvenance=clone(provenance);
+  const result=store.commit(clone(nextCase),{kind},expectedRevision);
+  rememberRevision(result.revision,{value:clone(result.value),pins:[],captureProvenance:clone(captureProvenance)});
   persistMutation(before);
   render();
   renderPreview();
   return inspect();
+}
+function loadCase({expectedRevision=revision(),case:nextCase}){ return commitLoadedCase({expectedRevision,nextCase,kind:'case_load',provenance:null}); }
+async function importCapture({expectedRevision=revision(),capture},{signal}={}){
+  store.assertRevision(expectedRevision);
+  const normalized=normalizeCapture(capture);
+  validateCase(normalized.case);
+  throwIfAborted(signal);
+  const baseline=await runCase(normalized.case,{signal});
+  throwIfAborted(signal);
+  store.assertRevision(expectedRevision);
+  if(baseline.status!=='FAIL')throw new Error(`CAPTURE_BASELINE_${baseline.status}`);
+  const state=commitLoadedCase({expectedRevision,nextCase:normalized.case,kind:'capture_import',provenance:normalized.provenance});
+  return {baseline:clone(baseline),state};
 }
 function resetCase({expectedRevision=revision()}={}){ return loadCase({expectedRevision,case:fixture}); }
 async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const source=value()[targetAxis];const unit=unitsFor(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(pins.has(pinKey(targetAxis,unitId)))throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const result=await runCase(candidate,{signal});throwIfAborted(signal);record('probe',result,{axis:targetAxis,unitId,mutated:false,revision:testedRevision});return {...result,mutated:false,testedRevision,canonicalRevision:revision()}; }
@@ -468,8 +487,9 @@ function listRevisions({limit=MAX_RUNTIME_REVISIONS}={}){
   });
   return {currentRevision,retentionLimit:MAX_RUNTIME_REVISIONS,revisions:items};
 }
-function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();renderPreview();return inspect(); }
+function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);captureProvenance=clone(snap.captureProvenance??null);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();renderPreview();return inspect(); }
 function exportCase(){const c=value(),safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>${String(c.js).replace(/<\/script/gi,'<\\/script')}<\/script></body></html>`;}
+function exportCapture(){if(!captureProvenance)throw new Error('CAPTURE_NOT_AVAILABLE');const c=value();return {schema:CAPTURE_SCHEMA,source:{html:c.html,css:c.css,js:c.js},oracle:clone(c.oracle),provenance:clone(captureProvenance),expectedStatus:'FAIL'};}
 function validateAxes(axes){if(!Array.isArray(axes)||axes.length<1||axes.length>3||axes.some(targetAxis=>!['html','css','js'].includes(targetAxis))||new Set(axes).size!==axes.length)throw new Error('INVALID_AXES');return axes;}
 async function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){
   validateAxes(axes);store.assertRevision(expectedRevision);throwIfAborted(signal);
@@ -533,10 +553,13 @@ const ACTION_STEP_SCHEMA={type:'object',additionalProperties:false,properties:{k
 const ACTION_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}},required:['kind']};
 const ORACLE_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ORACLE_KINDS},selector:{type:'string'},property:{type:'string'},equals:{},action:ACTION_SCHEMA,delayMs:{type:'number',minimum:0,maximum:2000}},required:['kind','action']};
 const CASE_SCHEMA={type:'object',additionalProperties:false,properties:{html:{type:'string'},css:{type:'string'},js:{type:'string'},oracle:ORACLE_SCHEMA},required:['html','css','js','oracle']};
+const CAPTURE_PROVENANCE_SCHEMA={type:'object',additionalProperties:false,properties:{url:{type:'string'},title:{type:'string'},capturedAt:{type:'string'},userAgent:{type:'string'},label:{type:'string'}},required:['url','title','capturedAt','userAgent']};
+const CAPTURE_ENVELOPE_SCHEMA={type:'object',additionalProperties:false,properties:{schema:{type:'string',const:CAPTURE_SCHEMA},source:{type:'object',additionalProperties:false,properties:{html:{type:'string'},css:{type:'string'},js:{type:'string'}},required:['html','css','js']},oracle:ORACLE_SCHEMA,provenance:CAPTURE_PROVENANCE_SCHEMA,expectedStatus:{type:'string',const:'FAIL'}},required:['schema','source','oracle','provenance','expectedStatus']};
 const TOOL_DEFS=[
  ['faultline_inspect','Inspect the canonical failure case, revision, pins and semantic-unit counts.',{},async()=>inspect(),true,true],
  ['faultline_units','List actionable semantic units and pin state for one canonical source axis.',{targetAxis:{type:'string',enum:['html','css','js']}},async input=>units(input),true,true,['targetAxis']],
  ['faultline_load_case','Replace the complete canonical HTML, CSS, JavaScript and oracle in one optimistic revision.',{...REVISION_PROPERTY,case:CASE_SCHEMA},async input=>loadCase(input),false,true,['expectedRevision','case']],
+ ['faultline_import_capture','Baseline-verify and atomically import a faultline.capture.v1 envelope produced from a real browser failure. Native WebMCP options.signal cancellation is supported.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,capture:CAPTURE_ENVELOPE_SCHEMA},async(input,options)=>importCapture(input,options),false,true,['expectedRevision','capture']],
  ['faultline_reset_case','Reset to the built-in fixture as one guarded canonical revision while preserving recoverable history.',{...REVISION_PROPERTY},async input=>resetCase(input),false,false,['expectedRevision']],
  ['faultline_run','Execute the locked deterministic failure oracle against the inspected canonical revision. Native WebMCP options.signal cancellation is supported; requestId is an optional compatibility handle for faultline_cancel_active.',{...REVISION_PROPERTY,...REQUEST_PROPERTY},async(input,options)=>run(input,options),false,true,['expectedRevision']],
  ['faultline_cancel_active','Cancel one active long-running FAULTLINE WebMCP operation by its caller-owned requestId without affecting unrelated work.',{...REQUEST_PROPERTY},async input=>cancelActiveWebMCP(input),false,false,['requestId']],
@@ -553,7 +576,7 @@ const TOOL_DEFS=[
 ];
 function registerWebMCP(){const mc=document.modelContext;if(!mc?.registerTool){$('webmcp').textContent='WebMCP unavailable';return;}const controllers=[];Promise.all(TOOL_DEFS.map(async([name,description,properties,execute,readOnly,untrustedContent,required=[]])=>{const controller=new AbortController();controllers.push(controller);await mc.registerTool({name,title:name.replace('faultline_','FAULTLINE · '),description,inputSchema:{type:'object',properties,required,additionalProperties:false},execute:async(input,options)=>await (CANCELLABLE_WEBMCP_TOOLS.has(name)?executeWebMCPOperation(name,execute,input||{},options||{}):execute(input||{},options||{})),annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}},{signal:controller.signal});})).then(()=>{$('webmcp').textContent=`WebMCP ready · ${TOOL_DEFS.length} tools`;$('webmcp').dataset.state='ready';}).catch(e=>{$('webmcp').textContent='WebMCP registration error';$('webmcp').title=String(e?.message||e);});window.addEventListener('pagehide',()=>{controllers.forEach(c=>c.abort());abortAllWebMCP();},{once:true});}
 
-window.faultline={inspect,units,loadCase,resetCase,run,defineOracle,applySource,probe,reduce,pin,history,revisions:listRevisions,restore,exportCase,autopilot,manifest:()=>TOOL_DEFS.map(([name,description,properties,,readOnly,untrustedContent,required=[]])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},readOnly,annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}}))};
+window.faultline={inspect,units,loadCase,importCapture,resetCase,run,defineOracle,applySource,probe,reduce,pin,history,revisions:listRevisions,restore,exportCase,exportCapture,autopilot,manifest:()=>TOOL_DEFS.map(([name,description,properties,,readOnly,untrustedContent,required=[]])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},readOnly,annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}}))};
 
 document.querySelectorAll('[data-axis]').forEach(b=>b.onclick=()=>{axis=b.dataset.axis;render();});
 $('apply').onclick=()=>applySource({source:$('source').value});

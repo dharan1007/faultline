@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
 import assert from 'node:assert/strict';
-import { captureFaultlineCase } from '../integrations/playwright-capture/index.js';
+import { armFaultlineDiagnostics, captureFaultlineCase } from '../integrations/playwright-capture/index.js';
 
 const root=process.cwd();
 const fixture='<!doctype html><html><head><title>Profile failure</title><style>.noise{color:red} #save{display:block}</style></head><body><p class="noise">irrelevant</p><label>Name <input id="name"></label><button id="save" aria-disabled="true">Save</button></body></html>';
@@ -31,9 +31,16 @@ try{
   browser=await chromium.launch({headless:true});
   const capturePage=await browser.newPage({viewport:{width:1280,height:720}});
   await capturePage.goto(`${origin}/fixture`,{waitUntil:'networkidle'});
-  const capture=await captureFaultlineCase({page:capturePage,oracle,js,provenance:{testTitle:'save remains disabled after valid name',testFile:'profile.spec.mjs'}});
+  const diagnostics=armFaultlineDiagnostics({page:capturePage});
+  await capturePage.evaluate(()=>console.error('ingestion pre-snapshot console failure'));
+  await capturePage.evaluate(()=>setTimeout(()=>{throw new Error('ingestion pre-snapshot page boom')},0));
+  await capturePage.waitForTimeout(50);
+  const capture=await captureFaultlineCase({page:capturePage,oracle,js,provenance:{testTitle:'save remains disabled after valid name',testFile:'profile.spec.mjs'},diagnostics});
+  diagnostics.dispose();
   assert.equal(capture.schema,'faultline.capture.v1');
   assert.match(capture.source.html,/irrelevant/);
+  assert.ok(capture.diagnostics.consoleErrors.some(message=>message.includes('ingestion pre-snapshot console failure')));
+  assert.ok(capture.diagnostics.pageErrors.some(message=>message.includes('ingestion pre-snapshot page boom')));
 
   const page=await browser.newPage();
   await page.goto(origin,{waitUntil:'networkidle'});
@@ -43,6 +50,8 @@ try{
     return window.faultline.importCapture({expectedRevision:before.revision,capture});
   },capture);
   assert.equal(imported.baseline.status,'FAIL');
+  assert.ok(imported.captureProvenance.diagnostics.consoleErrors.some(message=>message.includes('ingestion pre-snapshot console failure')),'import response must retain bounded console evidence');
+  assert.ok(imported.captureProvenance.diagnostics.pageErrors.some(message=>message.includes('ingestion pre-snapshot page boom')),'import response must retain bounded page-error evidence');
 
   const beforeReduce=await page.evaluate(()=>window.faultline.inspect());
   const reduction=await page.evaluate(async expectedRevision=>window.faultline.autopilot({expectedRevision,axes:['html','css','js'],maxTrialsPerAxis:80}),beforeReduce.revision);
@@ -53,6 +62,8 @@ try{
   const bundle=await page.evaluate(()=>window.faultline.exportBundle());
   assert.equal(bundle.schema,'faultline.export.v1');
   assert.equal(bundle.captureProvenance.provenance.testTitle,'save remains disabled after valid name');
+  assert.ok(bundle.captureProvenance.diagnostics.consoleErrors.some(message=>message.includes('ingestion pre-snapshot console failure')),'structured export must retain bounded console evidence after reduction');
+  assert.ok(bundle.captureProvenance.diagnostics.pageErrors.some(message=>message.includes('ingestion pre-snapshot page boom')),'structured export must retain bounded page-error evidence after reduction');
   assert.ok(bundle.case.html.length<=beforeReduce.case.html.length);
   assert.ok(bundle.case.css.length<=beforeReduce.case.css.length);
   assert.ok(bundle.case.js.length<=beforeReduce.case.js.length);
@@ -68,7 +79,7 @@ try{
   assert.equal(negativeAfter.revision,negativeBefore.revision,'non-reproducing capture must not mutate revision');
   assert.deepEqual(negativeAfter.case,negativeBefore.case,'non-reproducing capture must not mutate case');
 
-  console.log('Playwright capture ingestion PASS: real page capture reproduces, reduces, re-verifies, exports provenance, and rejects non-reproducing imports transactionally.');
+  console.log('Playwright capture ingestion PASS: real pre-snapshot failure evidence survives capture, import, reduction and structured export while non-reproducing imports remain transactional.');
 }finally{
   if(browser)await browser.close();
   await new Promise(resolve=>server.close(resolve));

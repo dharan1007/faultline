@@ -262,6 +262,38 @@ function containsExternalImage(source){
   return false;
 }
 
+
+function isBlockedMediaSource(source){
+  const src=String(source??'').trim();
+  return Boolean(src)&&!/^(?:data|blob):/i.test(src);
+}
+
+function containsExternalMedia(source){
+  const html=String(source??'');
+  if(typeof DOMParser==='function'){
+    const doc=new DOMParser().parseFromString(html,'text/html');
+    for(const media of doc.querySelectorAll('video[src],audio[src],video source[src],audio source[src]')){
+      if(isBlockedMediaSource(media.getAttribute('src')))return true;
+    }
+    return false;
+  }
+  const withoutComments=html.replace(/<!--[\s\S]*?-->/g,'');
+  for(const match of withoutComments.matchAll(/<(?:video|audio)\b[^>]*>/gi)){
+    const tag=match[0];
+    const src=tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const srcValue=String(src?.[1]??src?.[2]??src?.[3]??'').trim();
+    if(isBlockedMediaSource(srcValue))return true;
+  }
+  for(const match of withoutComments.matchAll(/<(video|audio)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)){
+    for(const source of match[2].matchAll(/<source\b[^>]*>/gi)){
+      const src=source[0].match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+      const srcValue=String(src?.[1]??src?.[2]??src?.[3]??'').trim();
+      if(isBlockedMediaSource(srcValue))return true;
+    }
+  }
+  return false;
+}
+
 function isBlockedFrameSource(source){
   const src=String(source??'').trim();
   return Boolean(src)&&!/^about:blank(?:[?#]|$)/i.test(src);
@@ -437,6 +469,7 @@ export function navigationRisk(candidate){
   if(containsExternalScript(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-script'};
   if(containsExternalStylesheet(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-stylesheet'};
   if(containsExternalImage(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-image'};
+  if(containsExternalMedia(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-media'};
   if(containsExternalFrame(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-frame'};
   if(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(?:["']?refresh["']?\b))[^>]*>/i.test(html))return {axis:'html',capability:'meta-refresh'};
   return null;

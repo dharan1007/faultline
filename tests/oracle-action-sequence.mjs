@@ -29,7 +29,7 @@ try{
     case:{
       html:'<label>Name <input id="name"></label><button id="submit" type="button">Submit</button><div id="status">idle</div>',
       css:'',
-      js:"let latest='';document.querySelector('#name').addEventListener('input',event=>{latest=event.currentTarget.value});document.querySelector('#submit').addEventListener('click',()=>{document.querySelector('#status').textContent='submitted:'+latest});",
+      js:"let latest='';document.querySelector('#name').addEventListener('input',event=>{const value=event.currentTarget.value;queueMicrotask(()=>{latest=value})});document.querySelector('#submit').addEventListener('click',()=>{document.querySelector('#status').textContent='submitted:'+latest});",
       oracle:{kind:'dom_property',selector:'#status',property:'textContent',equals:'submitted:alice',action:{kind:'sequence',steps:[{kind:'set_value',selector:'#name',value:'alice'},{kind:'click',selector:'#submit'}]},delayMs:0}
     }
   }),start.revision);
@@ -37,7 +37,7 @@ try{
 
   const result=await page.evaluate(()=>window.faultline.run());
   assert.equal(result.status,'FAIL','set_value followed by click must reproduce the locked failure');
-  assert.equal(result.evidence.actual,'submitted:alice','sequence steps must execute in declared order before measurement');
+  assert.equal(result.evidence.actual,'submitted:alice','sequence steps must preserve order and yield between browser interactions');
 
   await page.selectOption('#action-kind','sequence');
   const sequenceEditor=page.locator('#action-sequence');
@@ -56,7 +56,7 @@ try{
   },invalidRevision);
   assert.equal(invalid,'INVALID_ORACLE','empty action sequences must be rejected deterministically');
 
-  console.log('Oracle action sequence PASS: WebMCP and human surfaces execute bounded multi-step interactions in declared order.');
+  console.log('Oracle action sequence PASS: WebMCP and human surfaces execute bounded multi-step interactions in declared order with browser-task boundaries.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

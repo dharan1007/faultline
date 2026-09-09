@@ -1,0 +1,2 @@
+Oracle action sequence PASS: WebMCP and human surfaces execute bounded multi-step interactions in declared order with browser-task boundaries.
+exit_code=0

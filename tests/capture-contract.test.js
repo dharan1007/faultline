@@ -51,3 +51,12 @@ test('capture validation preserves exact source text and enforces existing wait/
   errorCode(()=>validateCaptureArtifact({...validCapture,oracle:{...validOracle,action:{kind:'sequence',steps:[{kind:'wait',durationMs:2001}]}}}),'UNSUPPORTED_CAPTURE_ACTION');
   errorCode(()=>validateCaptureArtifact({...validCapture,oracle:{...validOracle,delayMs:2001}}),'INVALID_ORACLE');
 });
+
+test('capture validation rejects shapes that canonical oracle validation cannot persist or recover',async()=>{
+  const {validateCaptureArtifact}=await contract();
+  errorCode(()=>validateCaptureArtifact({...validCapture,unexpected:true}),'INVALID_CAPTURE');
+  errorCode(()=>validateCaptureArtifact({...validCapture,source:{...validCapture.source,unexpected:true}}),'INVALID_CAPTURE');
+  errorCode(()=>validateCaptureArtifact({...validCapture,oracle:{...validOracle,unexpected:true}}),'INVALID_ORACLE');
+  errorCode(()=>validateCaptureArtifact({...validCapture,oracle:{...validOracle,action:{kind:'sequence',selector:'#save',steps:[{kind:'click',selector:'#save'}]}}}),'UNSUPPORTED_CAPTURE_ACTION');
+  errorCode(()=>validateCaptureArtifact({...validCapture,oracle:{...validOracle,action:{kind:'sequence',steps:[{kind:'wait',durationMs:0,selector:'#save'}]}}}),'UNSUPPORTED_CAPTURE_ACTION');
+});

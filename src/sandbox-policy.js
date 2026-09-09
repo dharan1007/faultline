@@ -293,6 +293,30 @@ function containsExternalMedia(source){
   return false;
 }
 
+function containsBlockedEmbeddedObject(source){
+  const html=String(source??'');
+  if(typeof DOMParser==='function'){
+    const doc=new DOMParser().parseFromString(html,'text/html');
+    for(const object of doc.querySelectorAll('object[data]')){
+      if(String(object.getAttribute('data')??'').trim())return true;
+    }
+    for(const embed of doc.querySelectorAll('embed[src]')){
+      if(String(embed.getAttribute('src')??'').trim())return true;
+    }
+    return false;
+  }
+  const withoutComments=html.replace(/<!--[\s\S]*?-->/g,'');
+  for(const match of withoutComments.matchAll(/<object\b[^>]*>/gi)){
+    const data=match[0].match(/\bdata\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    if(String(data?.[1]??data?.[2]??data?.[3]??'').trim())return true;
+  }
+  for(const match of withoutComments.matchAll(/<embed\b[^>]*>/gi)){
+    const src=match[0].match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    if(String(src?.[1]??src?.[2]??src?.[3]??'').trim())return true;
+  }
+  return false;
+}
+
 function isBlockedFrameSource(source){
   const src=String(source??'').trim();
   return Boolean(src)&&!/^about:blank(?:[?#]|$)/i.test(src);
@@ -528,6 +552,7 @@ export function navigationRisk(candidate){
   if(containsExternalImage(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-image'};
   if(containsExternalMedia(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-media'};
   if(containsExternalFrame(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-frame'};
+  if(containsBlockedEmbeddedObject(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-embedded-object'};
   if(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(?:["']?refresh["']?\b))[^>]*>/i.test(html))return {axis:'html',capability:'meta-refresh'};
   return null;
 }

@@ -1,3 +1,5 @@
+import { parse as parseJavaScript } from '../vendor/acorn.mjs';
+
 const clone = value => JSON.parse(JSON.stringify(value));
 const MAX_REVISION_SNAPSHOTS = 32;
 const MAX_REVISION_LEDGER = 64;
@@ -163,6 +165,51 @@ function cssUnits(source){
   return finishUnits('css',source,records);
 }
 
+const JAVASCRIPT_UNIT_CONTAINERS=new Set(['Program','BlockStatement','StaticBlock','ClassBody']);
+function parseJavaScriptProgram(source){
+  const common={ecmaVersion:'latest',allowHashBang:true,allowAwaitOutsideFunction:true};
+  try{return parseJavaScript(source,{...common,sourceType:'script',allowReturnOutsideFunction:true});}
+  catch(scriptError){
+    try{return parseJavaScript(source,{...common,sourceType:'module'});}
+    catch{throw scriptError;}
+  }
+}
+function isAstNode(value){return Boolean(value&&typeof value==='object'&&typeof value.type==='string'&&Number.isInteger(value.start)&&Number.isInteger(value.end));}
+function jsUnitKind(node){return ['MethodDefinition','PropertyDefinition','StaticBlock'].includes(node.type)?'class_member':'statement';}
+function parserBackedJsUnits(source){
+  const ast=parseJavaScriptProgram(source);
+  const records=[];
+  const visit=(node,parentRecord=null,forceUnit=false)=>{
+    if(!isAstNode(node))return;
+    let currentParent=parentRecord;
+    if(forceUnit&&node.type!=='EmptyStatement'){
+      const record={start:node.start,end:node.end,kind:jsUnitKind(node),parent:parentRecord};
+      records.push(record);
+      currentParent=record;
+    }
+    for(const [key,value] of Object.entries(node)){
+      if(['start','end','loc','range'].includes(key))continue;
+      if(Array.isArray(value)){
+        const forceChildren=(JAVASCRIPT_UNIT_CONTAINERS.has(node.type)&&key==='body')||(node.type==='SwitchCase'&&key==='consequent');
+        for(const child of value)if(isAstNode(child))visit(child,currentParent,forceChildren);
+      }else if(isAstNode(value))visit(value,currentParent,false);
+    }
+  };
+  visit(ast,null,false);
+  return finishUnits('js',source,records);
+}
+function legacyJsUnits(source){
+  const units=[];
+  const line=/[^\n;{}]+(?:\([^\n{}]*\)\s*=>\s*\{[^{}]*\}|\{[^{}]*\})?\s*;?/g;
+  let match;
+  while((match=line.exec(source)))if(match[0].trim())units.push({id:unitId('js',match.index,match.index+match[0].length),axis:'js',start:match.index,end:match.index+match[0].length,kind:'statement',text:match[0],parentId:null,depth:0});
+  return units.sort((a,b)=>a.start-b.start||a.end-b.end);
+}
+function jsUnits(source){
+  try{return parserBackedJsUnits(source);}
+  catch{return legacyJsUnits(source);}
+}
+
 function trimSnapshots(snapshots,currentRevision) {
   while (snapshots.size > MAX_REVISION_SNAPSHOTS) {
     const oldest = snapshots.keys().next().value;
@@ -175,13 +222,7 @@ export function semanticUnits(axis,source) {
   source=String(source??'');
   if(axis==='html')return htmlUnits(source);
   if(axis==='css')return cssUnits(source);
-  if(axis==='js'){
-    const units=[];
-    const line=/[^\n;{}]+(?:\([^\n{}]*\)\s*=>\s*\{[^{}]*\}|\{[^{}]*\})?\s*;?/g;
-    let match;
-    while((match=line.exec(source)))if(match[0].trim())units.push({id:unitId(axis,match.index,match.index+match[0].length),axis,start:match.index,end:match.index+match[0].length,kind:'statement',text:match[0],parentId:null,depth:0});
-    return units.sort((a,b)=>a.start-b.start||a.end-b.end);
-  }
+  if(axis==='js')return jsUnits(source);
   throw new Error('INVALID_AXIS');
 }
 

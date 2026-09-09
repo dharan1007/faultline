@@ -17,7 +17,9 @@ const PERSISTENCE_PROFILES=[
 ];
 const ORACLE_KINDS=['dom_property','computed_style','dom_exists','runtime_error'];
 const ACTION_KINDS=['none','click','set_value','sequence'];
-const ACTION_STEP_KINDS=['click','set_value'];
+const ACTION_STEP_KINDS=['click','set_value','wait'];
+const MAX_SEQUENCE_WAIT_MS=2000;
+const HOST_TIMEOUT_MS=5000;
 const REQUEST_ID_PATTERN=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const fixture = {
   html:'<dialog id="modal" open><button id="save">Save</button></dialog><p id="noise">Irrelevant debug noise</p>',
@@ -96,18 +98,26 @@ function cancelActiveWebMCP({requestId}={}){
   return {status:'CANCEL_REQUESTED',operations:[summary]};
 }
 function abortAllWebMCP(){ for(const operation of activeWebMCPOperations.values())operation.controller.abort(); }
-function validateAction(action,{allowSequence=true}={}){
-  if(!action||typeof action!=='object'||Array.isArray(action)||!ACTION_KINDS.includes(action.kind))throw new Error('INVALID_ORACLE');
-  if(Object.keys(action).some(key=>!['kind','selector','value','steps'].includes(key)))throw new Error('INVALID_ORACLE');
-  if(action.kind==='sequence'){
-    if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||!Array.isArray(action.steps)||action.steps.length<1||action.steps.length>8)throw new Error('INVALID_ORACLE');
-    for(const step of action.steps){
-      if(!ACTION_STEP_KINDS.includes(step?.kind))throw new Error('INVALID_ORACLE');
-      validateAction(step,{allowSequence:false});
-    }
+function validateAction(action,{allowSequence=true,allowWait=false}={}){
+  if(!action||typeof action!=='object'||Array.isArray(action))throw new Error('INVALID_ORACLE');
+  const supported=allowWait?[...ACTION_KINDS,'wait']:ACTION_KINDS;
+  if(!supported.includes(action.kind)||Object.keys(action).some(key=>!['kind','selector','value','steps','durationMs'].includes(key)))throw new Error('INVALID_ORACLE');
+  if(action.kind==='wait'){
+    if(!allowWait||Object.keys(action).some(key=>!['kind','durationMs'].includes(key))||!Number.isFinite(action.durationMs)||action.durationMs<0||action.durationMs>MAX_SEQUENCE_WAIT_MS)throw new Error('INVALID_ORACLE');
     return action;
   }
-  if(Object.hasOwn(action,'steps'))throw new Error('INVALID_ORACLE');
+  if(action.kind==='sequence'){
+    if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||Object.hasOwn(action,'durationMs')||!Array.isArray(action.steps)||action.steps.length<1||action.steps.length>8)throw new Error('INVALID_ORACLE');
+    let totalWait=0;
+    for(const step of action.steps){
+      if(!ACTION_STEP_KINDS.includes(step?.kind))throw new Error('INVALID_ORACLE');
+      validateAction(step,{allowSequence:false,allowWait:true});
+      if(step.kind==='wait')totalWait+=step.durationMs;
+    }
+    if(totalWait>MAX_SEQUENCE_WAIT_MS)throw new Error('INVALID_ORACLE');
+    return action;
+  }
+  if(Object.hasOwn(action,'steps')||Object.hasOwn(action,'durationMs'))throw new Error('INVALID_ORACLE');
   if(action.kind==='click'&&(typeof action.selector!=='string'||!action.selector.trim()))throw new Error('INVALID_ORACLE');
   if(action.kind==='set_value'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.value!=='string'))throw new Error('INVALID_ORACLE');
   return action;
@@ -286,7 +296,7 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  addEventListener('error',e=>{captureRuntimeError(e.error?.message??e.message??e.error??'runtime error');e.preventDefault()});
  addEventListener('unhandledrejection',e=>{captureRuntimeError(e.reason?.message??e.reason??'unhandled rejection');e.preventDefault()});
  const executeCandidate=()=>{candidateExecutionStarted=true;try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e)}};
- const waitActionTurn=()=>new Promise(resolve=>schedule(resolve,0));
+ const waitActionTurn=durationMs=>new Promise(resolve=>schedule(resolve,durationMs));
  const performAtomicAction=action=>{
   if(action?.kind==='click'){const target=querySelector(action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click();return}
   if(action?.kind==='set_value'){
@@ -304,8 +314,8 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
   if(!action||action.kind==='none')return;
   if(action.kind!=='sequence'){performAtomicAction(action);return;}
   for(const step of action.steps){
-   performAtomicAction(step);
-   await waitActionTurn();
+   if(step.kind==='wait')await waitActionTurn(Number(step.durationMs));
+   else {performAtomicAction(step);await waitActionTurn(0);}
    if(runtimePolicyViolation||latestNavigationAttempt())return;
   }
  };
@@ -342,7 +352,7 @@ function executeCase(c,{signal}={}){
     if(previewPolicy)experiment.setAttribute('csp',previewPolicy);
     const bootstrapId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
     let done=false,resultPort=null;
-    const timer=setTimeout(()=>finish({status:'UNRESOLVED',evidence:{reason:'HOST_TIMEOUT'}}),2200);
+    const timer=setTimeout(()=>finish({status:'UNRESOLVED',evidence:{reason:'HOST_TIMEOUT'}}),HOST_TIMEOUT_MS);
     const onReady=e=>{
       if(done||resultPort||e.source!==experiment.contentWindow||e.data?.type!=='faultline:ready'||e.data.bootstrapId!==bootstrapId||!e.ports?.[0])return;
       removeEventListener('message',onReady);
@@ -503,7 +513,7 @@ function render(){const s=inspect();$('revision').textContent=s.revision;documen
 
 const REVISION_PROPERTY={expectedRevision:{type:'string',pattern:'^r[1-9]\\d*$'}};
 const REQUEST_PROPERTY={requestId:{type:'string',pattern:'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}};
-const ACTION_STEP_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_STEP_KINDS},selector:{type:'string'},value:{type:'string'}},required:['kind','selector']};
+const ACTION_STEP_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_STEP_KINDS},selector:{type:'string'},value:{type:'string'},durationMs:{type:'number',minimum:0,maximum:MAX_SEQUENCE_WAIT_MS}},required:['kind']};
 const ACTION_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}},required:['kind']};
 const ORACLE_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ORACLE_KINDS},selector:{type:'string'},property:{type:'string'},equals:{},action:ACTION_SCHEMA,delayMs:{type:'number',minimum:0,maximum:2000}},required:['kind','action']};
 const CASE_SCHEMA={type:'object',additionalProperties:false,properties:{html:{type:'string'},css:{type:'string'},js:{type:'string'},oracle:ORACLE_SCHEMA},required:['html','css','js','oracle']};

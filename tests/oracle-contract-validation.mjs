@@ -36,7 +36,7 @@ try{
   assert.deepEqual(after.case.oracle,before.case.oracle,'rejected oracle definitions must not replace the canonical oracle');
 
   const schema=await page.evaluate(()=>window.__webmcpTools.find(tool=>tool.name==='faultline_define_oracle').inputSchema.properties.oracle);
-  assert.deepEqual(schema.properties.kind.enum,['dom_property','computed_style','dom_exists','runtime_error'],'WebMCP schema must enumerate supported oracle kinds');
+  assert.deepEqual(schema.properties.kind.enum,['dom_property','dom_attribute','computed_style','dom_exists','runtime_error'],'WebMCP schema must enumerate supported oracle kinds');
   assert.equal(schema.additionalProperties,false,'oracle schema must reject unknown top-level fields');
   assert.deepEqual(schema.properties.action.properties.kind.enum,['none','click','set_value','set_checked','sequence'],'WebMCP schema must enumerate supported action kinds');
   assert.equal(schema.properties.action.properties.value.type,'string','WebMCP schema must advertise set_value action payloads');
@@ -49,7 +49,7 @@ try{
   assert.equal(schema.properties.action.properties.steps.items.properties.durationMs.maximum,2000,'wait steps must expose the deterministic per-step ceiling');
   assert.equal(schema.properties.action.additionalProperties,false,'oracle action schema must reject unknown fields');
 
-  console.log('Oracle contract validation PASS: invalid oracle definitions are rejected atomically and WebMCP advertises value, checked-state, and bounded action-sequence contracts.');
+  console.log('Oracle contract validation PASS: invalid oracle definitions are rejected atomically and WebMCP advertises DOM attribute, value, checked-state, and bounded action-sequence contracts.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

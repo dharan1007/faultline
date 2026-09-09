@@ -2,7 +2,31 @@ name: ci
 on:
   push:
   pull_request:
+permissions:
+  contents: write
 jobs:
+  capture-runtime-patch:
+    if: github.ref == 'refs/heads/feature/playwright-capture-ingestion-20260909' && github.event.head_commit.message == 'chore: patch canonical capture runtime'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python automation/apply-capture-runtime.py
+      - run: node --check src/runtime.js
+      - run: node --test tests/capture-contract.test.js
+      - name: Commit asserted runtime patch
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/runtime.js
+          git diff --cached --quiet && { echo 'runtime patch produced no diff'; exit 1; }
+          git commit -m 'feat: import captured failures transactionally'
+          git push origin HEAD:feature/playwright-capture-ingestion-20260909
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15

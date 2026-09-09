@@ -36,12 +36,12 @@ Removing a declaration removes its full declaration range including its terminat
 
 ## Hierarchical reduction algorithm
 
-Add a canonical `hierarchicalReduce(units, evaluateSource, options)` helper in `src/reducer-engine.js`.
+Add a canonical `hierarchicalReduce(units, evaluateRemovedIds, options)` helper in `src/reducer-engine.js`.
 
 Inputs:
 
 - full semantic unit array for one axis;
-- an async evaluator accepting the current removed-unit frontier and returning `PASS | FAIL | UNRESOLVED`;
+- an async evaluator accepting the current set of removed unit IDs and returning `PASS | FAIL | UNRESOLVED`;
 - `protectedItems` containing explicitly pinned unit IDs;
 - one global `maxTrials` budget.
 
@@ -49,7 +49,7 @@ Rules:
 
 1. Compute ancestor closure of protected items. A pinned descendant implicitly protects every ancestor.
 2. Process hierarchy breadth-first by depth.
-3. At each depth, form a frontier of units whose ancestors are still present. Sibling/frontier units must be non-overlapping; if overlapping units would coexist, keep the outer ancestor in the earlier frontier and defer descendants.
+3. At each depth, form a frontier of units whose ancestors are still present. Units in one frontier are non-overlapping by construction; descendants of removed ancestors are skipped.
 4. Run ddmin only against removable units in that frontier. The evaluator materializes source using only topmost removed ranges, so overlapping ancestor/descendant removals can never corrupt offsets.
 5. Descend only into parents that survived.
 6. All frontier searches share one `maxTrials` budget. If the budget cannot complete the current ddmin search, throw `TRIAL_BUDGET_EXHAUSTED`; runtime must not commit a partial reduction.
@@ -58,9 +58,13 @@ Rules:
 
 ## Pin remapping after reduction
 
-Unit IDs encode source offsets, so surviving pins must be remapped after a source-changing reduction. Before reduction, retain each explicitly pinned unit's text range identity. After the reduced source is materialized, rediscover units and map surviving pins deterministically by structural path among protected survivors. If a pinned unit itself is removed, that is a reducer bug. If deterministic remapping fails, abort before canonical commit with `PIN_REMAP_FAILED`.
+Unit IDs encode source offsets, so surviving pins must be remapped after a source-changing reduction. Sibling-index paths are explicitly not used because deleting an earlier sibling changes those indexes and makes the mapping unstable.
 
-V1 structural path is the sequence of sibling indexes from root to unit, scoped to unit `kind`. It is computed from the pre- and post-reduction hierarchy. Ancestor-protected but not explicitly pinned units are not persisted as pins.
+Before reduction, retain every explicitly pinned unit's exact `{start,end,kind,text}` identity. Once the reducer has its final non-overlapping topmost removal ranges, transform a pinned unit's offsets by subtracting the total length of removal ranges that end before the pin begins. Protected ancestor closure guarantees no accepted removal may overlap a pinned unit. Rediscover semantic units in the reduced source and require one unit matching the transformed `start`, transformed `end`, `kind`, and exact `text`.
+
+If any removal overlaps an explicit pin, or the transformed unit cannot be rediscovered exactly, abort before canonical commit with `PIN_REMAP_FAILED`. This handles duplicate unit text deterministically because transformed offsets, rather than textual uniqueness or sibling position, identify the survivor.
+
+The same exact range-remapping helper is used for flat JavaScript reductions so source-offset pins never become stale after any axis reduction. Ancestor-protected but not explicitly pinned units are not persisted as pins.
 
 ## Runtime and WebMCP surface
 
@@ -96,9 +100,9 @@ RED tests must prove the existing production implementation lacks:
 4. ancestor closure for pinned descendants;
 5. coarse-to-fine removal of an irrelevant parent subtree;
 6. declaration-level reduction inside a required CSS rule;
-7. pin remapping after successful source shrinkage.
+7. exact pin offset remapping after successful source shrinkage.
 
-A Chromium end-to-end test must load a real nested failure case, pin a required descendant, run HTML reduction then CSS reduction through the canonical runtime/WebMCP surface, verify the pinned descendant and ancestors survive, verify irrelevant parent branches and declarations disappear, verify final status remains `FAIL`, and verify exported source matches canonical reduced source.
+A Chromium end-to-end test must load a real nested failure case with irrelevant source preceding a pinned descendant, pin that descendant, run HTML reduction then CSS reduction through the canonical runtime/WebMCP surface, verify the pinned descendant and ancestors survive with the pin ID remapped to its new offsets, verify irrelevant parent branches and declarations disappear, verify final status remains `FAIL`, and verify exported source matches canonical reduced source.
 
 ## Deployment gate
 

@@ -262,7 +262,6 @@ function containsExternalImage(source){
   return false;
 }
 
-
 function isBlockedMediaSource(source){
   const src=String(source??'').trim();
   return Boolean(src)&&!/^(?:data|blob):/i.test(src);
@@ -374,6 +373,63 @@ function containsExternalStylesheetImport(source){
   return false;
 }
 
+function isBlockedCssResourceSource(source){
+  const src=String(source??'').trim();
+  return Boolean(src)&&!/^(?:data|blob):/i.test(src)&&!/^#/.test(src);
+}
+
+function containsExternalCssResource(source){
+  const css=String(source??'');
+  let i=0;
+  const skipComment=()=>{
+    i+=2;
+    while(i<css.length&&!(css[i]==='*'&&css[i+1]==='/'))i++;
+    i=Math.min(css.length,i+2);
+  };
+  const skipWhitespace=()=>{while(i<css.length&&/\s/.test(css[i]))i++;};
+  const readQuoted=quote=>{
+    i++;
+    let value='';
+    while(i<css.length){
+      if(css[i]==='\\'){
+        if(i+1<css.length)value+=css[i+1];
+        i+=2;
+        continue;
+      }
+      if(css[i]===quote){i++;return value;}
+      value+=css[i++];
+    }
+    return value;
+  };
+  while(i<css.length){
+    const c=css[i];
+    if(c==='/'&&css[i+1]==='*'){skipComment();continue;}
+    if(c==="'"||c==='"'){readQuoted(c);continue;}
+    const previous=css[i-1]||'';
+    if(css.slice(i,i+3).toLowerCase()==='url'&&!/[-\w]/.test(previous)&&!/[-\w]/.test(css[i+3]||'')){
+      i+=3;
+      skipWhitespace();
+      if(css[i]!=='(')continue;
+      i++;
+      skipWhitespace();
+      let value='';
+      if(css[i]==="'"||css[i]==='"')value=readQuoted(css[i]);
+      else{
+        while(i<css.length&&css[i]!==')'){
+          if(css[i]==='\\'&&i+1<css.length){value+=css[i+1];i+=2;continue;}
+          value+=css[i++];
+        }
+      }
+      while(i<css.length&&css[i]!==')')i++;
+      if(css[i]===')')i++;
+      if(isBlockedCssResourceSource(value))return true;
+      continue;
+    }
+    i++;
+  }
+  return false;
+}
+
 function computedGlobalRisk(source){
   const text=String(source??'');
   const roots=new Set(['window','self','globalThis','document','parent','top','frames','this']);
@@ -465,6 +521,7 @@ export function navigationRisk(candidate){
   if(computed)return {axis:'js',capability:computed.property==='open'?'popup-navigation':'computed-global',...computed};
   const css=String(candidate?.css??'');
   if(containsExternalStylesheetImport(css))return {reason:'UNSAFE_NETWORK',axis:'css',capability:'external-stylesheet-import'};
+  if(containsExternalCssResource(css))return {reason:'UNSAFE_NETWORK',axis:'css',capability:'external-css-resource'};
   const html=String(candidate?.html??'');
   if(containsExternalScript(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-script'};
   if(containsExternalStylesheet(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-stylesheet'};

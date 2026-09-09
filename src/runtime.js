@@ -208,7 +208,7 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  const nativeFormRequestSubmit=HTMLFormElement.prototype.requestSubmit;
  const captureRuntimeError=value=>runtimeErrors.push(String(value));
  const reportRuntimePolicyViolation=event=>{
-  if(runtimePolicyViolation)return;
+  if(runtimePolicyViolation||!event.isTrusted)return;
   const directive=String(event.effectiveDirective||event.violatedDirective||'csp').trim().toLowerCase()||'csp';
   runtimePolicyViolation={axis:candidateExecutionStarted?'js':'html',capability:'runtime-csp-resource',directive};
   ${previewOnly?`parent.postMessage({type:'faultline:preview-policy-blocked',bootstrapId:${JSON.stringify(bootstrapId)},risk:runtimePolicyViolation},'*');`:''}

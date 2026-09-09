@@ -38,7 +38,8 @@ try{
   const schema=await page.evaluate(()=>window.__webmcpTools.find(tool=>tool.name==='faultline_define_oracle').inputSchema.properties.oracle);
   assert.deepEqual(schema.properties.kind.enum,['dom_property','computed_style','dom_exists','runtime_error'],'WebMCP schema must enumerate supported oracle kinds');
   assert.equal(schema.additionalProperties,false,'oracle schema must reject unknown top-level fields');
-  assert.deepEqual(schema.properties.action.properties.kind.enum,['none','click'],'WebMCP schema must enumerate supported action kinds');
+  assert.deepEqual(schema.properties.action.properties.kind.enum,['none','click','set_value'],'WebMCP schema must enumerate supported action kinds');
+  assert.equal(schema.properties.action.properties.value.type,'string','WebMCP schema must advertise set_value action payloads');
   assert.equal(schema.properties.action.additionalProperties,false,'oracle action schema must reject unknown fields');
 
   console.log('Oracle contract validation PASS: invalid oracle definitions are rejected atomically and WebMCP advertises a constrained oracle schema.');

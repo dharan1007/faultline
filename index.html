@@ -72,7 +72,8 @@
         <div class="oracle-form">
           <div class="row"><div><label for="oracle-kind">Oracle type</label><select id="oracle-kind"><option value="dom_property">DOM property</option><option value="computed_style">Computed style</option><option value="dom_exists">DOM existence</option><option value="runtime_error">Runtime error</option></select></div><div><label for="oracle-selector">Target selector</label><input id="oracle-selector" value="#modal"></div></div>
           <div class="row"><div><label for="oracle-property">Property</label><input id="oracle-property" value="open"></div><div><label for="oracle-equals">Failure value</label><input id="oracle-equals" value="true"></div></div>
-          <div class="row"><div><label for="action-kind">Before measurement</label><select id="action-kind"><option value="click">Click element</option><option value="none">No action</option></select></div><div><label for="action-selector">Action selector</label><input id="action-selector" value="#save"></div></div>
+          <div class="row"><div><label for="action-kind">Before measurement</label><select id="action-kind"><option value="click">Click element</option><option value="set_value">Set form value</option><option value="none">No action</option></select></div><div><label for="action-selector">Action selector</label><input id="action-selector" value="#save"></div></div>
+          <div><label for="action-value">Action value</label><input id="action-value" value="" autocomplete="off" aria-describedby="action-value-help"><span id="action-value-help" class="small">Used by “Set form value”; ignored by click and no-action runs.</span></div>
           <div class="actions" style="margin-top:12px"><button id="lock" class="btn primary">Lock oracle</button></div>
         </div>
       </div>

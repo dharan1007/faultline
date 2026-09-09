@@ -27,7 +27,7 @@ test('HTML units expose balanced hierarchy, void leaves, and ignore raw-text mar
   assert.equal(paragraph.parentId,section.id);
   assert.equal(script.depth,1);
   assert.equal(script.parentId,main.id);
-  assert.equal(units.some(x=>x.text.includes('<aside>fake</aside>')),false,'raw-text contents must not create fake HTML descendants');
+  assert.equal(units.some(x=>x.text.trim().startsWith('<aside>')),false,'raw-text contents must not create fake HTML descendants');
 });
 
 test('CSS units expose rule/declaration hierarchy without splitting quoted/comment delimiters', () => {

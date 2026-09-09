@@ -2,7 +2,7 @@
 
 **Capture a real browser failure, prove it reproduces in isolation, and reduce it to a smaller standalone HTML/CSS/JavaScript reproducer without changing the failure.**
 
-FAULTLINE is a local-first causal debugging workbench. You can load a deterministic case directly or capture an already-authorized Playwright page into a portable `faultline.capture.v1` artifact, independently verify that the captured failure still returns `FAIL`, then probe removals, run bounded delta reduction, pin required units, inspect revision/evidence history, restore earlier states, and export a standalone reproducer with capture provenance.
+FAULTLINE is a local-first causal debugging workbench. You can load a deterministic case directly or capture an already-authorized Playwright page into a portable `faultline.capture.v1` artifact, independently verify that the captured failure still returns `FAIL`, then probe removals, run bounded semantic reduction, pin required units, inspect revision/evidence history, restore earlier states, and export a standalone reproducer with capture provenance.
 
 [**Live Workbench**](https://faultline-webmcp.vercel.app/) · [Capture from Playwright](#capture-a-real-playwright-failure) · [Run locally](#run-locally) · [Security](docs/SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
 
@@ -24,7 +24,7 @@ FAULTLINE independently re-runs the captured case
         ↓
 only a reproduced FAIL may enter canonical state
         ↓
-probe / pin / bounded ddmin / Autopilot
+probe / pin / hierarchical HTML+CSS reduction / bounded JS ddmin / Autopilot
         ↓
 smaller source that still FAILS
         ↓
@@ -46,13 +46,13 @@ FAULTLINE makes both ingestion and preservation explicit.
 | "I already have a failing Playwright page" | Capture the caller-owned page into `faultline.capture.v1` |
 | "Does the capture really reproduce?" | Transactional import independently executes the baseline before state can change |
 | "Does this code matter?" | Probe a unit without mutating canonical state |
-| "Remove everything irrelevant" | Bounded ddmin reduction over semantic source units |
-| "This piece must stay" | Pin the unit before reduction |
+| "Remove everything irrelevant" | Coarse-to-fine HTML/CSS hierarchy plus bounded JS ddmin |
+| "This piece must stay" | Pin it; structural ancestors are protected and source-offset pins are remapped after reduction |
 | "Did the failure change?" | Deterministic PASS / FAIL / UNRESOLVED oracle result |
 | "Undo a bad reduction" | Revision snapshots and guarded restore |
 | "Where did this reproducer come from?" | Revision-bound capture provenance survives reduction, persistence, restore and structured export |
 | "Give me a bug report" | Export a standalone HTML reproducer plus structured bundle |
-| "Let an agent help" | Native WebMCP tools use the same canonical runtime |
+| "Let an agent help" | Native WebMCP tools use the same canonical runtime and hierarchy metadata |
 
 ## Capture a real Playwright failure
 
@@ -151,19 +151,27 @@ No signup or hosted project workspace is required for the current product path. 
 
 ## Current reduction semantics — precise claim
 
-The production browser runtime imports `semanticUnits`, `removeUnits` and `ddminReduce` from `src/reducer-engine.js` and reduces **one source axis at a time**.
+The production browser runtime imports the canonical reducers from `src/reducer-engine.js` and reduces **one source axis at a time**.
 
-For a given axis, FAULTLINE:
+### HTML
 
-1. extracts the current candidate semantic units,
-2. protects pinned units,
-3. verifies the baseline still fails,
-4. repeatedly tests subsets within the configured trial budget,
-5. commits the reduced source only after the final candidate still returns `FAIL`.
+HTML discovery uses a deterministic quote/comment-aware structural scanner. It exposes balanced nested element subtrees with `depth` and `parentId`. Reduction runs breadth-first over non-overlapping structural frontiers: irrelevant parent branches can be removed before their descendants are considered; required surviving parents are decomposed at deeper frontiers.
 
-The resulting reduction is **1-minimal relative to the tested candidate-unit set and trial semantics**, not a proof of the globally shortest HTML/CSS/JavaScript program. The current scanners are deliberately bounded structural heuristics rather than standards-complete language parsers. This distinction is part of the product contract.
+### CSS
 
-A separate experimental/legacy domain implementation contains depth-aware frontier concepts, but the public production claim follows the runtime actually imported by `src/runtime.js`. Future hierarchical/AST-backed work must land in the canonical runtime and tests before it changes this claim.
+CSS discovery uses a brace/string/comment-aware scanner. It exposes complete rules and declaration children. Reduction tests whole rules first and descends to declaration-level trials only inside rules that remain necessary for the failure.
+
+### JavaScript
+
+JavaScript still uses bounded statement-level lexical units and the flat ddmin path. It is deliberately not claimed to be AST-backed or parser-complete.
+
+### Pins and correctness
+
+For HTML/CSS, an explicitly pinned descendant protects its complete ancestor chain. When accepted removals occur before a pinned unit in source order, the unit ID changes because IDs contain source offsets. FAULTLINE remaps that pin by exact transformed range, kind and text. If the remap cannot be proven exact, reduction aborts before canonical commit with `PIN_REMAP_FAILED` rather than retaining a stale pin.
+
+All hierarchy frontiers share the configured trial budget. Budget exhaustion aborts instead of committing a partially searched result. After search completes, FAULTLINE independently executes the fully materialized candidate again and commits only if that final execution is still `FAIL` and the expected revision remains current.
+
+The resulting source is **not claimed to be the globally shortest HTML/CSS/JavaScript program**. The precise guarantee is scoped to the semantic units discovered, hierarchy frontiers actually explored, configured trial budget, sandbox execution boundary and deterministic oracle. Current scanners are intentionally bounded rather than standards-complete language parsers.
 
 ## Failure oracles and deterministic actions
 
@@ -216,7 +224,9 @@ State-changing operations use expected-revision checks so stale actions fail rat
 
 ## WebMCP
 
-FAULTLINE exposes its debugging operations through the browser's experimental `document.modelContext.registerTool()` API when available. The production surface contains 17 tools, including inspection, semantic-unit discovery, transactional capture import, case loading/reset, run, targeted cancellation, oracle/source changes, probe, reduction, pinning, revision/history operations, structured export and Autopilot.
+FAULTLINE exposes its debugging operations through the browser's experimental `document.modelContext.registerTool()` API when available. The production surface contains 17 tools, including inspection, structural semantic-unit discovery, transactional capture import, case loading/reset, run, targeted cancellation, oracle/source changes, probe, hierarchical reduction, pinning, revision/history operations, structured export and Autopilot.
+
+`faultline_units` exposes the same `depth`, `parentId`, `pinned` and `protectedByPin` metadata used by the human workbench. HTML/CSS reduction results expose `hierarchical: true` and the structural frontiers actually tested; JavaScript explicitly reports the flat reduction strategy.
 
 Long-running WebMCP operations support cancellation. Agent tools call the same canonical workbench functions rather than a separate privileged debugging implementation. `faultline_import_capture` is transactional and revision-guarded just like the human and Browser API paths.
 
@@ -248,7 +258,7 @@ npm run check
 npm run build
 ```
 
-Real browser/CDP gate, including Playwright capture adapter, transactional runtime import, accessible human import, and full capture → reduction → export acceptance:
+Real browser/CDP gate, including Playwright capture adapter, transactional runtime import, accessible human import, hierarchical HTML/CSS reduction, pin ancestor protection/remapping, WebMCP hierarchy parity, and full capture → reduction → export acceptance:
 
 ```bash
 npm run test:browser
@@ -264,7 +274,7 @@ Start with [`CONTRIBUTING.md`](CONTRIBUTING.md), [`good first issue`](https://gi
 
 ## Roadmap
 
-See [`ROADMAP.md`](ROADMAP.md). With Playwright capture ingestion in the production architecture, the next major technical direction is stronger semantic-unit quality, broader capture adapters/recipes, benchmark evidence and eventually cross-browser verification—without weakening deterministic failure preservation.
+See [`ROADMAP.md`](ROADMAP.md). With Playwright capture ingestion and hierarchical HTML/CSS reduction now in the canonical architecture, the next major technical direction is evidence-backed JavaScript semantic precision, benchmarked reducer quality, broader capture recipes and eventually cross-browser verification—without weakening deterministic failure preservation.
 
 ## Related projects
 

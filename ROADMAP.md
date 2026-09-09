@@ -4,7 +4,7 @@ FAULTLINE's roadmap is ordered around a measurable debugging outcome: **turn a r
 
 ## Shipped foundation — capture, verify, reduce
 
-The canonical production architecture now contains a local Playwright capture path in addition to direct case loading:
+The canonical production architecture contains a local Playwright capture path in addition to direct case loading:
 
 - a caller-owned Playwright `page` can be converted to bounded `faultline.capture.v1`,
 - the hosted workbench never navigates to or fetches the capture source URL,
@@ -16,20 +16,31 @@ The canonical production architecture now contains a local Playwright capture pa
 
 The v1 adapter deliberately snapshots already-authorized page state rather than pretending to reconstruct arbitrary application bundles. External/inaccessible dependencies are rejected instead of hidden.
 
-## Now — make semantic reduction stronger
+## Shipped semantic-reduction upgrade — hierarchical HTML/CSS
 
-The next major technical step is stronger semantic-unit quality while preserving non-overlap and deterministic removal semantics.
+The canonical production reducer now performs coarse-to-fine hierarchical reduction for HTML and CSS:
 
-Candidate work:
+- HTML discovery exposes balanced nested element subtrees with deterministic `depth`/`parentId` metadata.
+- CSS discovery exposes whole rules and declaration children using brace/string/comment-aware scanning.
+- Reduction searches non-overlapping frontiers breadth-first, so irrelevant parent branches can disappear before trials are spent on their descendants.
+- Surviving required parents are decomposed at deeper frontiers, enabling declaration-level reduction inside a required CSS rule and child-level reduction inside a required HTML branch.
+- Explicit pins protect their complete ancestor chain.
+- Source-offset pin IDs are remapped by exact transformed ranges after accepted removals; an unprovable remap aborts before canonical commit.
+- All frontiers share one explicit trial budget, and the final candidate is independently re-run before commit.
+- Human, Browser API and WebMCP unit discovery consume the same hierarchy metadata.
 
-1. HTML structural units that handle nested subtrees deliberately.
-2. CSS two-stage rule/declaration reduction with non-overlapping frontiers.
-3. JavaScript parser-backed statement/expression boundaries where the dependency/size cost is justified.
-4. Hierarchical reduction in the **canonical production runtime**, with pinned descendants protecting required ancestors.
-5. Tests proving the exact minimality class for each frontier.
-6. A reproducible browser-failure corpus measuring original size, reduced size, trial count, preservation status and capture environment.
+This does not make the scanners standards-complete parsers and does not justify a globally-minimal claim. The exact guarantee remains scoped to discovered units, explored frontiers, configured trial budget and deterministic failure-preservation semantics.
 
-The repository contains older/experimental depth-aware concepts, but they do not change the production claim until integrated into `src/runtime.js` and release tests.
+## Now — strengthen JavaScript and measurable reducer quality
+
+The next major technical work should improve semantic precision where the current implementation is still deliberately bounded:
+
+1. Evaluate parser-backed JavaScript statement/expression boundaries and dependency cost; do not add an AST stack unless benchmarked reduction quality justifies it.
+2. Build a reproducible browser-failure corpus measuring original size, reduced size, trial count, frontier count, preservation status and capture environment.
+3. Add adversarial fixtures for malformed-but-browser-tolerated HTML/CSS so scanner conservatism can be measured rather than assumed.
+4. Benchmark hierarchical reduction against the previous flat strategy on the same captured failures.
+5. Improve trial scheduling/caching only when evidence shows repeated candidate executions dominate end-to-end reduction time.
+6. Define the exact minimality class for parser-backed JavaScript before changing production claims.
 
 ## Next — broader real-browser integrations
 
@@ -51,8 +62,11 @@ The repository contains older/experimental depth-aware concepts, but they do not
 
 FAULTLINE will not:
 
-- call a source globally minimal when only a bounded candidate set was tested,
+- call a source globally minimal when only a bounded candidate set/frontier set was tested,
 - treat `UNRESOLVED` as success,
+- commit a partially searched reduction after trial-budget exhaustion,
+- allow a pinned descendant to disappear by deleting one of its required ancestors,
+- keep a stale source-offset pin when exact remapping cannot be proven,
 - disable containment to reduce more aggressively,
 - claim a browser iframe is equivalent to process/VM isolation,
 - invent reduction percentages for marketing,

@@ -1,5 +1,8 @@
 import './runtime.js';
 import { navigationRisk } from './sandbox-policy.js';
+import { installCaptureIntegration } from './capture-integration.js';
+
+installCaptureIntegration();
 
 const actionIds=['apply','run','probe','pin','reduce','autopilot','lock','reset'];
 const axisTabs=[...document.querySelectorAll('[role="tab"][data-axis]')];
@@ -8,11 +11,11 @@ const integrationBadge=document.querySelector('#integration-workspace>summary .t
 const integrationFlow=document.querySelector('#integration-workspace .integration-column:nth-child(2) pre');
 const browserFlow=document.querySelector('#integration-workspace .integration-column:nth-child(1) pre');
 const toolCount=window.faultline.manifest().length;
-const toolCountLabel=({13:'thirteen',14:'fourteen',15:'fifteen'})[toolCount]||String(toolCount);
+const toolCountLabel=({13:'thirteen',14:'fourteen',15:'fifteen',16:'sixteen'})[toolCount]||String(toolCount);
 
 if(integrationBadge)integrationBadge.textContent=`${toolCount} WebMCP tools`;
 if(integrationNote){
-  integrationNote.textContent=integrationNote.textContent.replace(/\b(?:twelve|thirteen|fourteen|\d+) WebMCP tools\b/i,`${toolCountLabel} WebMCP tools`);
+  integrationNote.textContent=integrationNote.textContent.replace(/\b(?:twelve|thirteen|fourteen|fifteen|sixteen|\d+) WebMCP tools\b/i,`${toolCountLabel} WebMCP tools`);
   if(!integrationNote.textContent.includes('faultline_apply_source')){
     const separator=document.createTextNode(' Single-axis agent writes use ');
     const tool=document.createElement('code');
@@ -47,6 +50,19 @@ function reportActionError(error){
   if(summary)summary.textContent=message;
 }
 
+function markReady(message=''){
+  const health=document.getElementById('health');
+  const summary=document.getElementById('summary');
+  if(health){health.textContent='READY';health.dataset.state='READY';}
+  if(message&&summary)summary.textContent=message;
+}
+
+function provenanceText(artifact){
+  const provenance=artifact.provenance;
+  const title=provenance.title||'Untitled page';
+  return `${title} · ${provenance.browser} · ${provenance.viewport.width}×${provenance.viewport.height} · ${provenance.url} · captured ${artifact.capturedAt}`;
+}
+
 function installCaseImport(){
   const actionBar=document.querySelector('#case-workspace .action-bar');
   if(!actionBar||document.getElementById('case-import'))return;
@@ -60,7 +76,7 @@ function installCaseImport(){
   const summary=document.createElement('summary');
   summary.className='btn ghost';
   summary.style.display='inline-flex';
-  summary.textContent='Import complete case JSON';
+  summary.textContent='Import case or Playwright capture';
 
   const help=document.createElement('p');
   help.className='small';
@@ -90,15 +106,71 @@ function installCaseImport(){
       const nextCase=JSON.parse(editor.value);
       const current=window.faultline.inspect();
       window.faultline.loadCase({expectedRevision:current.revision,case:nextCase});
-      const health=document.getElementById('health');
-      if(health){health.textContent='READY';health.dataset.state='READY';}
+      markReady('Complete case imported through one guarded canonical revision.');
+    }catch(error){
+      reportActionError(error);
+    }
+  });
+  actions.append(button);
+
+  const captureDivider=document.createElement('div');
+  captureDivider.style.marginTop='16px';
+  captureDivider.style.paddingTop='14px';
+  captureDivider.style.borderTop='1px solid var(--line)';
+
+  const captureLabel=document.createElement('label');
+  captureLabel.htmlFor='capture-import-file';
+  captureLabel.textContent='Playwright capture artifact';
+
+  const captureHelp=document.createElement('p');
+  captureHelp.className='small';
+  captureHelp.textContent='Import a versioned faultline.capture artifact created beside a real Playwright reproduction. FAULTLINE validates the envelope first, then re-verifies its case inside the existing sandbox.';
+
+  const captureInput=document.createElement('input');
+  captureInput.id='capture-import-file';
+  captureInput.type='file';
+  captureInput.accept='.json,application/json';
+  captureInput.style.display='block';
+  captureInput.style.width='100%';
+  captureInput.style.margin='8px 0 10px';
+
+  const captureActions=document.createElement('div');
+  captureActions.className='actions';
+
+  const captureButton=document.createElement('button');
+  captureButton.id='import-capture';
+  captureButton.className='btn primary';
+  captureButton.type='button';
+  captureButton.textContent='Import capture atomically';
+
+  const captureProvenance=document.createElement('p');
+  captureProvenance.id='capture-provenance';
+  captureProvenance.className='small';
+  captureProvenance.setAttribute('role','status');
+  captureProvenance.setAttribute('aria-live','polite');
+  captureProvenance.textContent='No Playwright capture imported in this session.';
+
+  captureButton.addEventListener('click',async()=>{
+    try{
+      const file=captureInput.files?.[0];
+      if(!file)throw new Error('FAULTLINE_CAPTURE_INVALID:FILE_REQUIRED');
+      let artifact;
+      try{artifact=JSON.parse(await file.text());}
+      catch{throw new Error('FAULTLINE_CAPTURE_INVALID:JSON');}
+      const current=window.faultline.inspect();
+      const imported=window.faultlineCapture.import({artifact,expectedRevision:current.revision});
+      const normalized=window.faultlineCapture.validate(artifact);
+      editor.value=JSON.stringify(window.faultline.inspect().case,null,2);
+      captureProvenance.textContent=provenanceText(normalized);
+      markReady(`Playwright capture imported at ${imported.result.revision}; baseline must be re-run before reduction.`);
     }catch(error){
       reportActionError(error);
     }
   });
 
-  actions.append(button);
-  details.append(summary,help,label,editor,actions);
+  captureActions.append(captureButton);
+  captureDivider.append(captureLabel,captureHelp,captureInput,captureActions,captureProvenance);
+  details.append(summary,help,label,editor,actions,captureDivider);
   actionBar.insertAdjacentElement('afterend',details);
 }
 
@@ -190,8 +262,7 @@ function installRevisionRecovery(){
             const current=window.faultline.inspect();
             window.faultline.restore({expectedRevision:current.revision,targetRevision:item.revision});
             refresh();
-            const health=document.getElementById('health');
-            if(health){health.textContent='READY';health.dataset.state='READY';}
+            markReady();
           }catch(error){reportActionError(error);refresh();}
         });
         row.append(button);

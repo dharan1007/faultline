@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 
 const packagePath='node_modules/acorn/package.json';
 const sourcePath='node_modules/acorn/dist/acorn.mjs';
-const targetPath='vendor/acorn.mjs';
+const targetPath='vendor/acorn.js';
 
 if(!existsSync(packagePath)||!existsSync(sourcePath)){
   console.error('Pinned Acorn dependency is missing. Run npm install before verification.');

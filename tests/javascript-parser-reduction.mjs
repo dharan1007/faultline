@@ -65,7 +65,7 @@ console.warn('root noise');`,
   const unpinned=await page.evaluate(({revision,unitId})=>window.faultline.pin({expectedRevision:revision,targetAxis:'js',unitId,pinned:false}),{revision:pinned.revision,unitId:assignment.id});
   const reduction=await page.evaluate(async expectedRevision=>window.faultline.reduce({expectedRevision,targetAxis:'js',maxTrials:120}),unpinned.revision);
   assert.equal(reduction.status,'FAIL','parser-backed JavaScript reduction must preserve the browser failure');
-  assert.ok(reduction.passes>=2,'JavaScript reduction must traverse multiple structural depths');
+  assert.ok(reduction.trials>0&&reduction.removed>=3,'JavaScript structural reduction must execute real trials and remove root plus nested noise');
 
   const after=await page.evaluate(()=>({inspect:window.faultline.inspect(),units:window.faultline.units({targetAxis:'js'})}));
   assert.ok(after.inspect.case.js.includes("setAttribute('data-failed','yes')"),'required failure-producing statement must survive');

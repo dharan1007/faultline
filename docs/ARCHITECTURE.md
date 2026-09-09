@@ -10,13 +10,15 @@ Reducers never decide whether an edit is correct. The locked oracle is authorita
 
 HTML is scanned with a deterministic stack/token scanner. Proven balanced elements become units with exact source ranges, `parentId`, and `depth`. Void elements are self-contained units. Comments/declarations are skipped, and `script`/`style` bodies are treated as raw text rather than recursively tokenized as HTML. Malformed boundaries are handled conservatively: FAULTLINE emits only ranges whose end boundary is known.
 
-CSS is scanned with brace, string, escape, and comment awareness. Rules are structural units; direct declarations are child units of the containing rule. Nested rules retain parent/depth relationships. JavaScript remains statement-level with the existing bounded lexical grouping and is not represented as a full ESTree AST in this release.
+CSS is scanned with brace, string, escape, and comment awareness. Rules are structural units; direct declarations are child units of the containing rule. Nested rules retain parent/depth relationships.
+
+JavaScript uses the pinned Acorn parser shipped with the production artifact. FAULTLINE parses normal scripts first and ES modules second, then derives removable units only from syntax positions where removing a complete list member is structurally meaningful: program statements, block statements, switch-case consequents, class methods/properties, and static-block statements. Nested statement units receive deterministic `parentId` and `depth` metadata. Mandatory expressions such as an `if` condition are not independently exposed as removable units. If source is already syntactically invalid and both parser modes reject it, FAULTLINE conservatively falls back to the previous bounded lexical statement discovery so syntax-error reproductions remain inspectable rather than becoming unusable.
 
 `removeUnits()` accepts ancestor/descendant selections safely: a descendant already covered by a selected ancestor is collapsed, while partially overlapping non-hierarchical ranges are rejected with `OVERLAPPING_UNIT_RANGES` instead of producing corrupt source.
 
 ## Hierarchical reduction
 
-HTML and CSS reduction is coarse-to-fine under one global trial budget per invocation.
+HTML, CSS, and parser-backed JavaScript reduction are coarse-to-fine under one global trial budget per invocation.
 
 1. The complete inspected source is independently verified as `FAIL`.
 2. FAULTLINE computes direct pins and closes protection upward over every ancestor of a pinned descendant.
@@ -28,7 +30,7 @@ HTML and CSS reduction is coarse-to-fine under one global trial budget per invoc
 8. The final candidate is executed again independently and must return `FAIL`.
 9. Only then are source and remapped direct pins committed under the original `expectedRevision`.
 
-JavaScript continues through the existing flat `ddmin` path, but surviving direct JavaScript pins are also remapped before commit so source-offset changes cannot silently leave stale pin IDs.
+When JavaScript cannot be parsed because the reproducer intentionally contains invalid syntax, its fallback lexical units remain flat and use the existing bounded ddmin path. This fallback is intentionally not described as AST-level minimality.
 
 Budget exhaustion, abort, stale revision, unresolved execution, lost failure, pin-remap failure, or persistence failure leaves canonical source and direct pins unchanged. Persistence rollback restores the pre-operation checkpoint if durable storage cannot be written.
 
@@ -54,10 +56,14 @@ Playwright Capture v1 converts a caller-owned prepared browser state into a boun
 
 Once imported, captured cases use the same hierarchical reduction path as manually loaded cases.
 
+## Browser parser supply chain
+
+The production browser never fetches its JavaScript parser from a CDN. `acorn` is version-pinned in `package.json`; `scripts-vendor.mjs` verifies that exact installed version and materializes `vendor/acorn.mjs`. The build stages that parser beside the application modules, and guarded deployment byte-compares it against both the staged deployment and the public production alias before the recoverable `production` checkpoint can advance.
+
 ## WebMCP and concurrency
 
 FAULTLINE currently registers 17 bounded WebMCP tools over the same canonical runtime used by the human interface. Mutating and long-running operations use optimistic `expectedRevision` guards; cancellable operations support native WebMCP abort signals plus bounded request-ID compatibility cancellation. Agent-visible semantic-unit discovery includes the same hierarchy and protection metadata rendered by the workbench.
 
 ## Minimality boundary
 
-For HTML and CSS, each reduction invocation now performs coarse-to-fine delta debugging over non-overlapping structural frontiers and descends only into surviving branches. This is materially stronger than the previous flat mixed-granularity search, but FAULTLINE does not claim a language-theoretic global minimum across arbitrary equivalent rewrites. JavaScript minimality remains bounded by the current statement-level unit discovery until a dedicated parser-backed JavaScript reducer is introduced.
+For HTML, CSS, and parseable JavaScript, each reduction invocation performs coarse-to-fine delta debugging over non-overlapping structural frontiers and descends only into surviving branches. This is materially stronger than flat mixed-granularity search, but FAULTLINE does not claim a language-theoretic global minimum across arbitrary equivalent rewrites. JavaScript expression-level rewriting and semantics-preserving transformations remain outside this release; syntactically invalid JavaScript uses the conservative flat fallback described above.

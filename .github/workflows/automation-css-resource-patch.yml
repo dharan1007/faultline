@@ -7,22 +7,22 @@ permissions:
   contents: write
 jobs:
   patch:
-    if: github.event.head_commit.message != 'fix: surface blocked CSS url resources as unsafe network evidence'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: automation/css-resource-containment-20260909
-      - name: Patch policy and remove temporary patch machinery
-        shell: python
+      - name: Patch policy
         run: |
+          python - <<'PY'
           from pathlib import Path
           p=Path('src/sandbox-policy.js')
           s=p.read_text()
           marker='\nfunction computedGlobalRisk(source){'
-          if marker not in s:
-              raise SystemExit('computedGlobalRisk insertion marker missing')
-          addition=r'''
+          if 'function containsExternalCssResource(source)' not in s:
+              if marker not in s:
+                  raise SystemExit('computedGlobalRisk insertion marker missing')
+              addition=r'''
 
 function isBlockedCssResourceSource(source){
   const src=String(source??'').trim();
@@ -81,20 +81,22 @@ function containsExternalCssResource(source){
   return false;
 }
 '''
-          s=s.replace(marker,addition+marker,1)
+              s=s.replace(marker,addition+marker,1)
           risk="  if(containsExternalStylesheetImport(css))return {reason:'UNSAFE_NETWORK',axis:'css',capability:'external-stylesheet-import'};"
-          replacement=risk+"\n  if(containsExternalCssResource(css))return {reason:'UNSAFE_NETWORK',axis:'css',capability:'external-css-resource'};"
-          if risk not in s:
-              raise SystemExit('navigationRisk CSS marker missing')
-          s=s.replace(risk,replacement,1)
+          resource="  if(containsExternalCssResource(css))return {reason:'UNSAFE_NETWORK',axis:'css',capability:'external-css-resource'};"
+          if resource not in s:
+              if risk not in s:
+                  raise SystemExit('navigationRisk CSS marker missing')
+              s=s.replace(risk,risk+'\n'+resource,1)
           p.write_text(s)
           Path('tests/network-css-resource-containment.mjs').unlink(missing_ok=True)
           Path('.github/workflows/automation-css-resource-patch.yml').unlink(missing_ok=True)
+          PY
       - name: Commit coherent candidate
         run: |
           git config user.name dharan
           git config user.email 150376358+dharan1007@users.noreply.github.com
-          git add src/sandbox-policy.js tests/network-css-import-containment.mjs .github/workflows/automation-css-resource-patch.yml tests/network-css-resource-containment.mjs || true
+          git add -A
           git diff --cached --check
           git commit -m "fix: surface blocked CSS url resources as unsafe network evidence"
           git push origin HEAD:automation/css-resource-containment-20260909

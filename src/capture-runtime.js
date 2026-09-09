@@ -66,6 +66,15 @@ const TOOL_MANIFEST_ENTRY={
   annotations:{readOnlyHint:false,untrustedContentHint:true}
 };
 
+function publishWebMCPReady(faultline){
+  const badge=document.getElementById('webmcp');
+  if(!badge)return;
+  const count=faultline.manifest().length;
+  badge.textContent=`WebMCP ready · ${count} tools`;
+  badge.dataset.state='ready';
+  badge.removeAttribute('title');
+}
+
 export function installCaptureRuntime(){
   const faultline=window.faultline;
   if(!faultline||typeof faultline.loadCase!=='function'||typeof faultline.manifest!=='function')throw new Error('FAULTLINE_RUNTIME_UNAVAILABLE');
@@ -95,7 +104,7 @@ export function installCaptureRuntime(){
       inputSchema:TOOL_MANIFEST_ENTRY.inputSchema,
       execute:async input=>loadCapture(input||{}),
       annotations:TOOL_MANIFEST_ENTRY.annotations
-    },{signal:controller.signal})).catch(error=>{
+    },{signal:controller.signal})).then(()=>publishWebMCPReady(faultline)).catch(error=>{
       const badge=document.getElementById('webmcp');
       if(badge){badge.textContent='WebMCP capture registration error';badge.dataset.state='ERROR';badge.title=String(error?.message||error);}
     });

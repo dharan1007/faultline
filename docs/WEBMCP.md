@@ -1,25 +1,44 @@
 # WebMCP contract
 
-FAULTLINE registers 16 causal tools:
+FAULTLINE registers 17 bounded causal tools:
 
 1. `faultline_inspect`
 2. `faultline_units`
 3. `faultline_load_case`
 4. `faultline_reset_case`
-5. `faultline_run`
-6. `faultline_cancel_active`
-7. `faultline_define_oracle`
-8. `faultline_apply_source`
-9. `faultline_probe`
-10. `faultline_reduce`
-11. `faultline_pin`
-12. `faultline_history`
-13. `faultline_revisions`
-14. `faultline_restore`
-15. `faultline_export`
-16. `faultline_autopilot`
+5. `faultline_import_capture`
+6. `faultline_run`
+7. `faultline_cancel_active`
+8. `faultline_define_oracle`
+9. `faultline_apply_source`
+10. `faultline_probe`
+11. `faultline_reduce`
+12. `faultline_pin`
+13. `faultline_history`
+14. `faultline_revisions`
+15. `faultline_restore`
+16. `faultline_export`
+17. `faultline_autopilot`
 
 The interface exposes causal operations rather than unrestricted browser scripting. UI actions, the `window.faultline` browser API, and WebMCP tools share the same canonical revision-guarded engine. Long-running WebMCP operations support the native execution `AbortSignal`; `faultline_cancel_active` is the compatibility surface for callers that supply a stable `requestId`.
+
+## Semantic-unit discovery and hierarchy
+
+`faultline_units` is the canonical discovery surface before probe/pin/reduction. Each returned unit includes:
+
+- `id` — revision-local source-range identity;
+- `kind` — HTML element, CSS rule/declaration, or bounded JavaScript statement;
+- `text` — exact source slice;
+- `depth` — hierarchy depth (`0` for the current flat JavaScript strategy);
+- `parentId` — containing structural unit when one exists;
+- `pinned` — the unit itself was explicitly pinned;
+- `protectedByPin` — the unit is an ancestor that cannot be removed because a pinned descendant depends on it.
+
+HTML and CSS reduction are hierarchical and coarse-to-fine. `faultline_reduce` reports `hierarchical: true` and the tested `frontiers` for those axes. JavaScript currently reports `hierarchical: false` and continues through the bounded flat reducer until a parser-backed strategy is justified.
+
+A pinned descendant closes protection upward through its ancestor chain. If accepted earlier removals shift source offsets, FAULTLINE remaps the explicit pin by exact transformed source range. Failure to prove the remap aborts before canonical commit rather than leaving a stale pin ID.
+
+The hierarchy/frontier metadata is evidence about what FAULTLINE actually searched; it is not a claim that the result is the globally shortest HTML/CSS/JavaScript program.
 
 ## Deterministic oracle measurements
 
@@ -52,6 +71,10 @@ Example:
 ```
 
 `set_value` is intended for deterministic input, textarea, select, and equivalent value-control reproductions. `set_checked` is intentionally limited to checkbox and radio inputs; it uses the browser's native checked-state setter, so radio-group exclusivity follows normal DOM semantics. Unsupported targets resolve as `ACTION_TARGET_NOT_CHECKABLE`. Missing targets resolve as `ACTION_TARGET_NOT_FOUND`; targets without a writable DOM `value` setter resolve as `ACTION_TARGET_NOT_VALUE_CONTROL`. These execution failures are `UNRESOLVED`, never ordinary PASS/FAIL evidence. Runtime CSP or navigation policy violations detected between sequence steps likewise stop the sequence and retain FAULTLINE's existing `UNRESOLVED` safety evidence.
+
+## Capture import
+
+`faultline_import_capture` accepts a bounded complete `faultline.capture.v1` object plus `expectedRevision`. It does not accept a URL for FAULTLINE to fetch. Import validates and normalizes the artifact, independently executes its candidate, and commits only a reproduced `FAIL`. Cancellation, stale revision, validation failure, unresolved execution, non-reproduction, and persistence failure leave the prior canonical case intact.
 
 ## Recovery flow
 

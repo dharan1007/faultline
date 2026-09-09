@@ -1,5 +1,8 @@
 import './runtime.js';
 import { navigationRisk } from './sandbox-policy.js';
+import { installCaptureRuntime } from './capture-runtime.js';
+
+installCaptureRuntime();
 
 const actionIds=['apply','run','probe','pin','reduce','autopilot','lock','reset'];
 const axisTabs=[...document.querySelectorAll('[role="tab"][data-axis]')];
@@ -8,11 +11,11 @@ const integrationBadge=document.querySelector('#integration-workspace>summary .t
 const integrationFlow=document.querySelector('#integration-workspace .integration-column:nth-child(2) pre');
 const browserFlow=document.querySelector('#integration-workspace .integration-column:nth-child(1) pre');
 const toolCount=window.faultline.manifest().length;
-const toolCountLabel=({13:'thirteen',14:'fourteen',15:'fifteen'})[toolCount]||String(toolCount);
+const toolCountLabel=({13:'thirteen',14:'fourteen',15:'fifteen',16:'sixteen',17:'seventeen'})[toolCount]||String(toolCount);
 
 if(integrationBadge)integrationBadge.textContent=`${toolCount} WebMCP tools`;
 if(integrationNote){
-  integrationNote.textContent=integrationNote.textContent.replace(/\b(?:twelve|thirteen|fourteen|\d+) WebMCP tools\b/i,`${toolCountLabel} WebMCP tools`);
+  integrationNote.textContent=integrationNote.textContent.replace(/\b(?:twelve|thirteen|fourteen|fifteen|sixteen|seventeen|\d+) WebMCP tools\b/i,`${toolCountLabel} WebMCP tools`);
   if(!integrationNote.textContent.includes('faultline_apply_source')){
     const separator=document.createTextNode(' Single-axis agent writes use ');
     const tool=document.createElement('code');
@@ -31,12 +34,24 @@ if(integrationNote){
     tool.textContent='faultline_revisions';
     integrationNote.append(separator,tool,document.createTextNode(' before faultline_restore.'));
   }
+  if(!integrationNote.textContent.includes('faultline_load_capture')){
+    const separator=document.createTextNode(' Real Playwright failures can enter the same canonical engine through ');
+    const tool=document.createElement('code');
+    tool.textContent='faultline_load_capture';
+    integrationNote.append(separator,tool,document.createTextNode('.'));
+  }
 }
 if(integrationFlow&&!integrationFlow.textContent.includes('faultline_units')){
   integrationFlow.textContent=integrationFlow.textContent.replace('faultline_probe','faultline_units({ targetAxis })\n  ↓\nfaultline_probe({ expectedRevision, targetAxis, unitId })');
 }
+if(integrationFlow&&!integrationFlow.textContent.includes('faultline_load_capture')){
+  integrationFlow.textContent=`Playwright test → faultline.capture.v1\n  ↓\nfaultline_load_capture({ expectedRevision, capture })\n  ↓\n${integrationFlow.textContent}`;
+}
 if(browserFlow&&!browserFlow.textContent.includes('window.faultline.units')){
   browserFlow.textContent+=`\n\nconst frontier = await window.faultline.units({ targetAxis: 'html' })\nconst unitId = frontier.units[0]?.id`;
+}
+if(browserFlow&&!browserFlow.textContent.includes('window.faultline.loadCapture')){
+  browserFlow.textContent=`// Import a capture produced in the failing Playwright process\nawait window.faultline.loadCapture({ expectedRevision, capture })\n\n${browserFlow.textContent}`;
 }
 
 function reportActionError(error){
@@ -100,6 +115,92 @@ function installCaseImport(){
   actions.append(button);
   details.append(summary,help,label,editor,actions);
   actionBar.insertAdjacentElement('afterend',details);
+}
+
+function installCaptureImport(){
+  const actionBar=document.querySelector('#case-workspace .action-bar');
+  if(!actionBar||document.getElementById('capture-import'))return;
+
+  const details=document.createElement('details');
+  details.id='capture-import';
+  details.style.marginTop='12px';
+  details.style.paddingTop='12px';
+  details.style.borderTop='1px solid var(--line)';
+
+  const heading=document.createElement('summary');
+  heading.className='btn ghost';
+  heading.style.display='inline-flex';
+  heading.textContent='Import Playwright capture';
+
+  const help=document.createElement('p');
+  help.className='small';
+  help.textContent='Import faultline.capture.v1 produced in your Playwright process. FAULTLINE never browses the captured URL; the versioned JSON is validated, then its HTML, CSS, JavaScript, and oracle enter the existing sandbox as one guarded revision.';
+
+  const fileLabel=document.createElement('label');
+  fileLabel.htmlFor='capture-import-file';
+  fileLabel.textContent='Capture JSON file';
+
+  const file=document.createElement('input');
+  file.id='capture-import-file';
+  file.type='file';
+  file.accept='.json,application/json';
+
+  const pasteLabel=document.createElement('label');
+  pasteLabel.htmlFor='capture-import-json';
+  pasteLabel.textContent='Or paste capture JSON';
+
+  const editor=document.createElement('textarea');
+  editor.id='capture-import-json';
+  editor.spellcheck=false;
+  editor.style.minHeight='200px';
+  editor.placeholder='{"schema":"faultline.capture.v1", ...}';
+
+  const status=document.createElement('p');
+  status.id='capture-import-status';
+  status.className='small';
+  status.setAttribute('role','status');
+  status.setAttribute('aria-live','polite');
+  status.textContent='No capture loaded.';
+
+  file.addEventListener('change',async()=>{
+    try{
+      const selected=file.files?.[0];
+      if(!selected)return;
+      editor.value=await selected.text();
+      status.textContent=`Loaded ${selected.name}. Review or import the capture.`;
+    }catch(error){reportActionError(error);status.textContent=String(error?.message||error);}
+  });
+
+  const actions=document.createElement('div');
+  actions.className='actions';
+  actions.style.marginTop='10px';
+
+  const button=document.createElement('button');
+  button.id='import-capture';
+  button.className='btn primary';
+  button.type='button';
+  button.textContent='Import captured failure';
+  button.addEventListener('click',()=>{
+    try{
+      const capture=JSON.parse(editor.value);
+      const current=window.faultline.inspect();
+      const result=window.faultline.loadCapture({expectedRevision:current.revision,capture});
+      const provenance=result.capture?.title||result.capture?.url||result.capture?.schema||'capture';
+      const health=document.getElementById('health');
+      const mainSummary=document.getElementById('summary');
+      if(health){health.textContent='READY';health.dataset.state='READY';}
+      if(mainSummary)mainSummary.textContent=`Capture imported · ${provenance}`;
+      status.textContent=`Imported ${provenance} at ${result.revision}. ${result.capture?.omittedResources||0} resource(s) were explicitly omitted during capture.`;
+    }catch(error){
+      reportActionError(error);
+      status.textContent=String(error?.message||error);
+    }
+  });
+
+  actions.append(button);
+  details.append(heading,help,fileLabel,file,pasteLabel,editor,status,actions);
+  const caseImport=document.getElementById('case-import');
+  (caseImport||actionBar).insertAdjacentElement('afterend',details);
 }
 
 function installCaseJsonExport(){
@@ -229,6 +330,7 @@ function installPreviewNavigationGuard(){
 }
 
 installCaseImport();
+installCaptureImport();
 installCaseJsonExport();
 installRevisionRecovery();
 installPreviewNavigationGuard();

@@ -6,7 +6,8 @@ const productionFiles = [
   'src/ui.js',
   'src/reducer-engine.js',
   'src/sandbox-policy.js',
-  'src/capture-contract.js'
+  'src/capture-contract.js',
+  'vendor/acorn.mjs'
 ];
 
 for (const file of productionFiles) {
@@ -18,6 +19,7 @@ for (const file of productionFiles) {
 
 rmSync('public', { recursive: true, force: true });
 mkdirSync('public/src', { recursive: true });
+mkdirSync('public/vendor', { recursive: true });
 
 for (const file of productionFiles) {
   copyFileSync(file, `public/${file}`);

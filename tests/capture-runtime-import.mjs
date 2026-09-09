@@ -32,9 +32,9 @@ const capture={
     css:'button{display:block}',
     js:"const name=document.querySelector('#name'),save=document.querySelector('#save');name.addEventListener('input',()=>save.dataset.name=name.value);save.addEventListener('click',()=>save.setAttribute('aria-disabled',save.dataset.name==='alice'?'true':'false'));"
   },
-  oracle:{kind:'dom_attribute',selector:'#save',property:'aria-disabled',equals:'false',action:{kind:'sequence',steps:[{kind:'set_value',selector:'#name',value:'alice'},{kind:'click',selector:'#save'}]},delayMs:0},
+  oracle:{kind:'dom_attribute',selector:'#save',property:'aria-disabled',equals:'true',action:{kind:'sequence',steps:[{kind:'set_value',selector:'#name',value:'alice'},{kind:'click',selector:'#save'}]},delayMs:0},
   environment:{browser:'chromium',playwrightVersion:'1.55.0',viewport:{width:1280,height:720}},
-  provenance:{adapter:'@faultline/playwright-capture',testTitle:'save enables after valid name',testFile:'tests/fixtures/capture-app.html'},
+  provenance:{adapter:'@faultline/playwright-capture',testTitle:'save remains disabled after valid name',testFile:'tests/fixtures/capture-app.html'},
   diagnostics:{externalDependencies:[],consoleErrors:[],pageErrors:[]}
 };
 
@@ -68,7 +68,7 @@ try{
 
   const state=await page.evaluate(()=>window.faultline.inspect());
   assert.equal(state.captureProvenance.schema,'faultline.capture.v1');
-  assert.equal(state.captureProvenance.provenance.testTitle,'save enables after valid name');
+  assert.equal(state.captureProvenance.provenance.testTitle,'save remains disabled after valid name');
   assert.equal(state.case.html,capture.source.html);
 
   const bundle=await page.evaluate(()=>window.faultline.exportBundle());

@@ -10,7 +10,8 @@ const productionFiles = [
   'src/ui.js',
   'src/reducer-engine.js',
   'src/sandbox-policy.js',
-  'src/capture-contract.js'
+  'src/capture-contract.js',
+  'vendor/acorn.mjs'
 ];
 
 test('production deployment parity verifies every shipped application file before and after promotion', () => {
@@ -26,8 +27,8 @@ test('production deployment parity verifies every shipped application file befor
   assert.match(workflow, /Verify public production alias serves exact tree/);
 });
 
-test('production build stages every runtime module imported by the browser', () => {
-  for (const file of productionFiles.filter(file=>file.startsWith('src/'))) {
+test('production build stages every browser runtime dependency', () => {
+  for (const file of productionFiles.filter(file=>file!=='index.html')) {
     assert.ok(buildScript.includes(file),`${file} must be copied into the static production tree`);
   }
 });

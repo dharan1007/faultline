@@ -7,16 +7,12 @@ permissions:
   contents: write
 jobs:
   patch:
-    if: github.event.head_commit.message == 'chore: apply set_checked implementation'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: automation/set-checked-action-20260909
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       - name: Apply implementation
         run: |
           python - <<'PY'
@@ -30,59 +26,25 @@ jobs:
                   raise SystemExit(f'missing patch anchor in {path}: {old[:120]!r}')
               p.write_text(text.replace(old,new,1))
 
-          replace_once('src/runtime.js',
-            "const ACTION_KINDS=['none','click','set_value','sequence'];\nconst ACTION_STEP_KINDS=['click','set_value','wait'];",
-            "const ACTION_KINDS=['none','click','set_value','set_checked','sequence'];\nconst ACTION_STEP_KINDS=['click','set_value','set_checked','wait'];")
-          replace_once('src/runtime.js',
-            "Object.keys(action).some(key=>!['kind','selector','value','steps','durationMs'].includes(key))",
-            "Object.keys(action).some(key=>!['kind','selector','value','checked','steps','durationMs'].includes(key))")
-          replace_once('src/runtime.js',
-            "if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||Object.hasOwn(action,'durationMs')||!Array.isArray(action.steps)",
-            "if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||Object.hasOwn(action,'checked')||Object.hasOwn(action,'durationMs')||!Array.isArray(action.steps)")
-          replace_once('src/runtime.js',
-            "if(Object.hasOwn(action,'steps')||Object.hasOwn(action,'durationMs'))throw new Error('INVALID_ORACLE');\n  if(action.kind==='click'&&(typeof action.selector!=='string'||!action.selector.trim()))throw new Error('INVALID_ORACLE');\n  if(action.kind==='set_value'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.value!=='string'))throw new Error('INVALID_ORACLE');",
-            "if(Object.hasOwn(action,'steps')||Object.hasOwn(action,'durationMs'))throw new Error('INVALID_ORACLE');\n  if(action.kind!=='set_checked'&&Object.hasOwn(action,'checked'))throw new Error('INVALID_ORACLE');\n  if(action.kind==='click'&&(typeof action.selector!=='string'||!action.selector.trim()))throw new Error('INVALID_ORACLE');\n  if(action.kind==='set_value'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.value!=='string'))throw new Error('INVALID_ORACLE');\n  if(action.kind==='set_checked'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.checked!=='boolean'||Object.hasOwn(action,'value')))throw new Error('INVALID_ORACLE');")
-          replace_once('src/runtime.js',
-            " const nativeFormSubmit=HTMLFormElement.prototype.submit;\n const nativeFormRequestSubmit=HTMLFormElement.prototype.requestSubmit;",
-            " const nativeFormSubmit=HTMLFormElement.prototype.submit;\n const nativeFormRequestSubmit=HTMLFormElement.prototype.requestSubmit;\n const NativeInputElement=HTMLInputElement;\n const nativeInputCheckedSetter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked')?.set;\n const nativeDispatchEvent=EventTarget.prototype.dispatchEvent;\n const NativeEvent=Event;")
-          replace_once('src/runtime.js',
-            "   target.dispatchEvent(new Event('change',{bubbles:true}));\n  }\n };",
-            "   target.dispatchEvent(new Event('change',{bubbles:true}));\n   return;\n  }\n  if(action?.kind==='set_checked'){\n   const target=querySelector(action.selector);\n   if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');\n   if(!(target instanceof NativeInputElement)||!['checkbox','radio'].includes(String(target.type).toLowerCase())||!nativeInputCheckedSetter)throw new Error('ACTION_TARGET_NOT_CHECKABLE');\n   nativeInputCheckedSetter.call(target,Boolean(action.checked));\n   nativeDispatchEvent.call(target,new NativeEvent('input',{bubbles:true,composed:true}));\n   nativeDispatchEvent.call(target,new NativeEvent('change',{bubbles:true}));\n  }\n };")
-          replace_once('src/runtime.js',
-            "function syncActionControls(){const kind=$('action-kind').value;$('action-selector').disabled=kind==='none'||kind==='sequence';$('action-value').disabled=kind!=='set_value';$('action-sequence').disabled=kind!=='sequence';}",
-            "function syncActionControls(){const kind=$('action-kind').value;$('action-selector').disabled=kind==='none'||kind==='sequence';$('action-value').disabled=kind!=='set_value';$('action-checked').disabled=kind!=='set_checked';$('action-sequence').disabled=kind!=='sequence';}")
-          replace_once('src/runtime.js',
-            "$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??'';$('action-sequence').value=s.case.oracle.action?.kind==='sequence'?JSON.stringify(s.case.oracle.action.steps,null,2):'';",
-            "$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??'';$('action-checked').value=String(s.case.oracle.action?.checked??true);$('action-sequence').value=s.case.oracle.action?.kind==='sequence'?JSON.stringify(s.case.oracle.action.steps,null,2):'';")
-          replace_once('src/runtime.js',
-            "properties:{kind:{type:'string',enum:ACTION_STEP_KINDS},selector:{type:'string'},value:{type:'string'},durationMs:{type:'number',minimum:0,maximum:MAX_SEQUENCE_WAIT_MS}}",
-            "properties:{kind:{type:'string',enum:ACTION_STEP_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},durationMs:{type:'number',minimum:0,maximum:MAX_SEQUENCE_WAIT_MS}}")
-          replace_once('src/runtime.js',
-            "properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}}",
-            "properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}}")
-          replace_once('src/runtime.js',
-            "else{action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;}try{defineOracle",
-            "else{action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;if(actionKind==='set_checked')action.checked=$('action-checked').value==='true';}try{defineOracle")
+          replace_once('src/runtime.js', "const ACTION_KINDS=['none','click','set_value','sequence'];\nconst ACTION_STEP_KINDS=['click','set_value','wait'];", "const ACTION_KINDS=['none','click','set_value','set_checked','sequence'];\nconst ACTION_STEP_KINDS=['click','set_value','set_checked','wait'];")
+          replace_once('src/runtime.js', "Object.keys(action).some(key=>!['kind','selector','value','steps','durationMs'].includes(key))", "Object.keys(action).some(key=>!['kind','selector','value','checked','steps','durationMs'].includes(key))")
+          replace_once('src/runtime.js', "if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||Object.hasOwn(action,'durationMs')||!Array.isArray(action.steps)", "if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||Object.hasOwn(action,'checked')||Object.hasOwn(action,'durationMs')||!Array.isArray(action.steps)")
+          replace_once('src/runtime.js', "if(Object.hasOwn(action,'steps')||Object.hasOwn(action,'durationMs'))throw new Error('INVALID_ORACLE');\n  if(action.kind==='click'&&(typeof action.selector!=='string'||!action.selector.trim()))throw new Error('INVALID_ORACLE');\n  if(action.kind==='set_value'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.value!=='string'))throw new Error('INVALID_ORACLE');", "if(Object.hasOwn(action,'steps')||Object.hasOwn(action,'durationMs'))throw new Error('INVALID_ORACLE');\n  if(action.kind!=='set_checked'&&Object.hasOwn(action,'checked'))throw new Error('INVALID_ORACLE');\n  if(action.kind==='click'&&(typeof action.selector!=='string'||!action.selector.trim()))throw new Error('INVALID_ORACLE');\n  if(action.kind==='set_value'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.value!=='string'))throw new Error('INVALID_ORACLE');\n  if(action.kind==='set_checked'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.checked!=='boolean'||Object.hasOwn(action,'value')))throw new Error('INVALID_ORACLE');")
+          replace_once('src/runtime.js', " const nativeFormSubmit=HTMLFormElement.prototype.submit;\n const nativeFormRequestSubmit=HTMLFormElement.prototype.requestSubmit;", " const nativeFormSubmit=HTMLFormElement.prototype.submit;\n const nativeFormRequestSubmit=HTMLFormElement.prototype.requestSubmit;\n const NativeInputElement=HTMLInputElement;\n const nativeInputCheckedSetter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked')?.set;\n const nativeDispatchEvent=EventTarget.prototype.dispatchEvent;\n const NativeEvent=Event;")
+          replace_once('src/runtime.js', "   target.dispatchEvent(new Event('change',{bubbles:true}));\n  }\n };", "   target.dispatchEvent(new Event('change',{bubbles:true}));\n   return;\n  }\n  if(action?.kind==='set_checked'){\n   const target=querySelector(action.selector);\n   if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');\n   if(!(target instanceof NativeInputElement)||!['checkbox','radio'].includes(String(target.type).toLowerCase())||!nativeInputCheckedSetter)throw new Error('ACTION_TARGET_NOT_CHECKABLE');\n   nativeInputCheckedSetter.call(target,Boolean(action.checked));\n   nativeDispatchEvent.call(target,new NativeEvent('input',{bubbles:true,composed:true}));\n   nativeDispatchEvent.call(target,new NativeEvent('change',{bubbles:true}));\n  }\n };")
+          replace_once('src/runtime.js', "function syncActionControls(){const kind=$('action-kind').value;$('action-selector').disabled=kind==='none'||kind==='sequence';$('action-value').disabled=kind!=='set_value';$('action-sequence').disabled=kind!=='sequence';}", "function syncActionControls(){const kind=$('action-kind').value;$('action-selector').disabled=kind==='none'||kind==='sequence';$('action-value').disabled=kind!=='set_value';$('action-checked').disabled=kind!=='set_checked';$('action-sequence').disabled=kind!=='sequence';}")
+          replace_once('src/runtime.js', "$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??'';$('action-sequence').value=s.case.oracle.action?.kind==='sequence'?JSON.stringify(s.case.oracle.action.steps,null,2):'';", "$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??'';$('action-checked').value=String(s.case.oracle.action?.checked??true);$('action-sequence').value=s.case.oracle.action?.kind==='sequence'?JSON.stringify(s.case.oracle.action.steps,null,2):'';")
+          replace_once('src/runtime.js', "properties:{kind:{type:'string',enum:ACTION_STEP_KINDS},selector:{type:'string'},value:{type:'string'},durationMs:{type:'number',minimum:0,maximum:MAX_SEQUENCE_WAIT_MS}}", "properties:{kind:{type:'string',enum:ACTION_STEP_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},durationMs:{type:'number',minimum:0,maximum:MAX_SEQUENCE_WAIT_MS}}")
+          replace_once('src/runtime.js', "properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}}", "properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}}")
+          replace_once('src/runtime.js', "else{action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;}try{defineOracle", "else{action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;if(actionKind==='set_checked')action.checked=$('action-checked').value==='true';}try{defineOracle")
 
-          replace_once('index.html',
-            '<option value="set_value">Set form value</option><option value="sequence">Action sequence</option>',
-            '<option value="set_value">Set form value</option><option value="set_checked">Set checked state</option><option value="sequence">Action sequence</option>')
-          replace_once('index.html',
-            '<div><label for="action-value">Action value</label><input id="action-value" value="" autocomplete="off" aria-describedby="action-value-help"><span id="action-value-help" class="small">Used by “Set form value”; ignored by click, sequence, and no-action runs.</span></div>',
-            '<div><label for="action-value">Action value</label><input id="action-value" value="" autocomplete="off" aria-describedby="action-value-help"><span id="action-value-help" class="small">Used by “Set form value”; ignored by other action kinds.</span></div><div><label for="action-checked">Checked state</label><select id="action-checked" aria-describedby="action-checked-help"><option value="true">Checked</option><option value="false">Unchecked</option></select><span id="action-checked-help" class="small">Used by “Set checked state” for checkbox and radio controls.</span></div>')
-          replace_once('index.html',
-            'provide 1–8 ordered click, set_value, or wait steps.',
-            'provide 1–8 ordered click, set_value, set_checked, or wait steps.')
+          replace_once('index.html', '<option value="set_value">Set form value</option><option value="sequence">Action sequence</option>', '<option value="set_value">Set form value</option><option value="set_checked">Set checked state</option><option value="sequence">Action sequence</option>')
+          replace_once('index.html', '<div><label for="action-value">Action value</label><input id="action-value" value="" autocomplete="off" aria-describedby="action-value-help"><span id="action-value-help" class="small">Used by “Set form value”; ignored by click, sequence, and no-action runs.</span></div>', '<div><label for="action-value">Action value</label><input id="action-value" value="" autocomplete="off" aria-describedby="action-value-help"><span id="action-value-help" class="small">Used by “Set form value”; ignored by other action kinds.</span></div><div><label for="action-checked">Checked state</label><select id="action-checked" aria-describedby="action-checked-help"><option value="true">Checked</option><option value="false">Unchecked</option></select><span id="action-checked-help" class="small">Used by “Set checked state” for checkbox and radio controls.</span></div>')
+          replace_once('index.html', 'provide 1–8 ordered click, set_value, or wait steps.', 'provide 1–8 ordered click, set_value, set_checked, or wait steps.')
 
-          replace_once('docs/WEBMCP.md',
-            "- `set_value` — assign the string in `action.value` to a value-capable form control selected by `action.selector`, then dispatch bubbling `input` followed by `change` before measurement.\n- `sequence` — execute 1–8 ordered `click`, `set_value`, and/or bounded `wait` steps from `action.steps`.",
-            "- `set_value` — assign the string in `action.value` to a value-capable form control selected by `action.selector`, then dispatch bubbling `input` followed by `change` before measurement.\n- `set_checked` — assign the boolean in `action.checked` to a checkbox or radio selected by `action.selector`, then dispatch bubbling `input` followed by `change` before measurement.\n- `sequence` — execute 1–8 ordered `click`, `set_value`, `set_checked`, and/or bounded `wait` steps from `action.steps`.")
-          replace_once('docs/WEBMCP.md',
-            'Click and set-value steps use the same target/value validation and runtime safety boundaries as their standalone equivalents.',
-            'Click, set-value, and set-checked steps use the same target/value validation and runtime safety boundaries as their standalone equivalents.')
-          replace_once('docs/WEBMCP.md',
-            "`set_value` is intended for deterministic input, textarea, select, and equivalent value-control reproductions. Missing targets resolve as `ACTION_TARGET_NOT_FOUND`; targets without a writable DOM `value` setter resolve as `ACTION_TARGET_NOT_VALUE_CONTROL`.",
-            "`set_value` is intended for deterministic input, textarea, select, and equivalent value-control reproductions. `set_checked` is intentionally limited to checkbox and radio inputs; unsupported targets resolve as `ACTION_TARGET_NOT_CHECKABLE`. Missing targets resolve as `ACTION_TARGET_NOT_FOUND`; targets without a writable DOM `value` setter resolve as `ACTION_TARGET_NOT_VALUE_CONTROL`.")
+          replace_once('docs/WEBMCP.md', "- `set_value` — assign the string in `action.value` to a value-capable form control selected by `action.selector`, then dispatch bubbling `input` followed by `change` before measurement.\n- `sequence` — execute 1–8 ordered `click`, `set_value`, and/or bounded `wait` steps from `action.steps`.", "- `set_value` — assign the string in `action.value` to a value-capable form control selected by `action.selector`, then dispatch bubbling `input` followed by `change` before measurement.\n- `set_checked` — assign the boolean in `action.checked` to a checkbox or radio selected by `action.selector`, then dispatch bubbling `input` followed by `change` before measurement.\n- `sequence` — execute 1–8 ordered `click`, `set_value`, `set_checked`, and/or bounded `wait` steps from `action.steps`.")
+          replace_once('docs/WEBMCP.md', 'Click and set-value steps use the same target/value validation and runtime safety boundaries as their standalone equivalents.', 'Click, set-value, and set-checked steps use the same target/value validation and runtime safety boundaries as their standalone equivalents.')
+          replace_once('docs/WEBMCP.md', "`set_value` is intended for deterministic input, textarea, select, and equivalent value-control reproductions. Missing targets resolve as `ACTION_TARGET_NOT_FOUND`; targets without a writable DOM `value` setter resolve as `ACTION_TARGET_NOT_VALUE_CONTROL`.", "`set_value` is intended for deterministic input, textarea, select, and equivalent value-control reproductions. `set_checked` is intentionally limited to checkbox and radio inputs; unsupported targets resolve as `ACTION_TARGET_NOT_CHECKABLE`. Missing targets resolve as `ACTION_TARGET_NOT_FOUND`; targets without a writable DOM `value` setter resolve as `ACTION_TARGET_NOT_VALUE_CONTROL`.")
 
           package_path=Path('package.json')
           package=json.loads(package_path.read_text())
@@ -97,7 +59,7 @@ jobs:
           rm -f .github/workflows/automation-set-checked-red.yml .github/workflows/automation-set-checked-patch.yml
           git config user.name dharan
           git config user.email '150376358+dharan1007@users.noreply.github.com'
-          git add src/runtime.js index.html docs/WEBMCP.md package.json tests/oracle-set-checked-action.mjs .github/workflows
+          git add -A
           git diff --cached --check
           git commit -m 'fix: add deterministic checked-state oracle action'
           git push origin HEAD:automation/set-checked-action-20260909

@@ -3,16 +3,23 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const workflow = fs.readFileSync('.github/workflows/deploy-production.yml', 'utf8');
+const buildScript = fs.readFileSync('scripts-build.mjs', 'utf8');
 const productionFiles = [
   'index.html',
   'src/runtime.js',
   'src/ui.js',
   'src/reducer-engine.js',
-  'src/sandbox-policy.js'
+  'src/sandbox-policy.js',
+  'src/capture-contract.js',
+  'src/capture-integration.js'
 ];
 
-test('production deployment parity verifies every shipped application file before and after promotion', () => {
+test('production build and deployment parity cover every shipped application file', () => {
   for (const file of productionFiles) {
+    assert.ok(
+      buildScript.includes(`'${file}'`),
+      `${file} must be explicitly staged into the production tree`
+    );
     const occurrences = workflow.split(file).length - 1;
     assert.ok(
       occurrences >= 2,

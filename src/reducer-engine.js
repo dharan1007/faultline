@@ -1,6 +1,8 @@
 const clone = value => JSON.parse(JSON.stringify(value));
 const MAX_REVISION_SNAPSHOTS = 32;
 const MAX_REVISION_LEDGER = 64;
+const HTML_VOID_ELEMENTS = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
+const HTML_RAW_TEXT_ELEMENTS = new Set(['script','style']);
 
 function trimSnapshots(snapshots,currentRevision) {
   while (snapshots.size > MAX_REVISION_SNAPSHOTS) {
@@ -10,28 +12,254 @@ function trimSnapshots(snapshots,currentRevision) {
   }
 }
 
+function unit(axis, source, start, end, kind, depth=0, parentId=null) {
+  return { id:`${axis}:${start}:${end}`, axis, start, end, kind, text:source.slice(start,end), depth, parentId };
+}
+
+function findTagEnd(source,start){
+  let quote=null;
+  for(let i=start+1;i<source.length;i++){
+    const ch=source[i];
+    if(quote){
+      if(ch==='\\'){i++;continue;}
+      if(ch===quote)quote=null;
+      continue;
+    }
+    if(ch==='"'||ch==="'"){quote=ch;continue;}
+    if(ch==='>')return i+1;
+  }
+  return -1;
+}
+
+function scanHtml(source){
+  const nodes=[];
+  const stack=[];
+  let cursor=0;
+  while(cursor<source.length){
+    const lt=source.indexOf('<',cursor);
+    if(lt<0)break;
+    if(source.startsWith('<!--',lt)){
+      const end=source.indexOf('-->',lt+4);
+      cursor=end<0?source.length:end+3;
+      continue;
+    }
+    if(source.startsWith('<![CDATA[',lt)){
+      const end=source.indexOf(']]>',lt+9);
+      cursor=end<0?source.length:end+3;
+      continue;
+    }
+    const tagEnd=findTagEnd(source,lt);
+    if(tagEnd<0)break;
+    const token=source.slice(lt,tagEnd);
+    if(/^<\s*!|^<\s*\?/.test(token)){cursor=tagEnd;continue;}
+    const close=/^<\s*\/\s*([A-Za-z][\w:-]*)[^>]*>$/.exec(token);
+    if(close){
+      const name=close[1].toLowerCase();
+      let match=-1;
+      for(let i=stack.length-1;i>=0;i--)if(stack[i].name===name){match=i;break;}
+      if(match>=0){
+        const node=stack[match];
+        node.end=tagEnd;
+        nodes.push(node);
+        stack.splice(match);
+      }
+      cursor=tagEnd;
+      continue;
+    }
+    const open=/^<\s*([A-Za-z][\w:-]*)\b/.exec(token);
+    if(!open){cursor=tagEnd;continue;}
+    const name=open[1].toLowerCase();
+    const parent=stack.at(-1)||null;
+    const isSelfClosing=/\/\s*>$/.test(token);
+    const node={start:lt,end:null,name,parent};
+    if(HTML_VOID_ELEMENTS.has(name)||isSelfClosing){
+      node.end=tagEnd;
+      nodes.push(node);
+      cursor=tagEnd;
+      continue;
+    }
+    if(HTML_RAW_TEXT_ELEMENTS.has(name)){
+      const closeRe=new RegExp(`<\\s*\\/\\s*${name}\\s*>`,'ig');
+      closeRe.lastIndex=tagEnd;
+      const closing=closeRe.exec(source);
+      node.end=closing?closing.index+closing[0].length:tagEnd;
+      nodes.push(node);
+      cursor=node.end;
+      continue;
+    }
+    stack.push(node);
+    cursor=tagEnd;
+  }
+  const emitted=new Set(nodes);
+  const resolveParent=node=>{
+    let parent=node.parent;
+    while(parent&&!emitted.has(parent))parent=parent.parent;
+    return parent||null;
+  };
+  const depthOf=node=>{
+    let depth=0,parent=resolveParent(node),seen=new Set();
+    while(parent&&!seen.has(parent)){seen.add(parent);depth++;parent=resolveParent(parent);}
+    return depth;
+  };
+  const ids=new Map(nodes.map(node=>[node,`html:${node.start}:${node.end}`]));
+  return nodes.map(node=>unit('html',source,node.start,node.end,'element',depthOf(node),ids.get(resolveParent(node))||null));
+}
+
+function skipCssTrivia(source,index,end){
+  let i=index;
+  while(i<end){
+    if(/\s/.test(source[i])){i++;continue;}
+    if(source.startsWith('/*',i)){
+      const close=source.indexOf('*/',i+2);
+      i=close<0?end:Math.min(end,close+2);
+      continue;
+    }
+    break;
+  }
+  return i;
+}
+
+function cssBalancedBlockEnd(source,open,end){
+  let depth=1,quote=null,inComment=false;
+  for(let i=open+1;i<end;i++){
+    const ch=source[i],next=source[i+1];
+    if(inComment){if(ch==='*'&&next==='/'){inComment=false;i++;}continue;}
+    if(quote){if(ch==='\\'){i++;continue;}if(ch===quote)quote=null;continue;}
+    if(ch==='/'&&next==='*'){inComment=true;i++;continue;}
+    if(ch==='"'||ch==="'"){quote=ch;continue;}
+    if(ch==='{')depth++;
+    else if(ch==='}'&&--depth===0)return i;
+  }
+  return -1;
+}
+
+function cssPreludeOpen(source,start,end){
+  let quote=null,inComment=false,paren=0,bracket=0;
+  for(let i=start;i<end;i++){
+    const ch=source[i],next=source[i+1];
+    if(inComment){if(ch==='*'&&next==='/'){inComment=false;i++;}continue;}
+    if(quote){if(ch==='\\'){i++;continue;}if(ch===quote)quote=null;continue;}
+    if(ch==='/'&&next==='*'){inComment=true;i++;continue;}
+    if(ch==='"'||ch==="'"){quote=ch;continue;}
+    if(ch==='(')paren++;
+    else if(ch===')'&&paren)paren--;
+    else if(ch==='[')bracket++;
+    else if(ch===']'&&bracket)bracket--;
+    else if(ch==='{'&&!paren&&!bracket)return i;
+    else if(ch===';'&&!paren&&!bracket)return -(i+1);
+  }
+  return -0;
+}
+
+function declarationRanges(source,start,end){
+  const ranges=[];
+  let segment=start,quote=null,inComment=false,paren=0,bracket=0,brace=0;
+  const push=endExclusive=>{
+    let s=segment,e=endExclusive;
+    while(s<e&&/\s/.test(source[s]))s++;
+    while(e>s&&/\s/.test(source[e-1]))e--;
+    if(s<e){
+      const text=source.slice(s,e);
+      if(text.includes(':'))ranges.push([s,e]);
+    }
+  };
+  for(let i=start;i<end;i++){
+    const ch=source[i],next=source[i+1];
+    if(inComment){if(ch==='*'&&next==='/'){inComment=false;i++;}continue;}
+    if(quote){if(ch==='\\'){i++;continue;}if(ch===quote)quote=null;continue;}
+    if(ch==='/'&&next==='*'){inComment=true;i++;continue;}
+    if(ch==='"'||ch==="'"){quote=ch;continue;}
+    if(ch==='(')paren++;
+    else if(ch===')'&&paren)paren--;
+    else if(ch==='[')bracket++;
+    else if(ch===']'&&bracket)bracket--;
+    else if(ch==='{')brace++;
+    else if(ch==='}'&&brace)brace--;
+    else if(ch===';'&&!paren&&!bracket&&!brace){push(i+1);segment=i+1;}
+  }
+  push(end);
+  return ranges;
+}
+
+function isNestedAtRule(prelude){
+  return /^@(media|supports|layer|container|scope|starting-style|document|keyframes|-\w+-keyframes)\b/i.test(prelude.trim());
+}
+
+function scanCssRange(source,start,end,parent=null,depth=0,nodes=[]){
+  let cursor=start;
+  while(cursor<end){
+    cursor=skipCssTrivia(source,cursor,end);
+    if(cursor>=end)break;
+    const marker=cssPreludeOpen(source,cursor,end);
+    if(marker<0){cursor=(-marker);continue;}
+    if(marker===0&&source[cursor]!=='{')break;
+    const open=marker===0?cursor:marker;
+    const close=cssBalancedBlockEnd(source,open,end);
+    if(close<0)break;
+    const prelude=source.slice(cursor,open).trim();
+    if(!prelude){cursor=close+1;continue;}
+    const node={start:cursor,end:close+1,parent,depth,kind:'rule'};
+    nodes.push(node);
+    if(isNestedAtRule(prelude)){
+      scanCssRange(source,open+1,close,node,depth+1,nodes);
+    }else{
+      for(const [declStart,declEnd] of declarationRanges(source,open+1,close))nodes.push({start:declStart,end:declEnd,parent:node,depth:depth+1,kind:'declaration'});
+    }
+    cursor=close+1;
+  }
+  return nodes;
+}
+
+function scanCss(source){
+  const nodes=scanCssRange(source,0,source.length);
+  const ids=new Map(nodes.map(node=>[node,`css:${node.start}:${node.end}`]));
+  return nodes.map(node=>unit('css',source,node.start,node.end,node.kind,node.depth,ids.get(node.parent)||null));
+}
+
 export function semanticUnits(axis, source) {
   source = String(source ?? '');
-  const units = [];
-  const push = (start, end, kind) => units.push({ id:`${axis}:${start}:${end}`, axis, start, end, kind, text:source.slice(start,end) });
-  if (axis === 'html') {
-    const paired = /<([a-zA-Z][\w:-]*)\b[^>]*>[^<>]*<\/\1\s*>/g;
-    const voidish = /<(?:img|input|br|hr|meta|link|source|area|base|embed|param|track|wbr)\b[^>]*\/?\s*>/gi;
-    let m; while ((m=paired.exec(source))) push(m.index,m.index+m[0].length,'element');
-    while ((m=voidish.exec(source))) push(m.index,m.index+m[0].length,'element');
-  } else if (axis === 'css') {
-    const rule = /[^{}]+\{[^{}]*\}/g; let m; while ((m=rule.exec(source))) push(m.index,m.index+m[0].length,'rule');
-  } else if (axis === 'js') {
+  let units;
+  if (axis === 'html') units=scanHtml(source);
+  else if (axis === 'css') units=scanCss(source);
+  else if (axis === 'js') {
+    units=[];
     const line = /[^\n;{}]+(?:\([^\n{}]*\)\s*=>\s*\{[^{}]*\}|\{[^{}]*\})?\s*;?/g; let m;
-    while ((m=line.exec(source))) if (m[0].trim()) push(m.index,m.index+m[0].length,'statement');
+    while ((m=line.exec(source))) if (m[0].trim()) units.push(unit('js',source,m.index,m.index+m[0].length,'statement',0,null));
   } else throw new Error('INVALID_AXIS');
-  return units.sort((a,b)=>a.start-b.start || a.end-b.end);
+  return units.sort((a,b)=>a.start-b.start || b.end-a.end || a.kind.localeCompare(b.kind));
+}
+
+export function ancestorClosure(units,pinnedIds=[]) {
+  const byId=new Map(units.map(item=>[item.id,item]));
+  const protectedIds=new Set();
+  for(const pinnedId of pinnedIds){
+    let current=byId.get(pinnedId),seen=new Set();
+    while(current&&!seen.has(current.id)){
+      seen.add(current.id);
+      protectedIds.add(current.id);
+      current=current.parentId?byId.get(current.parentId):null;
+    }
+  }
+  return protectedIds;
+}
+
+export function hierarchyFrontier(units,_protectedIds=new Set(),depth=0) {
+  const byId=new Map(units.map(item=>[item.id,item]));
+  return units.filter(item=>item.depth===depth&&(!item.parentId||byId.has(item.parentId))).sort((a,b)=>a.start-b.start||b.end-a.end);
 }
 
 export function removeUnits(source, units) {
-  const ranges = [...units].sort((a,b)=>b.start-a.start);
+  const ordered=[...units].sort((a,b)=>a.start-b.start||b.end-a.end);
+  const ranges=[];
+  for(const item of ordered){
+    if(!Number.isInteger(item.start)||!Number.isInteger(item.end)||item.start<0||item.end<item.start)continue;
+    const previous=ranges.at(-1);
+    if(previous&&item.start>=previous.start&&item.end<=previous.end)continue;
+    if(previous&&item.start<previous.end)previous.end=Math.max(previous.end,item.end);
+    else ranges.push({start:item.start,end:item.end});
+  }
   let out = String(source ?? '');
-  for (const unit of ranges) out = out.slice(0,unit.start)+out.slice(unit.end);
+  for (const range of ranges.reverse()) out = out.slice(0,range.start)+out.slice(range.end);
   return out;
 }
 

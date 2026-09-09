@@ -454,6 +454,30 @@ function containsExternalCssResource(source){
   return false;
 }
 
+function containsExternalInlineCssResource(source){
+  const html=String(source??'');
+  if(typeof DOMParser==='function'){
+    const doc=new DOMParser().parseFromString(html,'text/html');
+    for(const style of doc.querySelectorAll('style')){
+      const css=String(style.textContent??'');
+      if(containsExternalStylesheetImport(css)||containsExternalCssResource(css))return true;
+    }
+    for(const element of doc.querySelectorAll('[style]')){
+      if(containsExternalCssResource(element.getAttribute('style')))return true;
+    }
+    return false;
+  }
+  const withoutComments=html.replace(/<!--[\s\S]*?-->/g,'');
+  for(const match of withoutComments.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi)){
+    if(containsExternalStylesheetImport(match[1])||containsExternalCssResource(match[1]))return true;
+  }
+  for(const match of withoutComments.matchAll(/<[^>]+\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>/gi)){
+    const css=String(match[1]??match[2]??'');
+    if(containsExternalCssResource(css))return true;
+  }
+  return false;
+}
+
 function computedGlobalRisk(source){
   const text=String(source??'');
   const roots=new Set(['window','self','globalThis','document','parent','top','frames','this']);
@@ -553,6 +577,7 @@ export function navigationRisk(candidate){
   if(containsExternalMedia(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-media'};
   if(containsExternalFrame(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-frame'};
   if(containsBlockedEmbeddedObject(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-embedded-object'};
+  if(containsExternalInlineCssResource(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-inline-css-resource'};
   if(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(?:["']?refresh["']?\b))[^>]*>/i.test(html))return {axis:'html',capability:'meta-refresh'};
   return null;
 }

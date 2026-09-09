@@ -1,13 +1,14 @@
 # FAULTLINE
 
-> Local-first deterministic browser-failure reduction: define an oracle, probe/removes semantic HTML/CSS/JS units, keep changes only when the failure remains, inspect evidence/revisions and export a standalone reproducer.
+> Local-first deterministic browser-failure reduction: capture or load an exact reducible case, verify an oracle, probe/remove semantic HTML/CSS/JS units, keep changes only when the failure remains, inspect evidence/revisions and export a standalone reproducer.
 
 Canonical repository: https://github.com/dharan1007/faultline
-Live product: https://faultline-webmcp-tejs-projects-70bb4568.vercel.app/
+Live product: https://faultline-webmcp.vercel.app/
 
 ## Start here
 
 - README: https://github.com/dharan1007/faultline/blob/main/README.md
+- WebMCP contract: https://github.com/dharan1007/faultline/blob/main/docs/WEBMCP.md
 - Security policy: https://github.com/dharan1007/faultline/blob/main/SECURITY.md
 - Technical security boundary: https://github.com/dharan1007/faultline/blob/main/docs/SECURITY.md
 - Roadmap: https://github.com/dharan1007/faultline/blob/main/ROADMAP.md
@@ -18,20 +19,39 @@ Live product: https://faultline-webmcp-tejs-projects-70bb4568.vercel.app/
 - `src/runtime.js`
 - `src/reducer-engine.js`
 - `src/sandbox-policy.js`
+- `src/capture-contract.js`
+- `src/capture-integration.js`
+
+Playwright capture adapter:
+
+- `playwright/faultline-capture.mjs`
+- `bin/faultline-capture.mjs`
 
 Do not describe legacy/experimental domain files as the production reducer unless they are integrated into this path and tests.
 
 ## Core facts
 
 - Oracle results: PASS / FAIL / UNRESOLVED.
-- Oracles: DOM property, DOM existence, computed style, runtime error.
+- Oracles: DOM property, DOM attribute, DOM existence, computed style, runtime error.
+- Actions: none, click, set_value, set_checked, bounded sequence; sequence waits have a total 2000 ms budget.
 - Reduction: bounded ddmin over semantic units one axis at a time in the current production runtime.
 - Minimality: relative to the tested candidate-unit set; not global shortest-source proof.
 - State: local browser persistence, revision snapshots/history, stale-revision guards.
 - Execution boundary: sandboxed iframe + restrictive CSP/navigation controls; not OS/VM isolation.
 - Agent integration: browser WebMCP when `document.modelContext` is available.
-- Runtime npm dependencies: none; Playwright is a development dependency.
+- Capture integration: strict versioned `faultline.capture` v1 artifacts generated beside a real Playwright test, with browser provenance and atomic workbench ingestion through canonical `loadCase`.
+- Capture provenance is informational; rerun the oracle after import before reduction.
+- Capture v1 does not claim lossless reconstruction of arbitrary bundled framework applications.
+- Runtime npm dependencies: none; Playwright is a development dependency and local capture adapter.
 - License: MIT.
+
+## Capture / agent flow
+
+`npm run capture -- --url <url> --case <case.json> --out <capture.json> --browser chromium`
+
+or call `captureFaultlineCase({page, caseValue, outputPath, browserName})` from a Playwright test.
+
+Then validate the artifact, call `faultline_inspect`, feed `artifact.case` to `faultline_load_case` with the returned expected revision, call `faultline_run` to re-verify the baseline, and only then probe/reduce/autopilot.
 
 ## Verification
 

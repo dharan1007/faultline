@@ -42,8 +42,8 @@ console.warn('root noise');`,
   const initial=await page.evaluate(()=>window.faultline.units({targetAxis:'js'}));
   const fn=initial.units.find(unit=>unit.text.startsWith('function reproduce()'));
   const ifStatement=initial.units.find(unit=>unit.text.trim().startsWith('if(required)'));
-  const assignment=initial.units.find(unit=>unit.text.includes("setAttribute('data-failed','yes')")&&!unit.text.trim().startsWith('if'));
-  const rootNoise=initial.units.find(unit=>unit.text.includes("console.warn('root noise')"));
+  const assignment=initial.units.find(unit=>unit.text.trim().startsWith("document.querySelector('#app').setAttribute('data-failed','yes')"));
+  const rootNoise=initial.units.find(unit=>unit.text.trim().startsWith("console.warn('root noise')"));
   assert.ok(fn&&ifStatement&&assignment&&rootNoise,'real browser API must expose nested and root parser-backed JavaScript statements');
   assert.equal(fn.parentId,null);
   assert.equal(ifStatement.parentId,fn.id);
@@ -74,7 +74,7 @@ console.warn('root noise');`,
   assert.ok(!after.inspect.case.js.includes('inner noise'),'irrelevant sibling inside required control flow must be removable');
   assert.ok(!after.inspect.case.js.includes('root noise'),'irrelevant root statement must be removable');
 
-  const remappedAssignment=after.units.units.find(unit=>unit.text.includes("setAttribute('data-failed','yes')"));
+  const remappedAssignment=after.units.units.find(unit=>unit.text.trim().startsWith("document.querySelector('#app').setAttribute('data-failed','yes')"));
   assert.ok(remappedAssignment?.pinned,'pin must remain attached after JavaScript source offsets change');
   const finalRun=await page.evaluate(async expectedRevision=>window.faultline.run({expectedRevision}),after.inspect.revision);
   assert.equal(finalRun.status,'FAIL','independent final Chromium execution must reproduce the same reduced failure');

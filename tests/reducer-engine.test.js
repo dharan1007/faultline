@@ -49,9 +49,10 @@ test('structural scanners respect quoted delimiters and malformed boundaries con
 test('protectedHierarchyIds closes explicit pins over every ancestor', () => {
   assert.equal(typeof engine.protectedHierarchyIds,'function','production reducer must expose ancestor-closure helper');
   const units=semanticUnits('html','<main><section><p id="target">A</p><span>N</span></section></main>');
-  const target=units.find(unit=>unit.text.includes('id="target"'));
+  const target=units.find(unit=>unit.text.startsWith('<p id="target"'));
   const section=units.find(unit=>unit.text.startsWith('<section>'));
   const main=units.find(unit=>unit.text.startsWith('<main>'));
+  assert.ok(target); assert.ok(section); assert.ok(main);
   const protectedIds=engine.protectedHierarchyIds(units,[target.id]);
   assert.deepEqual(new Set([target.id,section.id,main.id]),protectedIds);
 });
@@ -75,7 +76,8 @@ test('hierarchicalReduce removes coarse parents before descending and keeps prot
   assert.equal(typeof engine.hierarchicalReduce,'function','production reducer must expose hierarchy-aware ddmin');
   const source='<aside><div><p>noise</p></div></aside><main><section><span>child-noise</span><button id="target">Keep</button></section></main>';
   const units=semanticUnits('html',source);
-  const target=units.find(unit=>unit.text.includes('id="target"'));
+  const target=units.find(unit=>unit.text.startsWith('<button id="target"'));
+  assert.ok(target);
   const result=await engine.hierarchicalReduce(units,async removedIds=>{
     const removed=units.filter(unit=>removedIds.has(unit.id));
     const candidate=removeUnits(source,removed);
@@ -93,11 +95,9 @@ test('hierarchicalReduce removes coarse parents before descending and keeps prot
 test('hierarchicalReduce uses one explicit global trial budget', async () => {
   assert.equal(typeof engine.hierarchicalReduce,'function');
   const units=semanticUnits('html','<aside>A</aside><main><p>B</p><button id="target">K</button></main>');
-  const target=units.find(unit=>unit.text.includes('id="target"'));
-  await assert.rejects(
-    engine.hierarchicalReduce(units,async()=> 'FAIL',{protectedItems:[target.id],maxTrials:1}),
-    /TRIAL_BUDGET_EXHAUSTED/
-  );
+  const target=units.find(unit=>unit.text.startsWith('<button id="target"'));
+  assert.ok(target);
+  await assert.rejects(engine.hierarchicalReduce(units,async()=> 'FAIL',{protectedItems:[target.id],maxTrials:1}),/TRIAL_BUDGET_EXHAUSTED/);
 });
 
 test('removeUnits removes only selected ranges', () => {

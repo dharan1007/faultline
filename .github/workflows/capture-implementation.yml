@@ -16,19 +16,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Apply exact source transformation
-        run: node scripts/implement-capture-pipeline.mjs
+      - name: Apply exact application transformation
+        run: node scripts/run-capture-transform-without-workflows.mjs
       - name: Verify transformed syntax
         run: |
           node --check src/capture-format.js
           node --check src/runtime.js
           node --check src/ui.js
           node --check scripts/capture-playwright.mjs
-      - name: Commit implementation and remove one-shot machinery
+      - name: Commit application implementation
         run: |
           set -euo pipefail
           git config user.name dharan
           git config user.email 150376358+dharan1007@users.noreply.github.com
-          git add -A
+          git add src/runtime.js src/ui.js scripts-build.mjs tests/deployment-tree-parity.test.js package.json README.md docs/SECURITY.md ROADMAP.md
           git commit -m 'feat: add transactional Playwright capture pipeline'
           git push origin HEAD:automation/playwright-capture-pipeline-20260909

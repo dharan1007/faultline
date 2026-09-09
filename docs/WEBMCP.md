@@ -23,7 +23,7 @@ The interface exposes causal operations rather than unrestricted browser scripti
 
 ## Deterministic oracle measurements
 
-FAULTLINE supports DOM property, DOM attribute, computed-style, DOM-existence, and runtime-error measurements. `dom_attribute` reads the named attribute with `Element.getAttribute()` after the configured action and delay. Its expected value must be a string or `null`: strings preserve exact serialized attribute values such as `aria-expanded="true"` or `data-state="open"`, while `null` distinguishes an absent attribute from an attribute whose value is the empty string. This makes ARIA and framework state-marker regressions directly reproducible without mapping attribute names onto unrelated JavaScript properties.
+FAULTLINE supports DOM property, DOM attribute, computed-style, DOM-existence, and runtime-error measurements. `dom_attribute` reads the named attribute with `Element.getAttribute()` after the configured action and delay. Its expected value must be a string or `null`: strings preserve exact serialized attribute values such as `aria-expanded="true"` or `data-state="open"`, while `null` distinguishes an absent attribute from an attribute whose value is the empty string. Attribute names are passed directly to `getAttribute()` rather than mapped to JavaScript properties, so ARIA, `data-*`, and other serialized state markers retain browser-native attribute semantics.
 
 ## Deterministic pre-measurement actions
 

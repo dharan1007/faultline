@@ -1,4 +1,4 @@
-import { parse as parseJavaScript } from '../vendor/acorn.mjs';
+import { parse as parseJavaScript } from '../vendor/acorn.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const MAX_REVISION_SNAPSHOTS = 32;

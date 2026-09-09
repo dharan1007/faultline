@@ -28,9 +28,9 @@ An oracle may perform one bounded action contract before measurement:
 - `none` — measure without interaction.
 - `click` — click the element selected by `action.selector`.
 - `set_value` — assign the string in `action.value` to a value-capable form control selected by `action.selector`, then dispatch bubbling `input` followed by `change` before measurement.
-- `sequence` — execute 1–8 ordered `click` and/or `set_value` steps from `action.steps`. FAULTLINE yields to a browser task boundary after every step so queued microtasks and framework state transitions can settle before the next interaction.
+- `sequence` — execute 1–8 ordered `click`, `set_value`, and/or bounded `wait` steps from `action.steps`. Interactive steps yield to a browser task boundary; a `wait` step uses `durationMs` and allows timer/debounce-driven state to settle before the next interaction.
 
-A sequence is deliberately structured and bounded rather than an arbitrary script escape hatch. Nested sequences and empty sequences are invalid. Each sequence step uses the same target/value validation and runtime safety boundaries as the equivalent standalone action.
+A sequence is deliberately structured and bounded rather than an arbitrary script escape hatch. Nested sequences and empty sequences are invalid. Each `wait` is limited to 0–2000 ms and the total declared wait budget across one sequence is capped at 2000 ms. Click and set-value steps use the same target/value validation and runtime safety boundaries as their standalone equivalents.
 
 Example:
 
@@ -39,6 +39,7 @@ Example:
   "kind": "sequence",
   "steps": [
     { "kind": "set_value", "selector": "#email", "value": "user@example.test" },
+    { "kind": "wait", "durationMs": 150 },
     { "kind": "click", "selector": "#submit" }
   ]
 }

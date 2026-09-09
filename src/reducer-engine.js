@@ -1,6 +1,167 @@
 const clone = value => JSON.parse(JSON.stringify(value));
 const MAX_REVISION_SNAPSHOTS = 32;
 const MAX_REVISION_LEDGER = 64;
+const VOID_HTML_TAGS = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
+const RAW_HTML_TAGS = new Set(['script','style']);
+
+function unitId(axis,start,end){ return `${axis}:${start}:${end}`; }
+function finishUnits(axis,source,records){
+  const complete=records.filter(record=>Number.isInteger(record.end)&&record.end>record.start);
+  const ids=new Map(complete.map(record=>[record,unitId(axis,record.start,record.end)]));
+  const nearestCompleteParent=record=>{
+    let parent=record.parent;
+    while(parent&&!ids.has(parent))parent=parent.parent;
+    return parent||null;
+  };
+  return complete.map(record=>{
+    const parent=nearestCompleteParent(record);
+    let depth=0,cursor=parent;
+    while(cursor){depth++;cursor=nearestCompleteParent(cursor);}
+    return {id:ids.get(record),axis,start:record.start,end:record.end,kind:record.kind,text:source.slice(record.start,record.end),parentId:parent?ids.get(parent):null,depth};
+  }).sort((a,b)=>a.start-b.start||b.end-a.end||a.depth-b.depth||a.kind.localeCompare(b.kind));
+}
+function htmlTagEnd(source,start){
+  let quote=null;
+  for(let i=start+1;i<source.length;i++){
+    const ch=source[i];
+    if(quote){if(ch===quote)quote=null;continue;}
+    if(ch==='"'||ch==="'"){quote=ch;continue;}
+    if(ch==='>')return i+1;
+  }
+  return -1;
+}
+function parseHtmlTag(source,start){
+  const end=htmlTagEnd(source,start);
+  if(end<0)return null;
+  const raw=source.slice(start,end);
+  if(/^<\s*![^-]|^<\s*\?/.test(raw))return {special:true,end};
+  const closing=/^<\s*\/\s*([A-Za-z][\w:-]*)/.exec(raw);
+  if(closing)return {closing:true,tag:closing[1].toLowerCase(),end};
+  const opening=/^<\s*([A-Za-z][\w:-]*)/.exec(raw);
+  if(!opening)return {special:true,end};
+  const tag=opening[1].toLowerCase();
+  return {closing:false,tag,end,selfClosing:/\/\s*>$/.test(raw)||VOID_HTML_TAGS.has(tag)};
+}
+function htmlUnits(source){
+  const records=[];
+  const stack=[];
+  const lower=source.toLowerCase();
+  for(let i=0;i<source.length;){
+    if(source[i]!=='<'){i++;continue;}
+    if(source.startsWith('<!--',i)){
+      const close=source.indexOf('-->',i+4);
+      i=close<0?source.length:close+3;
+      continue;
+    }
+    const tag=parseHtmlTag(source,i);
+    if(!tag)break;
+    if(tag.special){i=tag.end;continue;}
+    if(tag.closing){
+      const top=stack.at(-1);
+      if(top?.tag===tag.tag){top.end=tag.end;records.push(top);stack.pop();}
+      i=tag.end;
+      continue;
+    }
+    const parent=stack.at(-1)||null;
+    if(tag.selfClosing){records.push({tag:tag.tag,start:i,end:tag.end,kind:'element',parent});i=tag.end;continue;}
+    if(RAW_HTML_TAGS.has(tag.tag)){
+      const closeStart=lower.indexOf(`</${tag.tag}`,tag.end);
+      if(closeStart>=0){
+        const closeTag=parseHtmlTag(source,closeStart);
+        if(closeTag?.closing&&closeTag.tag===tag.tag){records.push({tag:tag.tag,start:i,end:closeTag.end,kind:'element',parent});i=closeTag.end;continue;}
+      }
+      i=tag.end;
+      continue;
+    }
+    stack.push({tag:tag.tag,start:i,end:null,kind:'element',parent});
+    i=tag.end;
+  }
+  return finishUnits('html',source,records);
+}
+function skipCssComment(source,i,end){
+  const close=source.indexOf('*/',i+2);
+  return close<0?end:Math.min(end,close+2);
+}
+function skipCssString(source,i,end){
+  const quote=source[i];
+  for(let cursor=i+1;cursor<end;cursor++){
+    if(source[cursor]==='\\'){cursor++;continue;}
+    if(source[cursor]===quote)return cursor+1;
+  }
+  return end;
+}
+function findCssClose(source,open,end){
+  let depth=1;
+  for(let i=open+1;i<end;i++){
+    if(source.startsWith('/*',i)){i=skipCssComment(source,i,end)-1;continue;}
+    if(source[i]==='"'||source[i]==="'"){i=skipCssString(source,i,end)-1;continue;}
+    if(source[i]==='{')depth++;
+    else if(source[i]==='}'&&--depth===0)return i;
+  }
+  return -1;
+}
+function trimmedStart(source,start,end){while(start<end&&/\s/.test(source[start]))start++;return start;}
+function trimmedEnd(source,start,end){while(end>start&&/\s/.test(source[end-1]))end--;return end;}
+function declarationRecord(source,start,end,parent){
+  const s=trimmedStart(source,start,end),e=trimmedEnd(source,s,end);
+  if(e<=s)return null;
+  const text=source.slice(s,e);
+  const colon=text.indexOf(':');
+  if(colon<=0)return null;
+  const name=text.slice(0,colon).trim();
+  if(!name||name.startsWith('@'))return null;
+  return {start:s,end:e,kind:'declaration',parent};
+}
+function scanCssBody(source,start,end,parent,records){
+  let segmentStart=start;
+  for(let i=start;i<end;){
+    if(source.startsWith('/*',i)){i=skipCssComment(source,i,end);continue;}
+    const ch=source[i];
+    if(ch==='"'||ch==="'"){i=skipCssString(source,i,end);continue;}
+    if(ch===';'){
+      const declaration=declarationRecord(source,segmentStart,i+1,parent);
+      if(declaration)records.push(declaration);
+      segmentStart=i+1;i++;continue;
+    }
+    if(ch==='{'){
+      const close=findCssClose(source,i,end);
+      if(close<0)return;
+      const ruleStart=trimmedStart(source,segmentStart,i);
+      if(ruleStart<i){
+        const nested={start:ruleStart,end:close+1,kind:'rule',parent};
+        records.push(nested);
+        scanCssBody(source,i+1,close,nested,records);
+      }
+      segmentStart=close+1;i=close+1;continue;
+    }
+    i++;
+  }
+  const declaration=declarationRecord(source,segmentStart,end,parent);
+  if(declaration)records.push(declaration);
+}
+function cssUnits(source){
+  const records=[];
+  let segmentStart=0;
+  for(let i=0;i<source.length;){
+    if(source.startsWith('/*',i)){i=skipCssComment(source,i,source.length);continue;}
+    const ch=source[i];
+    if(ch==='"'||ch==="'"){i=skipCssString(source,i,source.length);continue;}
+    if(ch===';'){segmentStart=i+1;i++;continue;}
+    if(ch==='{'){
+      const close=findCssClose(source,i,source.length);
+      if(close<0)break;
+      const ruleStart=trimmedStart(source,segmentStart,i);
+      if(ruleStart<i){
+        const rule={start:ruleStart,end:close+1,kind:'rule',parent:null};
+        records.push(rule);
+        scanCssBody(source,i+1,close,rule,records);
+      }
+      segmentStart=close+1;i=close+1;continue;
+    }
+    i++;
+  }
+  return finishUnits('css',source,records);
+}
 
 function trimSnapshots(snapshots,currentRevision) {
   while (snapshots.size > MAX_REVISION_SNAPSHOTS) {
@@ -10,28 +171,37 @@ function trimSnapshots(snapshots,currentRevision) {
   }
 }
 
-export function semanticUnits(axis, source) {
-  source = String(source ?? '');
-  const units = [];
-  const push = (start, end, kind) => units.push({ id:`${axis}:${start}:${end}`, axis, start, end, kind, text:source.slice(start,end) });
-  if (axis === 'html') {
-    const paired = /<([a-zA-Z][\w:-]*)\b[^>]*>[^<>]*<\/\1\s*>/g;
-    const voidish = /<(?:img|input|br|hr|meta|link|source|area|base|embed|param|track|wbr)\b[^>]*\/?\s*>/gi;
-    let m; while ((m=paired.exec(source))) push(m.index,m.index+m[0].length,'element');
-    while ((m=voidish.exec(source))) push(m.index,m.index+m[0].length,'element');
-  } else if (axis === 'css') {
-    const rule = /[^{}]+\{[^{}]*\}/g; let m; while ((m=rule.exec(source))) push(m.index,m.index+m[0].length,'rule');
-  } else if (axis === 'js') {
-    const line = /[^\n;{}]+(?:\([^\n{}]*\)\s*=>\s*\{[^{}]*\}|\{[^{}]*\})?\s*;?/g; let m;
-    while ((m=line.exec(source))) if (m[0].trim()) push(m.index,m.index+m[0].length,'statement');
-  } else throw new Error('INVALID_AXIS');
-  return units.sort((a,b)=>a.start-b.start || a.end-b.end);
+export function semanticUnits(axis,source) {
+  source=String(source??'');
+  if(axis==='html')return htmlUnits(source);
+  if(axis==='css')return cssUnits(source);
+  if(axis==='js'){
+    const units=[];
+    const line=/[^\n;{}]+(?:\([^\n{}]*\)\s*=>\s*\{[^{}]*\}|\{[^{}]*\})?\s*;?/g;
+    let match;
+    while((match=line.exec(source)))if(match[0].trim())units.push({id:unitId(axis,match.index,match.index+match[0].length),axis,start:match.index,end:match.index+match[0].length,kind:'statement',text:match[0],parentId:null,depth:0});
+    return units.sort((a,b)=>a.start-b.start||a.end-b.end);
+  }
+  throw new Error('INVALID_AXIS');
 }
 
-export function removeUnits(source, units) {
-  const ranges = [...units].sort((a,b)=>b.start-a.start);
-  let out = String(source ?? '');
-  for (const unit of ranges) out = out.slice(0,unit.start)+out.slice(unit.end);
+export function removeUnits(source,units) {
+  source=String(source??'');
+  const ordered=[...units].map(unit=>{
+    const start=Number(unit?.start),end=Number(unit?.end);
+    if(!Number.isInteger(start)||!Number.isInteger(end)||start<0||end<=start||end>source.length)throw new Error('INVALID_UNIT_RANGE');
+    return {start,end};
+  }).sort((a,b)=>a.start-b.start||b.end-a.end);
+  const collapsed=[];
+  for(const range of ordered){
+    const previous=collapsed.at(-1);
+    if(!previous){collapsed.push(range);continue;}
+    if(range.start>=previous.start&&range.end<=previous.end)continue;
+    if(range.start<previous.end)throw new Error('OVERLAPPING_UNIT_RANGES');
+    collapsed.push(range);
+  }
+  let out=source;
+  for(const range of collapsed.reverse())out=out.slice(0,range.start)+out.slice(range.end);
   return out;
 }
 

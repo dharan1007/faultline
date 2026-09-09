@@ -50,6 +50,23 @@ try {
   assert.equal(protectedSection.protectedByPin,true,'pinned descendant must protect its section ancestor');
   assert.equal(protectedMain.protectedByPin,true,'pinned descendant must protect its root ancestor');
 
+  const humanRows=await page.evaluate(({buttonId,sectionId,mainId})=>{
+    const read=id=>{
+      const row=document.querySelector(`.unit[data-unit-id="${CSS.escape(id)}"]`);
+      return row?{text:row.textContent,padding:getComputedStyle(row).paddingInlineStart,tag:row.tagName,type:row.getAttribute('type')}:null;
+    };
+    return {button:read(buttonId),section:read(sectionId),main:read(mainId)};
+  },{buttonId:protectedButton.id,sectionId:protectedSection.id,mainId:protectedMain.id});
+  assert.ok(humanRows.button&&humanRows.section&&humanRows.main,'human workbench must render every structural unit');
+  assert.equal(humanRows.button.tag,'BUTTON','unit rows must remain native keyboard-operable buttons');
+  assert.equal(humanRows.button.type,'button');
+  assert.match(humanRows.button.text,/depth 2 · pinned/,'human workbench must identify explicit pins and depth');
+  assert.match(humanRows.section.text,/protected by pin/,'human workbench must explain ancestor protection');
+  assert.match(humanRows.main.text,/protected by pin/,'human workbench must explain root protection');
+  assert.ok(parseFloat(humanRows.button.padding)>parseFloat(humanRows.main.padding),'nested workbench rows must expose hierarchy visually without changing semantics');
+  await page.locator(`.unit[data-unit-id="${button.id}"]`).focus();
+  assert.equal(await page.evaluate(()=>document.activeElement?.dataset?.unitId),button.id,'nested units must remain keyboard-focusable');
+
   const webmcpUnits=await page.evaluate(async()=>{
     const tool=window.__webmcpTools.find(item=>item.name==='faultline_units');
     return JSON.parse(await tool.execute({targetAxis:'html'}));
@@ -97,7 +114,7 @@ try {
   assert.equal(exported.case.css,state.case.css);
   assert.ok(exported.standaloneHtml.includes(state.case.html),'export must contain the exact reduced canonical HTML');
 
-  console.log('Hierarchical reduction PASS: canonical HTML/CSS reduction removes coarse parent noise, descends into required survivors, protects/remaps pins, exposes hierarchy through WebMCP, and exports a reverified FAIL.');
+  console.log('Hierarchical reduction PASS: canonical HTML/CSS reduction removes coarse parent noise, descends into required survivors, protects/remaps pins, exposes hierarchy through WebMCP and the accessible workbench, and exports a reverified FAIL.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

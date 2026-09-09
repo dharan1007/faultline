@@ -99,16 +99,22 @@ export function validateCaptureArtifact(capture){
 export function summarizeCaptureProvenance(capture){
   validateCaptureArtifact(capture);
   const diagnostics=capture.diagnostics??{};
+  const boundedDiagnostics={
+    externalDependencies:clone(diagnostics.externalDependencies??[]),
+    consoleErrors:clone(diagnostics.consoleErrors??[]),
+    pageErrors:clone(diagnostics.pageErrors??[])
+  };
   return {
     schema:CAPTURE_SCHEMA,
     capturedAt:typeof capture.capturedAt==='string'?capture.capturedAt:null,
     sourceUrl:typeof capture.source.url==='string'?capture.source.url:null,
     environment:capture.environment&&typeof capture.environment==='object'&&!Array.isArray(capture.environment)?clone(capture.environment):null,
     provenance:clone(capture.provenance),
+    diagnostics:boundedDiagnostics,
     diagnosticsSummary:{
-      externalDependencies:(diagnostics.externalDependencies??[]).length,
-      consoleErrors:(diagnostics.consoleErrors??[]).length,
-      pageErrors:(diagnostics.pageErrors??[]).length
+      externalDependencies:boundedDiagnostics.externalDependencies.length,
+      consoleErrors:boundedDiagnostics.consoleErrors.length,
+      pageErrors:boundedDiagnostics.pageErrors.length
     }
   };
 }

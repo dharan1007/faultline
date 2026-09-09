@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 
 const contractPath=new URL('../src/capture-contract.js',import.meta.url);
 const validOracle={kind:'dom_attribute',selector:'#save',property:'aria-disabled',equals:'false',action:{kind:'sequence',steps:[{kind:'set_value',selector:'#name',value:'alice'},{kind:'click',selector:'#save'}]},delayMs:0};
-const validCapture={schema:'faultline.capture.v1',capturedAt:'2026-09-09T00:00:00.000Z',source:{url:'http://127.0.0.1:4173/profile',title:'Profile',html:'<main><input id="name"><button id="save" aria-disabled="true">Save</button></main>',css:'button{display:block}',js:"document.querySelector('#save').addEventListener('click',()=>document.querySelector('#save').setAttribute('aria-disabled','true'))"},oracle:validOracle,environment:{browser:'chromium',playwrightVersion:'1.55.0',viewport:{width:1280,height:720}},provenance:{adapter:'@faultline/playwright-capture',testTitle:'profile enables save after name entry',testFile:'tests/profile.spec.mjs'},diagnostics:{externalDependencies:[],consoleErrors:[],pageErrors:[]}};
+const validCapture={schema:'faultline.capture.v1',capturedAt:'2026-09-09T00:00:00.000Z',source:{url:'http://127.0.0.1:4173/profile',title:'Profile',html:'<main><input id="name"><button id="save" aria-disabled="true">Save</button></main>',css:'button{display:block}',js:"document.querySelector('#save').addEventListener('click',()=>document.querySelector('#save').setAttribute('aria-disabled','true'))"},oracle:validOracle,environment:{browser:'chromium',playwrightVersion:'1.55.0',viewport:{width:1280,height:720}},provenance:{adapter:'@faultline/playwright-capture',testTitle:'profile enables save after name entry',testFile:'tests/profile.spec.mjs'},diagnostics:{externalDependencies:[],consoleErrors:['pre-capture console failure'],pageErrors:['Error: pre-capture page boom']}};
 
 async function contract(){ return import(contractPath.href); }
 
@@ -32,6 +32,11 @@ test('valid capture normalizes exactly to canonical case plus bounded provenance
   assert.equal(normalized.provenance.sourceUrl,validCapture.source.url);
   assert.equal(normalized.provenance.provenance.testTitle,validCapture.provenance.testTitle);
   assert.equal(normalized.provenance.diagnosticsSummary.externalDependencies,0);
+  assert.deepEqual(normalized.provenance.diagnostics.consoleErrors,validCapture.diagnostics.consoleErrors,'bounded console evidence must survive normalization into canonical provenance');
+  assert.deepEqual(normalized.provenance.diagnostics.pageErrors,validCapture.diagnostics.pageErrors,'bounded page-error evidence must survive normalization into canonical provenance');
+  validCapture.diagnostics.consoleErrors[0]='mutated after normalize';
+  assert.equal(normalized.provenance.diagnostics.consoleErrors[0],'pre-capture console failure','normalized provenance must own an immutable clone of captured diagnostics');
+  validCapture.diagnostics.consoleErrors[0]='pre-capture console failure';
 });
 
 test('capture validation rejects schema, size, dependency and unsupported-action violations deterministically',async()=>{

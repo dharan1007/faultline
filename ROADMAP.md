@@ -7,6 +7,9 @@ FAULTLINE's roadmap is ordered around a measurable debugging outcome: **turn a r
 The canonical production architecture contains a local Playwright capture path in addition to direct case loading:
 
 - a caller-owned Playwright `page` can be converted to bounded `faultline.capture.v1`,
+- diagnostics can be armed before the failing step so bounded `console.error` and uncaught `pageerror` evidence survives capture,
+- captured diagnostic evidence is retained through canonical import, persistence/recovery, reduction and structured export,
+- the human import surface previews captured console/page-error evidence as inert text before verification,
 - the hosted workbench never navigates to or fetches the capture source URL,
 - capture artifacts are schema/size/dependency validated,
 - import executes the captured candidate before canonical mutation and commits only a reproduced `FAIL`,
@@ -14,7 +17,7 @@ The canonical production architecture contains a local Playwright capture path i
 - human, Browser API and WebMCP import surfaces delegate to the same canonical operation,
 - the complete capture → import → reduction → re-verification → export path is exercised in Chromium as part of the standard production browser gate.
 
-The v1 adapter deliberately snapshots already-authorized page state rather than pretending to reconstruct arbitrary application bundles. External/inaccessible dependencies are rejected instead of hidden.
+The v1 adapter deliberately snapshots already-authorized page state rather than pretending to reconstruct arbitrary application bundles. External/inaccessible dependencies are rejected instead of hidden. Diagnostic recorders are explicit and caller-owned: they listen only from arming until deterministic disposal and never navigate, retry, or broaden browser authority.
 
 Semantic reduction is hierarchical across the three source axes. HTML uses balanced subtree units, CSS uses rule/declaration hierarchy, and parseable JavaScript uses a pinned Acorn AST to expose syntax-safe statement/class-member frontiers with parent/depth metadata. Pinned descendants protect required ancestors. JavaScript that is intentionally syntactically invalid remains reducible through a conservative lexical fallback rather than being falsely classified as parser-safe.
 
@@ -27,9 +30,8 @@ Candidate work:
 1. A public Web Reduction Benchmark corpus with deterministic fixtures representing DOM, styling, event, asynchronous, runtime-error and state bugs.
 2. Per-case metrics for original bytes, reduced bytes, semantic-unit counts, trial counts, wall-clock execution and final preservation status.
 3. Exact minimality-class assertions for each semantic frontier rather than global-minimum claims.
-4. Capture diagnostics that can be armed before a failing Playwright step so bounded console/page-error evidence survives into the artifact.
-5. Parser-backed JavaScript expression boundaries only where removal/rewrite semantics can be proven safe and materially improve benchmark results.
-6. Reproducer bundles carrying deterministic environment metadata required to rerun a benchmark case.
+4. Parser-backed JavaScript expression boundaries only where removal/rewrite semantics can be proven safe and materially improve benchmark results.
+5. Reproducer bundles carrying deterministic environment metadata required to rerun a benchmark case.
 
 ## Next — broader real-browser integrations
 

@@ -96,6 +96,23 @@ function installCaptureImport(){
   captureSummary.style.overflowWrap='anywhere';
   captureSummary.textContent='No capture selected.';
 
+  const captureDiagnostics=document.createElement('div');
+  captureDiagnostics.id='capture-diagnostics';
+  captureDiagnostics.className='small';
+  captureDiagnostics.setAttribute('role','note');
+  captureDiagnostics.style.marginTop='8px';
+  captureDiagnostics.style.whiteSpace='pre-wrap';
+  captureDiagnostics.style.overflowWrap='anywhere';
+  captureDiagnostics.textContent='No captured console or page errors.';
+
+  const diagnosticPreview=(label,entries)=>{
+    const list=Array.isArray(entries)?entries:[];
+    const visible=list.slice(0,5);
+    const lines=[`${label} (${list.length})`,...visible.map((entry,index)=>`  ${index+1}. ${entry}`)];
+    if(list.length>visible.length)lines.push(`  … ${list.length-visible.length} more retained in the capture`);
+    return lines.join('\n');
+  };
+
   const status=document.createElement('p');
   status.id='capture-status';
   status.className='small';
@@ -120,6 +137,7 @@ function installCaptureImport(){
     const selected=file.files?.[0];
     if(!selected){
       captureSummary.textContent='No capture selected.';
+      captureDiagnostics.textContent='No captured console or page errors.';
       status.textContent='Waiting for a capture.';
       return;
     }
@@ -132,10 +150,12 @@ function installCaptureImport(){
       const sourceUrl=typeof parsed.source?.url==='string'?parsed.source.url:'No source URL';
       const testTitle=typeof parsed.provenance?.testTitle==='string'?parsed.provenance.testTitle:'No test title';
       captureSummary.textContent=`${testTitle}\n${sourceTitle}\n${sourceUrl}\nOracle: ${parsed.oracle?.kind||'unknown'}`;
+      captureDiagnostics.textContent=`${diagnosticPreview('Console errors',parsed.diagnostics?.consoleErrors)}\n${diagnosticPreview('Page errors',parsed.diagnostics?.pageErrors)}`;
       status.textContent='Capture validated locally. Canonical state is unchanged until verification succeeds.';
       verify.disabled=false;
     }catch(error){
       captureSummary.textContent=selected.name;
+      captureDiagnostics.textContent='No validated diagnostic evidence.';
       status.textContent=`Capture rejected: ${String(error?.message||error)}`;
     }
   });
@@ -157,7 +177,7 @@ function installCaptureImport(){
   });
 
   actions.append(verify);
-  details.append(disclosure,help,label,file,captureSummary,status,actions);
+  details.append(disclosure,help,label,file,captureSummary,captureDiagnostics,status,actions);
   actionBar.insertAdjacentElement('afterend',details);
 }
 

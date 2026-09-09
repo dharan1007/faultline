@@ -2,16 +2,53 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { semanticUnits, removeUnits, ddminReduce, createRevisionStore } from '../src/reducer-engine.js';
 
-test('semanticUnits finds removable HTML, CSS and JS units deterministically', () => {
-  assert.deepEqual(semanticUnits('html','<main><p>A</p><aside>B</aside></main>').map(x=>x.text), ['<p>A</p>','<aside>B</aside>']);
-  assert.equal(semanticUnits('css','a{color:red} b{display:none}').length, 2);
-  assert.equal(semanticUnits('js','const a=1;\nconst b=2;').length, 2);
+test('semanticUnits exposes balanced HTML hierarchy deterministically', () => {
+  const units = semanticUnits('html','<main><p>A</p><aside>B</aside></main>');
+  assert.deepEqual(units.map(x=>x.text), [
+    '<main><p>A</p><aside>B</aside></main>',
+    '<p>A</p>',
+    '<aside>B</aside>'
+  ]);
+  const [main,p,aside]=units;
+  assert.equal(main.parentId,null);
+  assert.equal(main.depth,0);
+  assert.equal(p.parentId,main.id);
+  assert.equal(p.depth,1);
+  assert.equal(aside.parentId,main.id);
+  assert.equal(aside.depth,1);
 });
 
-test('removeUnits removes only selected ranges', () => {
-  const source = '<main><p>A</p><aside>B</aside></main>';
-  const units = semanticUnits('html', source);
-  assert.equal(removeUnits(source,[units[1]]), '<main><p>A</p></main>');
+test('semanticUnits exposes CSS rules and direct declarations as a hierarchy', () => {
+  const units=semanticUnits('css','a{color:red;display:block} b{display:none}');
+  const rules=units.filter(unit=>unit.kind==='rule');
+  const declarations=units.filter(unit=>unit.kind==='declaration');
+  assert.equal(rules.length,2);
+  assert.deepEqual(declarations.map(unit=>unit.text.trim()),['color:red;','display:block','display:none']);
+  assert.equal(declarations[0].parentId,rules[0].id);
+  assert.equal(declarations[0].depth,1);
+  assert.equal(declarations[1].parentId,rules[0].id);
+  assert.equal(declarations[2].parentId,rules[1].id);
+});
+
+test('semanticUnits keeps JavaScript statement discovery flat and compatible', () => {
+  const units=semanticUnits('js','const a=1;\nconst b=2;');
+  assert.equal(units.length,2);
+  assert.ok(units.every(unit=>unit.parentId===null&&unit.depth===0));
+});
+
+test('removeUnits collapses selected descendants already covered by an ancestor', () => {
+  const source='<main><p>A</p><aside>B</aside></main><footer>C</footer>';
+  const units=semanticUnits('html',source);
+  const main=units.find(unit=>unit.text.startsWith('<main>'));
+  const paragraph=units.find(unit=>unit.text==='<p>A</p>');
+  assert.equal(removeUnits(source,[main,paragraph]),'<footer>C</footer>');
+});
+
+test('removeUnits rejects partially overlapping ranges instead of corrupting source', () => {
+  assert.throws(
+    ()=>removeUnits('abcdefghij',[{start:1,end:6},{start:4,end:8}]),
+    /OVERLAPPING_UNIT_RANGES/
+  );
 });
 
 test('ddminReduce preserves protected units and the failing predicate', async () => {

@@ -30,6 +30,13 @@ test('normalizeCapture accepts and clones a strict faultline.capture.v1 envelope
   assert.notEqual(input.provenance.label,'changed');
 });
 
+test('normalizeCapture accepts an explicit empty title from untitled pages',()=>{
+  const input=validCapture();
+  input.provenance.title='';
+  const normalized=normalizeCapture(input);
+  assert.equal(normalized.provenance.title,'');
+});
+
 test('normalizeCapture rejects version drift and unknown fields',()=>{
   expectInvalid(c=>{c.schema='faultline.capture.v2';});
   expectInvalid(c=>{c.extra=true;});
@@ -41,6 +48,8 @@ test('normalizeCapture rejects malformed source and provenance',()=>{
   expectInvalid(c=>{c.source.html=42;});
   expectInvalid(c=>{delete c.source.css;});
   expectInvalid(c=>{c.provenance.url='';});
+  expectInvalid(c=>{c.provenance.title=42;});
+  expectInvalid(c=>{c.provenance.userAgent='';});
   expectInvalid(c=>{c.provenance.capturedAt='not-a-date';});
   expectInvalid(c=>{c.provenance.label=42;});
   expectInvalid(c=>{c.expectedStatus='PASS';});

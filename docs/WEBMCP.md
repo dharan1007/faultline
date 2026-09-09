@@ -19,17 +19,32 @@ FAULTLINE registers 16 causal tools:
 15. `faultline_export`
 16. `faultline_autopilot`
 
-The interface exposes causal operations rather than click/type primitives. UI actions, the `window.faultline` browser API, and WebMCP tools share the same canonical revision-guarded engine. Long-running WebMCP operations support the native execution `AbortSignal`; `faultline_cancel_active` is the compatibility surface for callers that supply a stable `requestId`.
+The interface exposes causal operations rather than unrestricted browser scripting. UI actions, the `window.faultline` browser API, and WebMCP tools share the same canonical revision-guarded engine. Long-running WebMCP operations support the native execution `AbortSignal`; `faultline_cancel_active` is the compatibility surface for callers that supply a stable `requestId`.
 
 ## Deterministic pre-measurement actions
 
-An oracle may perform one bounded action before measurement:
+An oracle may perform one bounded action contract before measurement:
 
 - `none` — measure without interaction.
 - `click` — click the element selected by `action.selector`.
 - `set_value` — assign the string in `action.value` to a value-capable form control selected by `action.selector`, then dispatch bubbling `input` followed by `change` before measurement.
+- `sequence` — execute 1–8 ordered `click` and/or `set_value` steps from `action.steps`. FAULTLINE yields to a browser task boundary after every step so queued microtasks and framework state transitions can settle before the next interaction.
 
-`set_value` is intended for deterministic input, textarea, select, and equivalent value-control reproductions. Missing targets resolve as `ACTION_TARGET_NOT_FOUND`; targets without a writable DOM `value` setter resolve as `ACTION_TARGET_NOT_VALUE_CONTROL`. These execution failures are `UNRESOLVED`, never ordinary PASS/FAIL evidence.
+A sequence is deliberately structured and bounded rather than an arbitrary script escape hatch. Nested sequences and empty sequences are invalid. Each sequence step uses the same target/value validation and runtime safety boundaries as the equivalent standalone action.
+
+Example:
+
+```json
+{
+  "kind": "sequence",
+  "steps": [
+    { "kind": "set_value", "selector": "#email", "value": "user@example.test" },
+    { "kind": "click", "selector": "#submit" }
+  ]
+}
+```
+
+`set_value` is intended for deterministic input, textarea, select, and equivalent value-control reproductions. Missing targets resolve as `ACTION_TARGET_NOT_FOUND`; targets without a writable DOM `value` setter resolve as `ACTION_TARGET_NOT_VALUE_CONTROL`. These execution failures are `UNRESOLVED`, never ordinary PASS/FAIL evidence. Runtime CSP or navigation policy violations detected between sequence steps likewise stop the sequence and retain FAULTLINE's existing `UNRESOLVED` safety evidence.
 
 ## Recovery flow
 

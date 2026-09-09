@@ -78,7 +78,8 @@ try{
   assert.deepEqual(tool.inputSchema.properties.capture.properties.schema.enum,['faultline.capture.v1']);
   assert.equal(tool.inputSchema.properties.capture.additionalProperties,false);
 
-  await faultlinePage.waitForSelector('#capture-import-json');
+  await faultlinePage.locator('#capture-import > summary').click();
+  await faultlinePage.waitForSelector('#capture-import-json',{state:'visible'});
   await faultlinePage.evaluate(()=>window.faultline.resetCase({expectedRevision:window.faultline.inspect().revision}));
   const fixtureRevision=await faultlinePage.evaluate(()=>window.faultline.inspect().revision);
   await faultlinePage.fill('#capture-import-json',JSON.stringify(capture));

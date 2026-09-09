@@ -7,7 +7,7 @@ const productionFiles = [
   'src/reducer-engine.js',
   'src/sandbox-policy.js',
   'src/capture-contract.js',
-  'vendor/acorn.mjs'
+  'vendor/acorn.js'
 ];
 
 for (const file of productionFiles) {

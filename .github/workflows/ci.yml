@@ -18,4 +18,5 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: node tests/playwright-capture-adapter.mjs
       - run: node tests/capture-runtime-import.mjs
+      - run: node tests/human-capture-import.mjs
       - run: npm run test:browser

@@ -30,10 +30,46 @@ test('semanticUnits exposes CSS rules and direct declarations as a hierarchy', (
   assert.equal(declarations[2].parentId,rules[1].id);
 });
 
-test('semanticUnits keeps JavaScript statement discovery flat and compatible', () => {
-  const units=semanticUnits('js','const a=1;\nconst b=2;');
-  assert.equal(units.length,2);
-  assert.ok(units.every(unit=>unit.parentId===null&&unit.depth===0));
+test('semanticUnits exposes parser-backed JavaScript statement hierarchy', () => {
+  const source=`function fail(){
+  const required = true;
+  console.debug('noise');
+  if(required){
+    document.querySelector('#app').dataset.failed='yes';
+    console.log('inner noise');
+  }
+}
+fail();
+console.info('root noise');`;
+  const units=semanticUnits('js',source);
+  const fn=units.find(unit=>unit.text.startsWith('function fail()'));
+  const ifStatement=units.find(unit=>unit.text.trim().startsWith('if(required)'));
+  const assignment=units.find(unit=>unit.text.includes("dataset.failed='yes'")&&!unit.text.trim().startsWith('if'));
+  const rootNoise=units.find(unit=>unit.text.includes("console.info('root noise')"));
+  assert.ok(fn&&ifStatement&&assignment&&rootNoise,'parser-backed discovery must expose nested and root statements');
+  assert.equal(fn.parentId,null);
+  assert.equal(fn.depth,0);
+  assert.equal(ifStatement.parentId,fn.id,'nested control flow must identify the enclosing function as its semantic parent');
+  assert.equal(ifStatement.depth,1);
+  assert.equal(assignment.parentId,ifStatement.id,'statements inside a control-flow block must identify that statement as their semantic parent');
+  assert.equal(assignment.depth,2);
+  assert.equal(rootNoise.parentId,null);
+});
+
+test('semanticUnits parses ES module declarations without falling back to flat regex discovery', () => {
+  const source=`import value from './dep.js';
+export function run(){
+  const answer=value+1;
+  return answer;
+}`;
+  const units=semanticUnits('js',source);
+  const exported=units.find(unit=>unit.text.startsWith('export function run()'));
+  const declaration=units.find(unit=>unit.text.includes('const answer=value+1'));
+  const returned=units.find(unit=>unit.text.includes('return answer'));
+  assert.ok(exported&&declaration&&returned,'module syntax must remain structurally reducible');
+  assert.equal(exported.parentId,null);
+  assert.equal(declaration.parentId,exported.id);
+  assert.equal(returned.parentId,exported.id);
 });
 
 test('removeUnits collapses selected descendants already covered by an ancestor', () => {

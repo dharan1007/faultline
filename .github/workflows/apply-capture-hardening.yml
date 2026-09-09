@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch:
-    if: "${{ github.event.head_commit.message == 'chore: run capture hardening patch v3' }}"
+    if: "${{ github.event.head_commit.message == 'chore: run WebMCP count migration' }}"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,11 +20,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node scripts/apply-capture-runtime-hardening.mjs
+      - run: node scripts/update-webmcp-capture-tool-count.mjs
       - run: |
           set -euo pipefail
           git config user.name dharan
           git config user.email 150376358+dharan1007@users.noreply.github.com
-          git add src/runtime.js src/capture-integration.js src/ui.js tests/browser-e2e.mjs
-          git commit -m 'feat: make Playwright capture transactional and agent-native'
+          git add tests
+          git commit -m 'test: migrate WebMCP readiness gates to 17 tools'
           git push origin HEAD:automation/playwright-capture-hardening-20260909

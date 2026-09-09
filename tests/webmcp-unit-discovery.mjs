@@ -39,7 +39,16 @@ try{
     assert.equal(typeof unit.kind,'string');
     assert.equal(typeof unit.text,'string');
     assert.equal(typeof unit.pinned,'boolean');
+    assert.equal(Number.isInteger(unit.depth),true,'hierarchical units must expose integer structural depth');
+    assert.ok(unit.depth>=0,'hierarchical depth must be non-negative');
+    assert.ok(unit.parentId===null||typeof unit.parentId==='string','hierarchical parentId must be a unit id or null');
   }
+  const child=result.listed.units.find(unit=>unit.parentId);
+  assert.ok(child,'the built-in nested fixture must expose at least one child unit');
+  const parent=result.listed.units.find(unit=>unit.id===child.parentId);
+  assert.ok(parent,'every advertised child parentId must resolve within the same canonical unit listing');
+  assert.equal(child.depth,parent.depth+1,'child hierarchy depth must be exactly one below its parent');
+
   assert.deepEqual(result.toolListed,result.listed,'browser API and WebMCP unit discovery must describe the same canonical units');
   assert.ok(['PASS','FAIL','UNRESOLVED'].includes(result.probe.status),'a discovered unit id must be immediately usable by faultline_probe');
   assert.equal(result.probe.mutated,false,'probe from a discovered unit must stay non-mutating');
@@ -52,7 +61,7 @@ try{
   assert.equal(manifestEntry.annotations.untrustedContentHint,true,'unit text can contain candidate-controlled content');
   assert.deepEqual(manifestEntry.inputSchema.required,['targetAxis']);
 
-  console.log('WebMCP unit discovery PASS: agents can enumerate canonical semantic unit IDs and use them directly with probe without mutating state.');
+  console.log('WebMCP unit discovery PASS: agents can enumerate canonical hierarchical semantic units and use them directly with probe without mutating state.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

@@ -1,13 +1,13 @@
 const FORMAT='faultline.capture';
 const VERSION=1;
-const BASELINE_NOTE='Source and oracle captured from the Playwright test boundary; FAULTLINE re-verifies baseline after import.';
+const BASELINE_NOTE='Source and oracle captured from the Playwright test boundary; FAULTLINE independently re-verifies FAIL before import.';
 const MAX_TEXT=2048;
 const TOP_LEVEL_KEYS=['format','version','capturedAt','case','provenance','baseline'];
 const CASE_KEYS=['html','css','js','oracle'];
 const PROVENANCE_KEYS=['adapter','adapterVersion','url','title','userAgent','viewport','browser'];
-const BASELINE_KEYS=['captured','note'];
+const BASELINE_KEYS=['captured','status','evidence','note'];
 
-const clone=value=>JSON.parse(JSON.stringify(value));
+const clone=value=>value===undefined?undefined:JSON.parse(JSON.stringify(value));
 const fail=detail=>{throw new Error(`FAULTLINE_CAPTURE_INVALID${detail?`:${detail}`:''}`);};
 const exactKeys=(value,keys)=>{
   if(!value||typeof value!=='object'||Array.isArray(value))return false;
@@ -35,7 +35,8 @@ function validateProvenance(provenance){
 }
 
 function validateBaseline(baseline){
-  if(!exactKeys(baseline,BASELINE_KEYS)||baseline.captured!==true||baseline.note!==BASELINE_NOTE)fail('BASELINE');
+  if(!exactKeys(baseline,BASELINE_KEYS)||baseline.captured!==true||baseline.status!=='FAIL'||baseline.note!==BASELINE_NOTE)fail('BASELINE');
+  if(!baseline.evidence||typeof baseline.evidence!=='object'||Array.isArray(baseline.evidence))fail('BASELINE_EVIDENCE');
   return baseline;
 }
 
@@ -50,14 +51,19 @@ export function validateCaptureArtifact(input){
   return clone(input);
 }
 
-export function createCaptureArtifact({caseValue,provenance,capturedAt=new Date().toISOString()}={}){
+export function createCaptureArtifact({caseValue,provenance,baseline,capturedAt=new Date().toISOString()}={}){
   const artifact={
     format:FORMAT,
     version:VERSION,
     capturedAt,
     case:clone(caseValue),
     provenance:clone(provenance),
-    baseline:{captured:true,note:BASELINE_NOTE}
+    baseline:{
+      captured:true,
+      status:baseline?.status,
+      evidence:clone(baseline?.evidence||{}),
+      note:BASELINE_NOTE
+    }
   };
   return validateCaptureArtifact(artifact);
 }

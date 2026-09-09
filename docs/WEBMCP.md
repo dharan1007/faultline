@@ -40,13 +40,14 @@ Example:
   "kind": "sequence",
   "steps": [
     { "kind": "set_value", "selector": "#email", "value": "user@example.test" },
+    { "kind": "set_checked", "selector": "#terms", "checked": true },
     { "kind": "wait", "durationMs": 150 },
     { "kind": "click", "selector": "#submit" }
   ]
 }
 ```
 
-`set_value` is intended for deterministic input, textarea, select, and equivalent value-control reproductions. `set_checked` is intentionally limited to checkbox and radio inputs; unsupported targets resolve as `ACTION_TARGET_NOT_CHECKABLE`. Missing targets resolve as `ACTION_TARGET_NOT_FOUND`; targets without a writable DOM `value` setter resolve as `ACTION_TARGET_NOT_VALUE_CONTROL`. These execution failures are `UNRESOLVED`, never ordinary PASS/FAIL evidence. Runtime CSP or navigation policy violations detected between sequence steps likewise stop the sequence and retain FAULTLINE's existing `UNRESOLVED` safety evidence.
+`set_value` is intended for deterministic input, textarea, select, and equivalent value-control reproductions. `set_checked` is intentionally limited to checkbox and radio inputs; it uses the browser's native checked-state setter, so radio-group exclusivity follows normal DOM semantics. Unsupported targets resolve as `ACTION_TARGET_NOT_CHECKABLE`. Missing targets resolve as `ACTION_TARGET_NOT_FOUND`; targets without a writable DOM `value` setter resolve as `ACTION_TARGET_NOT_VALUE_CONTROL`. These execution failures are `UNRESOLVED`, never ordinary PASS/FAIL evidence. Runtime CSP or navigation policy violations detected between sequence steps likewise stop the sequence and retain FAULTLINE's existing `UNRESOLVED` safety evidence.
 
 ## Recovery flow
 

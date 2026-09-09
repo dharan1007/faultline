@@ -271,21 +271,29 @@ function containsExternalMedia(source){
   const html=String(source??'');
   if(typeof DOMParser==='function'){
     const doc=new DOMParser().parseFromString(html,'text/html');
-    for(const media of doc.querySelectorAll('video[src],audio[src],video source[src],audio source[src]')){
+    for(const media of doc.querySelectorAll('video[src],audio[src],video source[src],audio source[src],video track[src],audio track[src]')){
       if(isBlockedMediaSource(media.getAttribute('src')))return true;
+    }
+    for(const video of doc.querySelectorAll('video[poster]')){
+      if(isBlockedMediaSource(video.getAttribute('poster')))return true;
     }
     return false;
   }
   const withoutComments=html.replace(/<!--[\s\S]*?-->/g,'');
-  for(const match of withoutComments.matchAll(/<(?:video|audio)\b[^>]*>/gi)){
+  for(const match of withoutComments.matchAll(/<(video|audio)\b[^>]*>/gi)){
     const tag=match[0];
     const src=tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
     const srcValue=String(src?.[1]??src?.[2]??src?.[3]??'').trim();
     if(isBlockedMediaSource(srcValue))return true;
+    if(match[1].toLowerCase()==='video'){
+      const poster=tag.match(/\bposter\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+      const posterValue=String(poster?.[1]??poster?.[2]??poster?.[3]??'').trim();
+      if(isBlockedMediaSource(posterValue))return true;
+    }
   }
   for(const match of withoutComments.matchAll(/<(video|audio)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)){
-    for(const source of match[2].matchAll(/<source\b[^>]*>/gi)){
-      const src=source[0].match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    for(const resource of match[2].matchAll(/<(?:source|track)\b[^>]*>/gi)){
+      const src=resource[0].match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
       const srcValue=String(src?.[1]??src?.[2]??src?.[3]??'').trim();
       if(isBlockedMediaSource(srcValue))return true;
     }

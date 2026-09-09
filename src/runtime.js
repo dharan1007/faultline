@@ -202,9 +202,18 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  const send=resultPort?resultPort.postMessage.bind(resultPort):null;
  const runtimeErrors=[];
  const navigationAttempts=[];
+ let runtimePolicyViolation=null;
+ let candidateExecutionStarted=false;
  const nativeFormSubmit=HTMLFormElement.prototype.submit;
  const nativeFormRequestSubmit=HTMLFormElement.prototype.requestSubmit;
  const captureRuntimeError=value=>runtimeErrors.push(String(value));
+ const reportRuntimePolicyViolation=event=>{
+  if(runtimePolicyViolation)return;
+  const directive=String(event.effectiveDirective||event.violatedDirective||'csp').trim().toLowerCase()||'csp';
+  runtimePolicyViolation={axis:candidateExecutionStarted?'js':'html',capability:'runtime-csp-resource',directive};
+  ${previewOnly?`parent.postMessage({type:'faultline:preview-policy-blocked',bootstrapId:${JSON.stringify(bootstrapId)},risk:runtimePolicyViolation},'*');`:''}
+ };
+ const blockedRuntimePolicy=sendResult=>{if(!runtimePolicyViolation)return false;sendResult({status:'UNRESOLVED',evidence:{reason:'UNSAFE_NETWORK',...runtimePolicyViolation}});return true;};
  const latestNavigationAttempt=()=>navigationAttempts.at(-1)||null;
  const reportNavigationAttempt=risk=>{
   const previous=latestNavigationAttempt();
@@ -259,14 +268,15 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  const blockedNavigation=sendResult=>{const risk=latestNavigationAttempt();if(!risk)return false;sendResult({status:'UNRESOLVED',evidence:{reason:'UNSAFE_NAVIGATION',...risk}});return true;};
  addEventListener('click',captureNavigationAttempt,true);
  addEventListener('submit',captureFormNavigationAttempt,true);
+ addEventListener('securitypolicyviolation',reportRuntimePolicyViolation,true);
  addEventListener('error',e=>{captureRuntimeError(e.error?.message??e.message??e.error??'runtime error');e.preventDefault()});
  addEventListener('unhandledrejection',e=>{captureRuntimeError(e.reason?.message??e.reason??'unhandled rejection');e.preventDefault()});
- const executeCandidate=()=>{try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e)}};
+ const executeCandidate=()=>{candidateExecutionStarted=true;try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e)}};
  const measure=sendResult=>schedule(()=>{try{
-  if(blockedNavigation(sendResult))return;
+  if(blockedRuntimePolicy(sendResult)||blockedNavigation(sendResult))return;
   if(o.action?.kind==='click'){const target=querySelector(o.action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click()}
   schedule(()=>{try{
-   if(blockedNavigation(sendResult))return;
+   if(blockedRuntimePolicy(sendResult)||blockedNavigation(sendResult))return;
    let actual;
    if(o.kind==='runtime_error'){const expectedRuntime=o.equals!==undefined?String(o.equals):undefined;actual=expectedRuntime===undefined?(runtimeErrors.at(-1)??null):(runtimeErrors.find(message=>same(message,expectedRuntime))??runtimeErrors.at(-1)??null)}
    else {const el=querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='computed_style')actual=el?readComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
@@ -441,7 +451,15 @@ function handlePreviewNavigationMessage(event){
   renderHealth('UNRESOLVED');
   $('summary').textContent=`UNSAFE_NAVIGATION · ${risk.axis||'html'} · ${risk.capability||'navigation'}`;
 }
+function handlePreviewPolicyMessage(event){
+  const preview=$('preview');
+  if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-policy-blocked'||event.data.bootstrapId!==previewBootstrapId)return;
+  const risk=event.data.risk||{};
+  renderHealth('UNRESOLVED');
+  $('summary').textContent=`UNSAFE_NETWORK · ${risk.axis||'js'} · ${risk.capability||'runtime-csp-resource'}${risk.directive?` · ${risk.directive}`:''}`;
+}
 addEventListener('message',handlePreviewNavigationMessage);
+addEventListener('message',handlePreviewPolicyMessage);
 function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';renderUnits();renderTrace();persistBestEffort();}
 
 const REVISION_PROPERTY={expectedRevision:{type:'string',pattern:'^r[1-9]\\d*$'}};

@@ -16,7 +16,7 @@ const capture={
     css:'',
     js:''
   },
-  oracle:{kind:'dom_attribute',selector:'#save',property:'aria-disabled',equals:'false',action:{kind:'none'},delayMs:0},
+  oracle:{kind:'dom_attribute',selector:'#save',property:'aria-disabled',equals:'true',action:{kind:'none'},delayMs:0},
   environment:{browser:'chromium',viewport:{width:1280,height:720}},
   provenance:{adapter:'@faultline/playwright-capture',testTitle:'save remains disabled',testFile:'profile.spec.mjs'},
   diagnostics:{externalDependencies:[],consoleErrors:[],pageErrors:[]}

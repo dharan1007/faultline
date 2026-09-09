@@ -48,6 +48,21 @@ try{
   assert.equal(protectedRequired.protectedByDescendant,true,'pinned descendant must structurally protect its section ancestor');
   assert.equal(protectedMain.protectedByDescendant,true,'pinned descendant must structurally protect its root ancestor');
 
+  const rendered=await page.locator('#units .unit').evaluateAll(rows=>rows.map(row=>({id:row.dataset.unitId,depth:row.dataset.depth,tag:row.tagName,meta:row.querySelector('small')?.textContent||''})));
+  const renderedRequired=rendered.find(row=>row.id===required.id);
+  assert.ok(renderedRequired,'human unit list must render protected structural ancestors');
+  assert.equal(renderedRequired.tag,'BUTTON','semantic units must remain keyboard-operable buttons');
+  assert.equal(renderedRequired.depth,String(required.depth),'human workbench must expose deterministic structural depth');
+  assert.match(renderedRequired.meta,/protected by pinned descendant/,'human workbench must explain why an ancestor cannot be removed');
+  await page.locator(`.unit[data-unit-id="${required.id}"]`).click();
+  assert.equal(await page.locator('#probe').isDisabled(),true,'human probe control must disable for an ancestor protected by a pinned descendant');
+
+  await assert.rejects(
+    page.evaluate(({revision,unitId})=>window.faultline.probe({expectedRevision:revision,targetAxis:'html',unitId}),{revision:pinned.revision,unitId:required.id}),
+    /UNIT_PINNED/,
+    'browser API must reject indirect removal of a pinned descendant through its ancestor'
+  );
+
   const toolListed=await page.evaluate(async()=>{
     const tool=window.__webmcpTools.find(item=>item.name==='faultline_units');
     return JSON.parse(await tool.execute({targetAxis:'html'}));
@@ -56,6 +71,7 @@ try{
 
   const reduction=await page.evaluate(async expectedRevision=>window.faultline.reduce({expectedRevision,targetAxis:'html',maxTrials:120}),pinned.revision);
   assert.equal(reduction.status,'FAIL','hierarchical reduction must preserve the failure');
+  assert.ok(reduction.passes>=2,'coarse-to-fine reduction must traverse multiple structural depths');
 
   const after=await page.evaluate(()=>({inspect:window.faultline.inspect(),units:window.faultline.units({targetAxis:'html'})}));
   assert.ok(!after.inspect.case.html.includes('noise-before'),'coarse reduction must remove an irrelevant root subtree');
@@ -75,7 +91,7 @@ try{
   const cssUnits=await page.evaluate(()=>window.faultline.units({targetAxis:'css'}));
   assert.ok(cssUnits.units.some(unit=>unit.kind==='declaration'&&unit.parentId&&unit.depth>0),'CSS hierarchy must expose declaration children after the HTML reduction');
 
-  console.log('Hierarchical reduction PASS: FAULTLINE removes whole irrelevant branches, descends into surviving structure, remaps pins, and exposes hierarchy through WebMCP.');
+  console.log('Hierarchical reduction PASS: FAULTLINE removes whole irrelevant branches, descends into surviving structure, remaps pins, exposes hierarchy through WebMCP, and prevents indirect pinned-unit removal.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

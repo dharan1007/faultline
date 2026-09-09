@@ -1,0 +1,132 @@
+from pathlib import Path
+
+runtime = Path('src/runtime.js')
+text = runtime.read_text()
+
+replacements = [
+    (
+        "const ACTION_KINDS=['none','click','set_value'];",
+        "const ACTION_KINDS=['none','click','set_value','sequence'];\nconst ACTION_STEP_KINDS=['click','set_value'];",
+    ),
+]
+
+old_validate = """function validateOracle(oracle){
+  if(!oracle||typeof oracle!=='object'||Array.isArray(oracle))throw new Error('INVALID_ORACLE');
+  const allowed=new Set(['kind','selector','property','equals','action','delayMs']);
+  if(Object.keys(oracle).some(key=>!allowed.has(key))||!ORACLE_KINDS.includes(oracle.kind))throw new Error('INVALID_ORACLE');
+  if(!oracle.action||typeof oracle.action!=='object'||Array.isArray(oracle.action))throw new Error('INVALID_ORACLE');
+  if(Object.keys(oracle.action).some(key=>!['kind','selector','value'].includes(key))||!ACTION_KINDS.includes(oracle.action.kind))throw new Error('INVALID_ORACLE');
+  if(oracle.action.kind==='click'&&typeof oracle.action.selector==='string'&&oracle.action.selector.trim()==='')throw new Error('INVALID_ORACLE');
+  if(oracle.action.kind==='click'&&typeof oracle.action.selector!=='string')throw new Error('INVALID_ORACLE');
+  if(oracle.action.kind==='set_value'&&(typeof oracle.action.selector!=='string'||!oracle.action.selector.trim()||typeof oracle.action.value!=='string'))throw new Error('INVALID_ORACLE');
+  if(oracle.kind!=='runtime_error'&&(typeof oracle.selector!=='string'||!oracle.selector.trim()))throw new Error('INVALID_ORACLE');
+  if(['dom_property','computed_style'].includes(oracle.kind)&&(typeof oracle.property!=='string'||!oracle.property.trim()))throw new Error('INVALID_ORACLE');
+  if(oracle.delayMs!==undefined&&(!Number.isFinite(oracle.delayMs)||oracle.delayMs<0||oracle.delayMs>2000))throw new Error('INVALID_ORACLE');
+  return oracle;
+}"""
+new_validate = """function validateAction(action,{allowSequence=true}={}){
+  if(!action||typeof action!=='object'||Array.isArray(action)||!ACTION_KINDS.includes(action.kind))throw new Error('INVALID_ORACLE');
+  if(Object.keys(action).some(key=>!['kind','selector','value','steps'].includes(key)))throw new Error('INVALID_ORACLE');
+  if(action.kind==='sequence'){
+    if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||!Array.isArray(action.steps)||action.steps.length<1||action.steps.length>8)throw new Error('INVALID_ORACLE');
+    for(const step of action.steps){
+      if(!ACTION_STEP_KINDS.includes(step?.kind))throw new Error('INVALID_ORACLE');
+      validateAction(step,{allowSequence:false});
+    }
+    return action;
+  }
+  if(Object.hasOwn(action,'steps'))throw new Error('INVALID_ORACLE');
+  if(action.kind==='click'&&(typeof action.selector!=='string'||!action.selector.trim()))throw new Error('INVALID_ORACLE');
+  if(action.kind==='set_value'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.value!=='string'))throw new Error('INVALID_ORACLE');
+  return action;
+}
+function validateOracle(oracle){
+  if(!oracle||typeof oracle!=='object'||Array.isArray(oracle))throw new Error('INVALID_ORACLE');
+  const allowed=new Set(['kind','selector','property','equals','action','delayMs']);
+  if(Object.keys(oracle).some(key=>!allowed.has(key))||!ORACLE_KINDS.includes(oracle.kind))throw new Error('INVALID_ORACLE');
+  validateAction(oracle.action);
+  if(oracle.kind!=='runtime_error'&&(typeof oracle.selector!=='string'||!oracle.selector.trim()))throw new Error('INVALID_ORACLE');
+  if(['dom_property','computed_style'].includes(oracle.kind)&&(typeof oracle.property!=='string'||!oracle.property.trim()))throw new Error('INVALID_ORACLE');
+  if(oracle.delayMs!==undefined&&(!Number.isFinite(oracle.delayMs)||oracle.delayMs<0||oracle.delayMs>2000))throw new Error('INVALID_ORACLE');
+  return oracle;
+}"""
+replacements.append((old_validate, new_validate))
+
+old_measure = """ const measure=sendResult=>schedule(()=>{try{
+  if(blockedRuntimePolicy(sendResult)||blockedNavigation(sendResult))return;
+  if(o.action?.kind==='click'){const target=querySelector(o.action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click()}
+  else if(o.action?.kind==='set_value'){
+   const target=querySelector(o.action.selector);
+   if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');
+   let prototype=target,valueDescriptor=null;
+   while((prototype=Object.getPrototypeOf(prototype))&&!valueDescriptor)valueDescriptor=Object.getOwnPropertyDescriptor(prototype,'value');
+   if(!valueDescriptor?.set)throw new Error('ACTION_TARGET_NOT_VALUE_CONTROL');
+   valueDescriptor.set.call(target,String(o.action.value));
+   target.dispatchEvent(new Event('input',{bubbles:true,composed:true}));
+   target.dispatchEvent(new Event('change',{bubbles:true}));
+  }
+  schedule(()=>{try{
+"""
+new_measure = """ const waitActionTurn=()=>new Promise(resolve=>schedule(resolve,0));
+ const performAtomicAction=action=>{
+  if(action?.kind==='click'){const target=querySelector(action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click();return}
+  if(action?.kind==='set_value'){
+   const target=querySelector(action.selector);
+   if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');
+   let prototype=target,valueDescriptor=null;
+   while((prototype=Object.getPrototypeOf(prototype))&&!valueDescriptor)valueDescriptor=Object.getOwnPropertyDescriptor(prototype,'value');
+   if(!valueDescriptor?.set)throw new Error('ACTION_TARGET_NOT_VALUE_CONTROL');
+   valueDescriptor.set.call(target,String(action.value));
+   target.dispatchEvent(new Event('input',{bubbles:true,composed:true}));
+   target.dispatchEvent(new Event('change',{bubbles:true}));
+  }
+ };
+ const performAction=async action=>{
+  if(!action||action.kind==='none')return;
+  if(action.kind!=='sequence'){performAtomicAction(action);return;}
+  for(const step of action.steps){
+   performAtomicAction(step);
+   await waitActionTurn();
+   if(runtimePolicyViolation||latestNavigationAttempt())return;
+  }
+ };
+ const measure=sendResult=>schedule(async()=>{try{
+  if(blockedRuntimePolicy(sendResult)||blockedNavigation(sendResult))return;
+  await performAction(o.action);
+  if(blockedRuntimePolicy(sendResult)||blockedNavigation(sendResult))return;
+  schedule(()=>{try{
+"""
+replacements.append((old_measure, new_measure))
+
+old_schema = "const ORACLE_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ORACLE_KINDS},selector:{type:'string'},property:{type:'string'},equals:{},action:{type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'}},required:['kind']},delayMs:{type:'number',minimum:0,maximum:2000}},required:['kind','action']};"
+new_schema = "const ACTION_STEP_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_STEP_KINDS},selector:{type:'string'},value:{type:'string'}},required:['kind','selector']};\nconst ACTION_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}},required:['kind']};\nconst ORACLE_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ORACLE_KINDS},selector:{type:'string'},property:{type:'string'},equals:{},action:ACTION_SCHEMA,delayMs:{type:'number',minimum:0,maximum:2000}},required:['kind','action']};"
+replacements.append((old_schema, new_schema))
+
+old_render = "function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??'';renderUnits();renderTrace();persistBestEffort();}"
+new_render = "function syncActionControls(){const kind=$('action-kind').value;$('action-selector').disabled=kind==='none'||kind==='sequence';$('action-value').disabled=kind!=='set_value';$('action-sequence').disabled=kind!=='sequence';}\nfunction render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??'';$('action-sequence').value=s.case.oracle.action?.kind==='sequence'?JSON.stringify(s.case.oracle.action.steps,null,2):'';syncActionControls();renderUnits();renderTrace();persistBestEffort();}"
+replacements.append((old_render, new_render))
+
+old_lock = "$('lock').onclick=()=>{const actionKind=$('action-kind').value;const action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;defineOracle({oracle:{kind:$('oracle-kind').value,selector:$('oracle-selector').value,property:$('oracle-property').value,equals:normalizeExpected($('oracle-equals').value),action,delayMs:0}});};"
+new_lock = "$('action-kind').onchange=syncActionControls;\n$('lock').onclick=()=>{const actionKind=$('action-kind').value;let action;if(actionKind==='sequence'){try{action={kind:'sequence',steps:JSON.parse($('action-sequence').value)}}catch{renderHealth('ERROR');$('summary').textContent='INVALID_ACTION_SEQUENCE_JSON';return;}}else{action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;}try{defineOracle({oracle:{kind:$('oracle-kind').value,selector:$('oracle-selector').value,property:$('oracle-property').value,equals:normalizeExpected($('oracle-equals').value),action,delayMs:0}})}catch(e){renderHealth('ERROR');$('summary').textContent=String(e?.message||e);}};"
+replacements.append((old_lock, new_lock))
+
+for old, new in replacements:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f'runtime replacement expected 1 occurrence, found {count}: {old[:90]!r}')
+    text = text.replace(old, new)
+runtime.write_text(text)
+
+index = Path('index.html')
+html = index.read_text()
+old_ui = '''          <div class="row"><div><label for="action-kind">Before measurement</label><select id="action-kind"><option value="click">Click element</option><option value="set_value">Set form value</option><option value="none">No action</option></select></div><div><label for="action-selector">Action selector</label><input id="action-selector" value="#save"></div></div>
+          <div><label for="action-value">Action value</label><input id="action-value" value="" autocomplete="off" aria-describedby="action-value-help"><span id="action-value-help" class="small">Used by “Set form value”; ignored by click and no-action runs.</span></div>
+          <div class="actions" style="margin-top:12px"><button id="lock" class="btn primary">Lock oracle</button></div>'''
+new_ui = '''          <div class="row"><div><label for="action-kind">Before measurement</label><select id="action-kind"><option value="click">Click element</option><option value="set_value">Set form value</option><option value="sequence">Action sequence</option><option value="none">No action</option></select></div><div><label for="action-selector">Action selector</label><input id="action-selector" value="#save"></div></div>
+          <div><label for="action-value">Action value</label><input id="action-value" value="" autocomplete="off" aria-describedby="action-value-help"><span id="action-value-help" class="small">Used by “Set form value”; ignored by click, sequence, and no-action runs.</span></div>
+          <div><label for="action-sequence">Action sequence JSON</label><textarea id="action-sequence" style="min-height:118px" spellcheck="false" aria-describedby="action-sequence-help"></textarea><span id="action-sequence-help" class="small">For “Action sequence”, provide 1–8 ordered click/set_value steps. Each step runs in its own browser task before measurement.</span></div>
+          <div class="actions" style="margin-top:12px"><button id="lock" class="btn primary">Lock oracle</button></div>'''
+count = html.count(old_ui)
+if count != 1:
+    raise SystemExit(f'index replacement expected 1 occurrence, found {count}')
+index.write_text(html.replace(old_ui, new_ui))

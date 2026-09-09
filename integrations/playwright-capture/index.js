@@ -4,13 +4,53 @@ import { CAPTURE_SCHEMA, validateCaptureArtifact } from '../../src/capture-contr
 
 const require=createRequire(import.meta.url);
 const playwrightVersion=require('playwright/package.json').version;
+const MAX_DIAGNOSTICS=200;
+const MAX_DIAGNOSTIC_CHARS=2048;
 
 function boundedText(value,max=2048){
   const text=String(value??'');
   return text.length>max?text.slice(0,max):text;
 }
 
-export async function captureFaultlineCase({page,oracle,js='',provenance={},writeTo}={}){
+function boundedDiagnosticList(values){
+  return values.slice(0,MAX_DIAGNOSTICS).map(value=>boundedText(value,MAX_DIAGNOSTIC_CHARS));
+}
+
+export function armFaultlineDiagnostics(page){
+  if(!page||typeof page.on!=='function'||typeof page.off!=='function')throw new Error('INVALID_PLAYWRIGHT_PAGE');
+  const consoleErrors=[];
+  const pageErrors=[];
+  let disposed=false;
+  const push=(list,value)=>{if(list.length<MAX_DIAGNOSTICS)list.push(boundedText(value,MAX_DIAGNOSTIC_CHARS));};
+  const onConsole=message=>{if(message?.type?.()==='error')push(consoleErrors,message.text?.()??'');};
+  const onPageError=error=>push(pageErrors,error?.stack||error?.message||error);
+  page.on('console',onConsole);
+  page.on('pageerror',onPageError);
+  return Object.freeze({
+    snapshot(){
+      if(disposed)throw new Error('DIAGNOSTICS_DISPOSED');
+      return {consoleErrors:[...consoleErrors],pageErrors:[...pageErrors]};
+    },
+    dispose(){
+      if(disposed)return;
+      disposed=true;
+      page.off('console',onConsole);
+      page.off('pageerror',onPageError);
+    }
+  });
+}
+
+function readDiagnostics(diagnostics){
+  if(diagnostics==null)return {consoleErrors:[],pageErrors:[]};
+  const snapshot=typeof diagnostics.snapshot==='function'?diagnostics.snapshot():diagnostics;
+  if(!snapshot||!Array.isArray(snapshot.consoleErrors)||!Array.isArray(snapshot.pageErrors))throw new Error('INVALID_CAPTURE_DIAGNOSTICS');
+  return {
+    consoleErrors:boundedDiagnosticList(snapshot.consoleErrors),
+    pageErrors:boundedDiagnosticList(snapshot.pageErrors)
+  };
+}
+
+export async function captureFaultlineCase({page,oracle,js='',provenance={},diagnostics,writeTo}={}){
   if(!page||typeof page.evaluate!=='function')throw new Error('INVALID_PLAYWRIGHT_PAGE');
   if(typeof js!=='string')throw new Error('INVALID_CAPTURE');
 
@@ -26,9 +66,6 @@ export async function captureFaultlineCase({page,oracle,js='',provenance={},writ
       }
     }
 
-    // innerHTML reflects markup, not all current DOM property state. Clone the body and
-    // project live form values into serializable markup so a caller-prepared Playwright
-    // page can be reproduced without changing the page being debugged.
     const body=document.body;
     const portableBody=body?.cloneNode(true)??null;
     if(body&&portableBody){
@@ -78,6 +115,7 @@ export async function captureFaultlineCase({page,oracle,js='',provenance={},writ
     };
   });
 
+  const capturedDiagnostics=readDiagnostics(diagnostics);
   const viewport=page.viewportSize?.()??null;
   const browser=page.context?.().browser?.();
   const capture={
@@ -104,8 +142,8 @@ export async function captureFaultlineCase({page,oracle,js='',provenance={},writ
     },
     diagnostics:{
       externalDependencies:snapshot.externalDependencies.map(value=>boundedText(value)),
-      consoleErrors:[],
-      pageErrors:[]
+      consoleErrors:capturedDiagnostics.consoleErrors,
+      pageErrors:capturedDiagnostics.pageErrors
     }
   };
 

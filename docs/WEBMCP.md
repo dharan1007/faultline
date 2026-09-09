@@ -1,6 +1,6 @@
 # WebMCP contract
 
-FAULTLINE registers 16 causal tools:
+FAULTLINE exposes 17 causal tools after the capture adapter is installed by the production UI:
 
 1. `faultline_inspect`
 2. `faultline_units`
@@ -18,8 +18,66 @@ FAULTLINE registers 16 causal tools:
 14. `faultline_restore`
 15. `faultline_export`
 16. `faultline_autopilot`
+17. `faultline_load_capture`
 
 The interface exposes causal operations rather than unrestricted browser scripting. UI actions, the `window.faultline` browser API, and WebMCP tools share the same canonical revision-guarded engine. Long-running WebMCP operations support the native execution `AbortSignal`; `faultline_cancel_active` is the compatibility surface for callers that supply a stable `requestId`.
+
+## Real Playwright failure ingestion
+
+`faultline_load_capture` closes the gap between a real Playwright failure and FAULTLINE's canonical reducer. The browser under test creates a versioned `faultline.capture.v1` artifact in the developer/test process; the FAULTLINE web application only imports that JSON. Production never navigates to the artifact's `provenance.url`.
+
+The stable top-level artifact is:
+
+```json
+{
+  "schema": "faultline.capture.v1",
+  "case": {
+    "html": "...",
+    "css": "...",
+    "js": "...",
+    "oracle": {
+      "kind": "dom_attribute",
+      "selector": "#status",
+      "property": "data-broken",
+      "equals": "true",
+      "action": { "kind": "click", "selector": "#trigger" },
+      "delayMs": 0
+    }
+  },
+  "provenance": {
+    "url": "http://127.0.0.1:3000/repro",
+    "title": "Captured regression",
+    "capturedAt": "2026-09-09T00:00:00.000Z",
+    "viewport": { "width": 1280, "height": 720 },
+    "userAgent": "...",
+    "playwright": { "projectName": "chromium", "testTitle": "regression" }
+  },
+  "diagnostics": {
+    "omittedResources": [],
+    "capturedScripts": [],
+    "capturedStylesheets": []
+  }
+}
+```
+
+WebMCP import is optimistic-revision guarded:
+
+```text
+faultline_inspect()
+  -> expectedRevision
+faultline_load_capture({ expectedRevision, capture })
+  -> one new canonical revision + bounded capture summary
+faultline_run({ expectedRevision: newRevision })
+  -> PASS | FAIL | UNRESOLVED
+```
+
+The executable state remains exactly `{html, css, js, oracle}`. Provenance and diagnostics are validated but are not inserted into candidate HTML/JavaScript. Unknown capture versions, malformed metadata, malformed diagnostics, or captures above the source-size ceiling are rejected before the canonical case mutation. Stale expected revisions are rejected by the same canonical mutation path as `faultline_load_case`.
+
+The tool is annotated as mutating and untrusted-content accepting. Importing a capture does not grant any new execution privilege: once loaded, the case is subject to FAULTLINE's existing sandbox, CSP, navigation/network containment, oracle validation, revision semantics, and reducer rules.
+
+The repository-side producer is `integrations/playwright/index.mjs`. `captureFaultlineBaseline(page, options)` captures the current browser baseline; `createFaultlineTest(baseTest, options)` adds a reusable `faultline.arm(...)` fixture that can emit `faultline.capture.json` when the armed test ends unexpectedly. Capture should be armed before the interaction expected to expose the bug so FAULTLINE receives the pre-failure source plus the deterministic replay action.
+
+Same-origin external classic JavaScript capture is opt-in. Cross-origin scripts are not fetched. Unreadable stylesheets, module scripts, disabled JavaScript capture, failed resources, and other unsupported dependencies are represented in `diagnostics.omittedResources` rather than silently disappearing.
 
 ## Deterministic oracle measurements
 

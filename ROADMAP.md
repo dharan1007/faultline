@@ -4,7 +4,7 @@ FAULTLINE's roadmap is ordered around a measurable debugging outcome: **turn a r
 
 ## Shipped foundation — capture, verify, reduce
 
-The canonical production architecture now contains a local Playwright capture path in addition to direct case loading:
+The canonical production architecture contains a local Playwright capture path in addition to direct case loading:
 
 - a caller-owned Playwright `page` can be converted to bounded `faultline.capture.v1`,
 - the hosted workbench never navigates to or fetches the capture source URL,
@@ -16,20 +16,32 @@ The canonical production architecture now contains a local Playwright capture pa
 
 The v1 adapter deliberately snapshots already-authorized page state rather than pretending to reconstruct arbitrary application bundles. External/inaccessible dependencies are rejected instead of hidden.
 
-## Now — make semantic reduction stronger
+## Shipped — hierarchical HTML/CSS reduction
 
-The next major technical step is stronger semantic-unit quality while preserving non-overlap and deterministic removal semantics.
+The canonical production reducer now performs structural coarse-to-fine reduction instead of feeding overlapping parent/child ranges into one flat candidate set:
 
-Candidate work:
+- nested HTML elements expose deterministic `depth` and `parentId` metadata,
+- void elements are leaves and script/style raw-text contents do not create fake descendants,
+- CSS style rules expose declaration children and supported nested at-rules expose child rule structure,
+- quoted delimiters and comments are respected by the structural scanners,
+- HTML/CSS reduction operates over one non-overlapping depth frontier at a time,
+- accepted shallower removals suppress descendants by re-discovering the current hierarchy,
+- pinned descendants protect their full ancestor chain,
+- surviving pins are remapped after accepted deletions shift source ranges,
+- all hierarchy passes share one global reduction trial budget,
+- the final candidate is independently executed and must still return `FAIL` before canonical commit,
+- Browser API, human unit rendering and `faultline_units` WebMCP discovery expose the same canonical hierarchy metadata.
 
-1. HTML structural units that handle nested subtrees deliberately.
-2. CSS two-stage rule/declaration reduction with non-overlapping frontiers.
-3. JavaScript parser-backed statement/expression boundaries where the dependency/size cost is justified.
-4. Hierarchical reduction in the **canonical production runtime**, with pinned descendants protecting required ancestors.
-5. Tests proving the exact minimality class for each frontier.
-6. A reproducible browser-failure corpus measuring original size, reduced size, trial count, preservation status and capture environment.
+The scanners are deliberately bounded structural scanners, not standards-complete HTML5/CSSOM parsers. JavaScript remains the existing bounded statement-level scanner.
 
-The repository contains older/experimental depth-aware concepts, but they do not change the production claim until integrated into `src/runtime.js` and release tests.
+## Now — improve semantic precision and measured effectiveness
+
+The next major technical work should improve reduction quality where evidence shows the current structural boundaries are insufficient:
+
+1. JavaScript parser-backed statement/expression reduction where the dependency/size cost is justified.
+2. A reproducible browser-failure corpus measuring original size, reduced size, trial count, preservation status, hierarchy passes and capture environment.
+3. Corpus-driven HTML/CSS scanner hardening for malformed-but-browser-tolerated markup and advanced CSS constructs.
+4. Reduction strategy improvements driven by benchmark data rather than additional heuristic complexity by default.
 
 ## Next — broader real-browser integrations
 
@@ -43,7 +55,7 @@ The repository contains older/experimental depth-aware concepts, but they do not
 ## Later — stronger isolation / scale
 
 - Optional process/VM-backed execution for services accepting arbitrary third-party code.
-- Standards-complete parsing for selected axes where it materially improves reduction quality.
+- Standards-complete parsing for selected axes where benchmark evidence shows it materially improves reduction quality.
 - Reproducer bundles with deterministic environment metadata.
 - Stable reusable reducer/oracle/capture packages after APIs settle.
 
@@ -51,14 +63,15 @@ The repository contains older/experimental depth-aware concepts, but they do not
 
 FAULTLINE will not:
 
-- call a source globally minimal when only a bounded candidate set was tested,
+- call a source globally minimal when only a bounded candidate set/frontier sequence was tested,
 - treat `UNRESOLVED` as success,
 - disable containment to reduce more aggressively,
 - claim a browser iframe is equivalent to process/VM isolation,
 - invent reduction percentages for marketing,
 - fetch arbitrary capture URLs in hosted production,
 - expose arbitrary remote/browser control merely to appear more agentic,
-- claim `faultline.capture.v1` reconstructs an arbitrary SPA bundle when it does not.
+- claim `faultline.capture.v1` reconstructs an arbitrary SPA bundle when it does not,
+- claim its bounded structural scanners are standards-complete parsers.
 
 ## Contributing to roadmap work
 

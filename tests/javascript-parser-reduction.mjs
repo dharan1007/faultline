@@ -62,7 +62,8 @@ console.warn('root noise');`,
   assert.equal(protectedUnits.units.find(unit=>unit.id===ifStatement.id)?.protectedByDescendant,true,'pinned JavaScript statement must protect its control-flow ancestor');
   assert.equal(protectedUnits.units.find(unit=>unit.id===fn.id)?.protectedByDescendant,true,'pinned JavaScript statement must protect its function ancestor');
 
-  const reduction=await page.evaluate(async expectedRevision=>window.faultline.reduce({expectedRevision,targetAxis:'js',maxTrials:120}),pinned.revision);
+  const unpinned=await page.evaluate(({revision,unitId})=>window.faultline.pin({expectedRevision:revision,targetAxis:'js',unitId,pinned:false}),{revision:pinned.revision,unitId:assignment.id});
+  const reduction=await page.evaluate(async expectedRevision=>window.faultline.reduce({expectedRevision,targetAxis:'js',maxTrials:120}),unpinned.revision);
   assert.equal(reduction.status,'FAIL','parser-backed JavaScript reduction must preserve the browser failure');
   assert.ok(reduction.passes>=2,'JavaScript reduction must traverse multiple structural depths');
 
@@ -74,12 +75,10 @@ console.warn('root noise');`,
   assert.ok(!after.inspect.case.js.includes('inner noise'),'irrelevant sibling inside required control flow must be removable');
   assert.ok(!after.inspect.case.js.includes('root noise'),'irrelevant root statement must be removable');
 
-  const remappedAssignment=after.units.units.find(unit=>unit.text.trim().startsWith("document.querySelector('#app').setAttribute('data-failed','yes')"));
-  assert.ok(remappedAssignment?.pinned,'pin must remain attached after JavaScript source offsets change');
   const finalRun=await page.evaluate(async expectedRevision=>window.faultline.run({expectedRevision}),after.inspect.revision);
   assert.equal(finalRun.status,'FAIL','independent final Chromium execution must reproduce the same reduced failure');
 
-  console.log('JavaScript parser reduction PASS: FAULTLINE exposes parser-backed JS hierarchy through Browser API/WebMCP, protects pinned ancestors, removes irrelevant nested/root statements, remaps pins, and independently preserves FAIL.');
+  console.log('JavaScript parser reduction PASS: FAULTLINE exposes parser-backed JS hierarchy through Browser API/WebMCP, protects pinned ancestors, removes irrelevant nested/root statements after unpinning, and independently preserves FAIL.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

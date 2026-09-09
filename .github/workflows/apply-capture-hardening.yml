@@ -2,14 +2,15 @@ name: Apply capture hardening patch
 
 on:
   push:
-    branches: [automation/playwright-capture-hardening-20260909]
+    branches:
+      - automation/playwright-capture-hardening-20260909
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'chore: run capture hardening patch'
+    if: ${{ github.event.head_commit.message == 'chore: run capture hardening patch v2' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

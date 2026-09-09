@@ -8,11 +8,11 @@ const integrationBadge=document.querySelector('#integration-workspace>summary .t
 const integrationFlow=document.querySelector('#integration-workspace .integration-column:nth-child(2) pre');
 const browserFlow=document.querySelector('#integration-workspace .integration-column:nth-child(1) pre');
 const toolCount=window.faultline.manifest().length;
-const toolCountLabel=({13:'thirteen',14:'fourteen',15:'fifteen'})[toolCount]||String(toolCount);
+const toolCountLabel=({13:'thirteen',14:'fourteen',15:'fifteen',16:'sixteen',17:'seventeen'})[toolCount]||String(toolCount);
 
 if(integrationBadge)integrationBadge.textContent=`${toolCount} WebMCP tools`;
 if(integrationNote){
-  integrationNote.textContent=integrationNote.textContent.replace(/\b(?:twelve|thirteen|fourteen|\d+) WebMCP tools\b/i,`${toolCountLabel} WebMCP tools`);
+  integrationNote.textContent=integrationNote.textContent.replace(/\b(?:twelve|thirteen|fourteen|fifteen|sixteen|seventeen|\d+) WebMCP tools\b/i,`${toolCountLabel} WebMCP tools`);
   if(!integrationNote.textContent.includes('faultline_apply_source')){
     const separator=document.createTextNode(' Single-axis agent writes use ');
     const tool=document.createElement('code');
@@ -31,12 +31,24 @@ if(integrationNote){
     tool.textContent='faultline_revisions';
     integrationNote.append(separator,tool,document.createTextNode(' before faultline_restore.'));
   }
+  if(!integrationNote.textContent.includes('faultline_import_capture')){
+    const separator=document.createTextNode(' Import real Playwright-captured failures with ');
+    const tool=document.createElement('code');
+    tool.textContent='faultline_import_capture';
+    integrationNote.append(separator,tool,document.createTextNode(' after inspecting the current revision.'));
+  }
 }
 if(integrationFlow&&!integrationFlow.textContent.includes('faultline_units')){
   integrationFlow.textContent=integrationFlow.textContent.replace('faultline_probe','faultline_units({ targetAxis })\n  ↓\nfaultline_probe({ expectedRevision, targetAxis, unitId })');
 }
+if(integrationFlow&&!integrationFlow.textContent.includes('faultline_import_capture')){
+  integrationFlow.textContent=`faultline_inspect()\n  ↓\nfaultline_import_capture({ expectedRevision, capture })\n  ↓\n${integrationFlow.textContent}`;
+}
 if(browserFlow&&!browserFlow.textContent.includes('window.faultline.units')){
   browserFlow.textContent+=`\n\nconst frontier = await window.faultline.units({ targetAxis: 'html' })\nconst unitId = frontier.units[0]?.id`;
+}
+if(browserFlow&&!browserFlow.textContent.includes('window.faultline.importCapture')){
+  browserFlow.textContent+=`\n\nconst current = window.faultline.inspect()\nawait window.faultline.importCapture({ expectedRevision: current.revision, capture })`;
 }
 
 function reportActionError(error){
@@ -92,6 +104,7 @@ function installCaseImport(){
       window.faultline.loadCase({expectedRevision:current.revision,case:nextCase});
       const health=document.getElementById('health');
       if(health){health.textContent='READY';health.dataset.state='READY';}
+      refreshCaptureExport();
     }catch(error){
       reportActionError(error);
     }
@@ -100,6 +113,73 @@ function installCaseImport(){
   actions.append(button);
   details.append(summary,help,label,editor,actions);
   actionBar.insertAdjacentElement('afterend',details);
+}
+
+function installCaptureImport(){
+  const caseImport=document.getElementById('case-import');
+  const actionBar=document.querySelector('#case-workspace .action-bar');
+  if((!caseImport&&!actionBar)||document.getElementById('capture-import'))return;
+
+  const details=document.createElement('details');
+  details.id='capture-import';
+  details.style.marginTop='12px';
+  details.style.paddingTop='12px';
+  details.style.borderTop='1px solid var(--line)';
+
+  const summary=document.createElement('summary');
+  summary.className='btn ghost';
+  summary.style.display='inline-flex';
+  summary.textContent='Import Playwright capture';
+
+  const help=document.createElement('p');
+  help.className='small';
+  help.textContent='Paste a faultline.capture.v1 envelope created from a real Playwright failure. FAULTLINE validates and baseline-runs it first; only a reproduced FAIL becomes canonical state.';
+
+  const label=document.createElement('label');
+  label.htmlFor='capture-import-json';
+  label.textContent='Playwright capture JSON';
+
+  const editor=document.createElement('textarea');
+  editor.id='capture-import-json';
+  editor.spellcheck=false;
+  editor.style.minHeight='220px';
+  editor.placeholder='{"schema":"faultline.capture.v1", ...}';
+  editor.setAttribute('aria-describedby','capture-import-help');
+  help.id='capture-import-help';
+
+  const actions=document.createElement('div');
+  actions.className='actions';
+  actions.style.marginTop='10px';
+
+  const button=document.createElement('button');
+  button.id='import-capture';
+  button.className='btn primary';
+  button.type='button';
+  button.textContent='Verify and import capture';
+  button.addEventListener('click',async()=>{
+    button.disabled=true;
+    try{
+      const capture=JSON.parse(editor.value);
+      const current=window.faultline.inspect();
+      const result=await window.faultline.importCapture({expectedRevision:current.revision,capture});
+      const health=document.getElementById('health');
+      const evidence=document.getElementById('summary');
+      if(health){health.textContent='FAIL';health.dataset.state='FAIL';}
+      if(evidence){
+        const labelText=result.state.captureProvenance?.label||result.state.captureProvenance?.url||'captured failure';
+        evidence.textContent=`Capture baseline confirmed FAIL · ${labelText}`;
+      }
+      refreshCaptureExport();
+    }catch(error){
+      reportActionError(error);
+    }finally{
+      button.disabled=false;
+    }
+  });
+
+  actions.append(button);
+  details.append(summary,help,label,editor,actions);
+  (caseImport||actionBar).insertAdjacentElement('afterend',details);
 }
 
 function installCaseJsonExport(){
@@ -130,6 +210,47 @@ function installCaseJsonExport(){
   });
 
   reproducerButton.insertAdjacentElement('beforebegin',button);
+}
+
+function refreshCaptureExport(){
+  const button=document.getElementById('export-capture-json');
+  if(!button)return;
+  const provenance=window.faultline.inspect().captureProvenance;
+  button.disabled=!provenance;
+  button.title=provenance?`Export capture from ${provenance.label||provenance.url}`:'Import a Playwright capture before exporting capture JSON';
+}
+
+function installCaptureJsonExport(){
+  const reproducerButton=document.getElementById('export');
+  if(!reproducerButton||document.getElementById('export-capture-json'))return;
+
+  const button=document.createElement('button');
+  button.id='export-capture-json';
+  button.className='btn';
+  button.type='button';
+  button.textContent='Export capture JSON';
+  button.setAttribute('aria-label','Export current provenance-bound Playwright capture JSON');
+  button.addEventListener('click',()=>{
+    try{
+      const state=window.faultline.inspect();
+      const capture=window.faultline.exportCapture();
+      const blob=new Blob([`${JSON.stringify(capture,null,2)}\n`],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement('a');
+      link.href=url;
+      link.download=`faultline-capture-${state.revision}.faultline.json`;
+      link.hidden=true;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),0);
+    }catch(error){reportActionError(error);}
+  });
+  reproducerButton.insertAdjacentElement('beforebegin',button);
+  refreshCaptureExport();
+
+  const revisionBadge=document.getElementById('revision');
+  if(revisionBadge)new MutationObserver(refreshCaptureExport).observe(revisionBadge,{childList:true,subtree:true,characterData:true});
 }
 
 function installRevisionRecovery(){
@@ -190,6 +311,7 @@ function installRevisionRecovery(){
             const current=window.faultline.inspect();
             window.faultline.restore({expectedRevision:current.revision,targetRevision:item.revision});
             refresh();
+            refreshCaptureExport();
             const health=document.getElementById('health');
             if(health){health.textContent='READY';health.dataset.state='READY';}
           }catch(error){reportActionError(error);refresh();}
@@ -229,7 +351,9 @@ function installPreviewNavigationGuard(){
 }
 
 installCaseImport();
+installCaptureImport();
 installCaseJsonExport();
+installCaptureJsonExport();
 installRevisionRecovery();
 installPreviewNavigationGuard();
 
@@ -265,7 +389,9 @@ for(const id of actionIds){
   if(!element||typeof action!=='function')continue;
   element.onclick=async event=>{
     try{
-      return await action.call(element,event);
+      const result=await action.call(element,event);
+      refreshCaptureExport();
+      return result;
     }catch(error){
       reportActionError(error);
       return undefined;

@@ -58,7 +58,7 @@ Once imported, captured cases use the same hierarchical reduction path as manual
 
 ## Browser parser supply chain
 
-The production browser never fetches its JavaScript parser from a CDN. `acorn` is version-pinned in `package.json`; `scripts-vendor.mjs` verifies that exact installed version and materializes `vendor/acorn.mjs`. The build stages that parser beside the application modules, and guarded deployment byte-compares it against both the staged deployment and the public production alias before the recoverable `production` checkpoint can advance.
+The production browser never fetches its JavaScript parser from a CDN. `acorn` is version-pinned in `package.json`; `scripts-vendor.mjs` verifies that exact installed version and materializes the ESM distribution as `vendor/acorn.js`. The `.js` extension deliberately preserves compatibility with FAULTLINE's existing static/dev-server integrations that already serve JavaScript MIME types correctly. The build stages that parser beside the application modules, and guarded deployment byte-compares it against both the staged deployment and the public production alias before the recoverable `production` checkpoint can advance.
 
 ## WebMCP and concurrency
 

@@ -31,7 +31,7 @@ try{
   },nestedCase);
 
   const initialUnits=await page.evaluate(()=>window.faultline.units({targetAxis:'html'}));
-  const button=initialUnits.units.find(unit=>unit.text.includes('id="save"'));
+  const button=initialUnits.units.find(unit=>unit.text.startsWith('<button id="save"'));
   const required=initialUnits.units.find(unit=>unit.text.startsWith('<section id="required"'));
   const main=initialUnits.units.find(unit=>unit.text.startsWith('<main id="app"'));
   assert.ok(button&&required&&main,'nested parent and child units must all be discoverable');
@@ -63,7 +63,7 @@ try{
   assert.ok(!after.inspect.case.html.includes('inner-noise'),'reduction must descend into the surviving required branch');
   assert.ok(after.inspect.case.html.includes('id="app"')&&after.inspect.case.html.includes('id="required"')&&after.inspect.case.html.includes('id="save"'),'pinned descendant and required ancestors must survive');
 
-  const remappedButton=after.units.units.find(unit=>unit.text.includes('id="save"'));
+  const remappedButton=after.units.units.find(unit=>unit.text.startsWith('<button id="save"'));
   assert.ok(remappedButton,'pinned button must remain discoverable after earlier source removal shifts offsets');
   assert.equal(remappedButton.pinned,true,'direct pin must be remapped to the surviving unit id');
   assert.ok(after.inspect.pins.includes(`html|${remappedButton.id}`),'canonical pin storage must contain the remapped unit id');

@@ -1,24 +1,35 @@
 # WebMCP contract
 
-FAULTLINE registers 15 causal tools:
+FAULTLINE registers 16 causal tools:
 
 1. `faultline_inspect`
 2. `faultline_units`
 3. `faultline_load_case`
 4. `faultline_reset_case`
 5. `faultline_run`
-6. `faultline_define_oracle`
-7. `faultline_apply_source`
-8. `faultline_probe`
-9. `faultline_reduce`
-10. `faultline_pin`
-11. `faultline_history`
-12. `faultline_revisions`
-13. `faultline_restore`
-14. `faultline_export`
-15. `faultline_autopilot`
+6. `faultline_cancel_active`
+7. `faultline_define_oracle`
+8. `faultline_apply_source`
+9. `faultline_probe`
+10. `faultline_reduce`
+11. `faultline_pin`
+12. `faultline_history`
+13. `faultline_revisions`
+14. `faultline_restore`
+15. `faultline_export`
+16. `faultline_autopilot`
 
-The interface exposes causal operations rather than click/type primitives. UI actions, the `window.faultline` browser API, and WebMCP tools share the same canonical revision-guarded engine.
+The interface exposes causal operations rather than click/type primitives. UI actions, the `window.faultline` browser API, and WebMCP tools share the same canonical revision-guarded engine. Long-running WebMCP operations support the native execution `AbortSignal`; `faultline_cancel_active` is the compatibility surface for callers that supply a stable `requestId`.
+
+## Deterministic pre-measurement actions
+
+An oracle may perform one bounded action before measurement:
+
+- `none` — measure without interaction.
+- `click` — click the element selected by `action.selector`.
+- `set_value` — assign the string in `action.value` to a value-capable form control selected by `action.selector`, then dispatch bubbling `input` followed by `change` before measurement.
+
+`set_value` is intended for deterministic input, textarea, select, and equivalent value-control reproductions. Missing targets resolve as `ACTION_TARGET_NOT_FOUND`; targets without a writable DOM `value` setter resolve as `ACTION_TARGET_NOT_VALUE_CONTROL`. These execution failures are `UNRESOLVED`, never ordinary PASS/FAIL evidence.
 
 ## Recovery flow
 

@@ -49,7 +49,7 @@ try{
   });
   const response=await page.goto(origin,{waitUntil:'networkidle'});
   assert.equal(response.status(),200);
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length>0);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===window.faultline.manifest().length);
 
   const capabilities=await page.evaluate(()=>({
     importCapture:typeof window.faultline.importCapture,
@@ -61,6 +61,44 @@ try{
   assert.ok(capabilities.toolNames.includes('faultline_import_capture'),'WebMCP must expose the same canonical capture import operation');
 
   const before=await page.evaluate(()=>window.faultline.inspect());
+
+  const stale=await page.evaluate(async({capture})=>{
+    try{await window.faultline.importCapture({expectedRevision:'r999999',capture});return null;}catch(error){return String(error?.message||error);}
+  },{capture});
+  assert.equal(stale,'STALE_REVISION','capture import must reject stale callers before executing or mutating');
+  const afterStale=await page.evaluate(()=>window.faultline.inspect());
+  assert.equal(afterStale.revision,before.revision);
+  assert.deepEqual(afterStale.case,before.case);
+  assert.equal(afterStale.captureProvenance,before.captureProvenance);
+
+  const aborted=await page.evaluate(async({capture,revision})=>{
+    const controller=new AbortController();
+    controller.abort();
+    try{await window.faultline.importCapture({expectedRevision:revision,capture},{signal:controller.signal});return null;}catch(error){return String(error?.name||error?.message||error);}
+  },{capture,revision:before.revision});
+  assert.equal(aborted,'AbortError','pre-aborted capture verification must stop before mutation');
+  const afterAbort=await page.evaluate(()=>window.faultline.inspect());
+  assert.equal(afterAbort.revision,before.revision);
+  assert.deepEqual(afterAbort.case,before.case);
+  assert.equal(afterAbort.captureProvenance,before.captureProvenance);
+
+  const persistenceFailure=await page.evaluate(async({capture,revision})=>{
+    const original=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(){throw new DOMException('quota exceeded','QuotaExceededError')};
+    try{
+      await window.faultline.importCapture({expectedRevision:revision,capture});
+      return {error:null,state:window.faultline.inspect()};
+    }catch(error){
+      return {error:String(error?.message||error),state:window.faultline.inspect()};
+    }finally{
+      Storage.prototype.setItem=original;
+    }
+  },{capture,revision:before.revision});
+  assert.equal(persistenceFailure.error,'PERSISTENCE_FAILED','capture import must fail closed when durable persistence fails');
+  assert.equal(persistenceFailure.state.revision,before.revision,'failed durable capture import must roll back revision');
+  assert.deepEqual(persistenceFailure.state.case,before.case,'failed durable capture import must roll back case');
+  assert.equal(persistenceFailure.state.captureProvenance,before.captureProvenance,'failed durable capture import must roll back provenance');
+
   const imported=await page.evaluate(async({expectedRevision,capture})=>window.faultline.importCapture({expectedRevision,capture}),{expectedRevision:before.revision,capture});
   assert.equal(imported.status,'IMPORTED');
   assert.equal(imported.baseline.status,'FAIL','capture must independently reproduce before canonical mutation');
@@ -76,7 +114,7 @@ try{
   assert.equal(bundle.captureProvenance.schema,'faultline.capture.v1');
   assert.match(bundle.standaloneHtml,/aria-disabled/);
 
-  console.log('Capture runtime import PASS: capture is verified before atomic commit and provenance-aware export.');
+  console.log('Capture runtime import PASS: stale, aborted, and non-durable imports roll back while verified FAIL captures commit with provenance-aware export.');
 }finally{
   if(browser)await browser.close();
   await new Promise(resolveClose=>server.close(resolveClose));

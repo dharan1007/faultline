@@ -17,5 +17,5 @@ jobs:
       - run: node --check tests/hierarchical-reduction.mjs
       - run: npm run build
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:browser
       - run: node tests/hierarchical-reduction.mjs
+      - run: npm run test:browser

@@ -1,0 +1,32 @@
+name: feature capture patcher
+on:
+  push:
+    branches:
+      - feature/playwright-capture-v1-20260909
+    paths:
+      - scripts/apply-capture-runtime.mjs
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/playwright-capture-v1-20260909
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/apply-capture-runtime.mjs
+      - run: node --check src/runtime.js
+      - name: Commit deterministic runtime patch
+        run: |
+          git config user.name "faultline-automation"
+          git config user.email "150376358+dharan1007@users.noreply.github.com"
+          git add src/runtime.js
+          if git diff --cached --quiet; then
+            echo "No runtime patch changes"
+            exit 0
+          fi
+          git commit -m "feat: add transactional capture ingestion runtime"
+          git push origin HEAD:feature/playwright-capture-v1-20260909

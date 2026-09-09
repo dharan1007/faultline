@@ -1,5 +1,6 @@
 import './runtime.js';
 import { navigationRisk } from './sandbox-policy.js';
+import { CAPTURE_LIMITS, validateCaptureArtifact } from './capture-contract.js';
 
 const actionIds=['apply','run','probe','pin','reduce','autopilot','lock','reset'];
 const axisTabs=[...document.querySelectorAll('[role="tab"][data-axis]')];
@@ -8,11 +9,11 @@ const integrationBadge=document.querySelector('#integration-workspace>summary .t
 const integrationFlow=document.querySelector('#integration-workspace .integration-column:nth-child(2) pre');
 const browserFlow=document.querySelector('#integration-workspace .integration-column:nth-child(1) pre');
 const toolCount=window.faultline.manifest().length;
-const toolCountLabel=({13:'thirteen',14:'fourteen',15:'fifteen'})[toolCount]||String(toolCount);
+const toolCountLabel=({13:'thirteen',14:'fourteen',15:'fifteen',16:'sixteen',17:'seventeen'})[toolCount]||String(toolCount);
 
 if(integrationBadge)integrationBadge.textContent=`${toolCount} WebMCP tools`;
 if(integrationNote){
-  integrationNote.textContent=integrationNote.textContent.replace(/\b(?:twelve|thirteen|fourteen|\d+) WebMCP tools\b/i,`${toolCountLabel} WebMCP tools`);
+  integrationNote.textContent=integrationNote.textContent.replace(/\b(?:twelve|thirteen|fourteen|fifteen|sixteen|seventeen|\d+) WebMCP tools\b/i,`${toolCountLabel} WebMCP tools`);
   if(!integrationNote.textContent.includes('faultline_apply_source')){
     const separator=document.createTextNode(' Single-axis agent writes use ');
     const tool=document.createElement('code');
@@ -31,12 +32,24 @@ if(integrationNote){
     tool.textContent='faultline_revisions';
     integrationNote.append(separator,tool,document.createTextNode(' before faultline_restore.'));
   }
+  if(!integrationNote.textContent.includes('faultline_import_capture')){
+    const separator=document.createTextNode(' Import locally captured Playwright failures transactionally with ');
+    const tool=document.createElement('code');
+    tool.textContent='faultline_import_capture';
+    integrationNote.append(separator,tool,document.createTextNode('.'));
+  }
 }
 if(integrationFlow&&!integrationFlow.textContent.includes('faultline_units')){
   integrationFlow.textContent=integrationFlow.textContent.replace('faultline_probe','faultline_units({ targetAxis })\n  ↓\nfaultline_probe({ expectedRevision, targetAxis, unitId })');
 }
+if(integrationFlow&&!integrationFlow.textContent.includes('faultline_import_capture')){
+  integrationFlow.textContent=`faultline_import_capture({ expectedRevision, capture })\n  ↓\n${integrationFlow.textContent}`;
+}
 if(browserFlow&&!browserFlow.textContent.includes('window.faultline.units')){
   browserFlow.textContent+=`\n\nconst frontier = await window.faultline.units({ targetAxis: 'html' })\nconst unitId = frontier.units[0]?.id`;
+}
+if(browserFlow&&!browserFlow.textContent.includes('window.faultline.importCapture')){
+  browserFlow.textContent+=`\n\nawait window.faultline.importCapture({ expectedRevision: window.faultline.inspect().revision, capture })`;
 }
 
 function reportActionError(error){
@@ -45,6 +58,107 @@ function reportActionError(error){
   const summary=document.getElementById('summary');
   if(health){health.textContent='ERROR';health.dataset.state='ERROR';}
   if(summary)summary.textContent=message;
+}
+
+function installCaptureImport(){
+  const actionBar=document.querySelector('#case-workspace .action-bar');
+  if(!actionBar||document.getElementById('capture-import'))return;
+
+  let pendingCapture=null;
+  const details=document.createElement('details');
+  details.id='capture-import';
+  details.style.marginTop='12px';
+  details.style.paddingTop='12px';
+  details.style.borderTop='1px solid var(--line)';
+
+  const disclosure=document.createElement('summary');
+  disclosure.className='btn ghost';
+  disclosure.textContent='Import Playwright capture';
+
+  const help=document.createElement('p');
+  help.className='small';
+  help.textContent='Select a local .faultline.json artifact. Selection only validates and previews metadata; Verify & import independently reproduces FAIL in the sandbox before canonical state can change.';
+
+  const label=document.createElement('label');
+  label.htmlFor='capture-file';
+  label.textContent='FAULTLINE capture file';
+
+  const file=document.createElement('input');
+  file.id='capture-file';
+  file.type='file';
+  file.accept='.json,.faultline.json';
+
+  const captureSummary=document.createElement('div');
+  captureSummary.id='capture-summary';
+  captureSummary.className='small';
+  captureSummary.style.marginTop='10px';
+  captureSummary.style.whiteSpace='pre-wrap';
+  captureSummary.style.overflowWrap='anywhere';
+  captureSummary.textContent='No capture selected.';
+
+  const status=document.createElement('p');
+  status.id='capture-status';
+  status.className='small';
+  status.setAttribute('role','status');
+  status.setAttribute('aria-live','polite');
+  status.textContent='Waiting for a capture.';
+
+  const actions=document.createElement('div');
+  actions.className='actions';
+  actions.style.marginTop='10px';
+
+  const verify=document.createElement('button');
+  verify.id='verify-capture';
+  verify.type='button';
+  verify.className='btn primary';
+  verify.textContent='Verify & import';
+  verify.disabled=true;
+
+  file.addEventListener('change',async()=>{
+    pendingCapture=null;
+    verify.disabled=true;
+    const selected=file.files?.[0];
+    if(!selected){
+      captureSummary.textContent='No capture selected.';
+      status.textContent='Waiting for a capture.';
+      return;
+    }
+    try{
+      if(selected.size>CAPTURE_LIMITS.totalBytes)throw new Error('CAPTURE_TOO_LARGE');
+      const parsed=JSON.parse(await selected.text());
+      validateCaptureArtifact(parsed);
+      pendingCapture=parsed;
+      const sourceTitle=typeof parsed.source?.title==='string'?parsed.source.title:'Untitled page';
+      const sourceUrl=typeof parsed.source?.url==='string'?parsed.source.url:'No source URL';
+      const testTitle=typeof parsed.provenance?.testTitle==='string'?parsed.provenance.testTitle:'No test title';
+      captureSummary.textContent=`${testTitle}\n${sourceTitle}\n${sourceUrl}\nOracle: ${parsed.oracle?.kind||'unknown'}`;
+      status.textContent='Capture validated locally. Canonical state is unchanged until verification succeeds.';
+      verify.disabled=false;
+    }catch(error){
+      captureSummary.textContent=selected.name;
+      status.textContent=`Capture rejected: ${String(error?.message||error)}`;
+    }
+  });
+
+  verify.addEventListener('click',async()=>{
+    if(!pendingCapture)return;
+    verify.disabled=true;
+    status.textContent='Verifying captured failure in isolated sandbox…';
+    try{
+      const current=window.faultline.inspect();
+      const result=await window.faultline.importCapture({expectedRevision:current.revision,capture:pendingCapture});
+      status.textContent=`Imported ${result.revision} · baseline ${result.baseline.status}`;
+    }catch(error){
+      status.textContent=`Import blocked: ${String(error?.message||error)}`;
+      reportActionError(error);
+    }finally{
+      verify.disabled=pendingCapture===null;
+    }
+  });
+
+  actions.append(verify);
+  details.append(disclosure,help,label,file,captureSummary,status,actions);
+  actionBar.insertAdjacentElement('afterend',details);
 }
 
 function installCaseImport(){
@@ -228,6 +342,7 @@ function installPreviewNavigationGuard(){
   };
 }
 
+installCaptureImport();
 installCaseImport();
 installCaseJsonExport();
 installRevisionRecovery();

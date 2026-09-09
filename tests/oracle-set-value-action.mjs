@@ -19,7 +19,7 @@ try{
   await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.some(tool=>tool.name==='faultline_define_oracle'));
 
   const actionSchema=await page.evaluate(()=>window.__webmcpTools.find(tool=>tool.name==='faultline_define_oracle').inputSchema.properties.oracle.properties.action);
-  assert.deepEqual(actionSchema.properties.kind.enum,['none','click','set_value','sequence'],'WebMCP must preserve set_value while advertising bounded sequences');
+  assert.deepEqual(actionSchema.properties.kind.enum,['none','click','set_value','set_checked','sequence'],'WebMCP must preserve set_value while advertising the complete bounded action surface');
   assert.equal(actionSchema.properties.value?.type,'string','WebMCP set_value actions must advertise a string value');
 
   const start=await page.evaluate(()=>window.faultline.inspect());

@@ -94,6 +94,28 @@ test('ddminReduce preserves protected units and the failing predicate', async ()
   assert.ok(result.trials.length > 0);
 });
 
+test('ddminReduce reduces structural units coarse-to-fine and closes direct pins over ancestors', async () => {
+  const units=[
+    {id:'root',parentId:null,depth:0},
+    {id:'root-noise',parentId:null,depth:0},
+    {id:'required',parentId:'root',depth:1},
+    {id:'child-noise',parentId:'root',depth:1},
+    {id:'leaf',parentId:'required',depth:2},
+    {id:'leaf-noise',parentId:'required',depth:2}
+  ];
+  const leaf=units.find(unit=>unit.id==='leaf');
+  const observed=[];
+  const result=await ddminReduce(units,async kept=>{
+    const ids=new Set(kept.map(unit=>unit.id));
+    observed.push([...ids]);
+    return ids.has('root')&&ids.has('required')&&ids.has('leaf')?'FAIL':'PASS';
+  },{protectedItems:[leaf],maxTrials:40});
+  assert.deepEqual(result.items.map(unit=>unit.id),['root','required','leaf']);
+  assert.ok(observed.some(ids=>!ids.includes('root-noise')&&ids.includes('root')),'coarse root noise must be removable before required descendants');
+  assert.ok(observed.some(ids=>!ids.includes('child-noise')&&ids.includes('required')),'reduction must descend into a surviving parent');
+  assert.ok(observed.every(ids=>ids.includes('root')&&ids.includes('required')&&ids.includes('leaf')),'a direct leaf pin must protect its complete ancestor chain in every trial');
+});
+
 test('ddminReduce rejects when the trial budget cannot complete the search', async () => {
   const units = ['required','noise-a','noise-b'];
   await assert.rejects(

@@ -47,11 +47,17 @@ jobs:
       - name: Verify JavaScript syntax
         run: npm run check
 
+      - name: Verify capture module syntax
+        run: node --check src/capture-format.js && node --check src/capture-runtime.js && node --check integrations/playwright/index.mjs
+
       - name: Verify production tree
         run: npm run build
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
+
+      - name: Verify real Playwright capture ingestion
+        run: node tests/playwright-capture-integration.mjs
 
       - name: Verify real browser and WebMCP behavior
         run: npm run test:browser
@@ -122,7 +128,7 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
-          for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js; do
+          for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js src/capture-format.js src/capture-runtime.js; do
             if [ "$file" = "index.html" ]; then
               remote_path="/"
             else
@@ -144,7 +150,7 @@ jobs:
           MATCHED=0
           for attempt in $(seq 1 18); do
             TREE_MATCHED=1
-            for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js; do
+            for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js src/capture-format.js src/capture-runtime.js; do
               if [ "$file" = "index.html" ]; then
                 remote_path="/"
               else

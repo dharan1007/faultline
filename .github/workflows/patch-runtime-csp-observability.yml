@@ -1,0 +1,66 @@
+name: patch-runtime-csp-observability
+on:
+  push:
+    branches:
+      - automation/runtime-csp-observability-20260909
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, 'implement runtime CSP observability') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/runtime-csp-observability-20260909
+          fetch-depth: 0
+      - name: Apply deterministic runtime CSP observer
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/runtime.js')
+          s = p.read_text()
+          old = """ const runtimeErrors=[];\n const navigationAttempts=[];\n const nativeFormSubmit=HTMLFormElement.prototype.submit;"""
+          new = """ const runtimeErrors=[];\n const navigationAttempts=[];\n let runtimePolicyViolation=null;\n let candidateExecutionStarted=false;\n const nativeFormSubmit=HTMLFormElement.prototype.submit;"""
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = """ const captureRuntimeError=value=>runtimeErrors.push(String(value));\n const latestNavigationAttempt=()=>navigationAttempts.at(-1)||null;"""
+          new = """ const captureRuntimeError=value=>runtimeErrors.push(String(value));\n const reportRuntimePolicyViolation=event=>{\n  if(runtimePolicyViolation)return;\n  const directive=String(event.effectiveDirective||event.violatedDirective||'csp').trim().toLowerCase()||'csp';\n  runtimePolicyViolation={axis:candidateExecutionStarted?'js':'html',capability:'runtime-csp-resource',directive};\n  ${previewOnly?`parent.postMessage({type:'faultline:preview-policy-blocked',bootstrapId:${JSON.stringify(bootstrapId)},risk:runtimePolicyViolation},'*');`:''}\n };\n const blockedRuntimePolicy=sendResult=>{if(!runtimePolicyViolation)return false;sendResult({status:'UNRESOLVED',evidence:{reason:'UNSAFE_NETWORK',...runtimePolicyViolation}});return true;};\n const latestNavigationAttempt=()=>navigationAttempts.at(-1)||null;"""
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = """ addEventListener('click',captureNavigationAttempt,true);\n addEventListener('submit',captureFormNavigationAttempt,true);\n addEventListener('error',e=>{captureRuntimeError(e.error?.message??e.message??e.error??'runtime error');e.preventDefault()});"""
+          new = """ addEventListener('click',captureNavigationAttempt,true);\n addEventListener('submit',captureFormNavigationAttempt,true);\n addEventListener('securitypolicyviolation',reportRuntimePolicyViolation,true);\n addEventListener('error',e=>{captureRuntimeError(e.error?.message??e.message??e.error??'runtime error');e.preventDefault()});"""
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = """ const executeCandidate=()=>{try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e)}};\n const measure=sendResult=>schedule(()=>{try{\n  if(blockedNavigation(sendResult))return;"""
+          new = """ const executeCandidate=()=>{candidateExecutionStarted=true;try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e)}};\n const measure=sendResult=>schedule(()=>{try{\n  if(blockedRuntimePolicy(sendResult)||blockedNavigation(sendResult))return;"""
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = """  schedule(()=>{try{\n   if(blockedNavigation(sendResult))return;\n   let actual;"""
+          new = """  schedule(()=>{try{\n   if(blockedRuntimePolicy(sendResult)||blockedNavigation(sendResult))return;\n   let actual;"""
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = """function handlePreviewNavigationMessage(event){\n  const preview=$('preview');\n  if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-navigation-blocked'||event.data.bootstrapId!==previewBootstrapId)return;\n  const risk=event.data.risk||{};\n  renderHealth('UNRESOLVED');\n  $('summary').textContent=`UNSAFE_NAVIGATION · ${risk.axis||'html'} · ${risk.capability||'navigation'}`;\n}\naddEventListener('message',handlePreviewNavigationMessage);"""
+          new = """function handlePreviewNavigationMessage(event){\n  const preview=$('preview');\n  if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-navigation-blocked'||event.data.bootstrapId!==previewBootstrapId)return;\n  const risk=event.data.risk||{};\n  renderHealth('UNRESOLVED');\n  $('summary').textContent=`UNSAFE_NAVIGATION · ${risk.axis||'html'} · ${risk.capability||'navigation'}`;\n}\nfunction handlePreviewPolicyMessage(event){\n  const preview=$('preview');\n  if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-policy-blocked'||event.data.bootstrapId!==previewBootstrapId)return;\n  const risk=event.data.risk||{};\n  renderHealth('UNRESOLVED');\n  $('summary').textContent=`UNSAFE_NETWORK · ${risk.axis||'js'} · ${risk.capability||'runtime-csp-resource'}${risk.directive?` · ${risk.directive}`:''}`;\n}\naddEventListener('message',handlePreviewNavigationMessage);\naddEventListener('message',handlePreviewPolicyMessage);"""
+          assert old in s
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+      - name: Verify syntax and targeted regression is now green
+        run: |
+          npm install --no-audit --no-fund
+          npm run check
+          npx playwright install --with-deps chromium
+          node tests/runtime-csp-resource-containment.mjs
+      - name: Commit implementation
+        run: |
+          git config user.name "faultline-production-bot"
+          git config user.email "150376358+dharan1007@users.noreply.github.com"
+          git add src/runtime.js
+          git diff --cached --exit-code && exit 1 || true
+          git commit -m "fix: implement runtime CSP observability"
+          git push origin HEAD:automation/runtime-csp-observability-20260909

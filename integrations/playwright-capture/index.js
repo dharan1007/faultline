@@ -25,10 +25,54 @@ export async function captureFaultlineCase({page,oracle,js='',provenance={},writ
         if(sheet.href)externalDependencies.push(String(sheet.href));
       }
     }
+
+    // innerHTML reflects markup, not all current DOM property state. Clone the body and
+    // project live form values into serializable markup so a caller-prepared Playwright
+    // page can be reproduced without changing the page being debugged.
+    const body=document.body;
+    const portableBody=body?.cloneNode(true)??null;
+    if(body&&portableBody){
+      const liveControls=[...body.querySelectorAll('input,textarea,select')];
+      const portableControls=[...portableBody.querySelectorAll('input,textarea,select')];
+      for(let index=0;index<liveControls.length;index+=1){
+        const live=liveControls[index];
+        const portable=portableControls[index];
+        if(!portable)continue;
+
+        if(live instanceof HTMLInputElement){
+          const type=String(live.type||'text').toLowerCase();
+          if(type==='password')portable.removeAttribute('value');
+          else if(type!=='file')portable.setAttribute('value',live.value);
+          if(type==='checkbox'||type==='radio'){
+            if(live.checked)portable.setAttribute('checked','');
+            else portable.removeAttribute('checked');
+          }
+          continue;
+        }
+
+        if(live instanceof HTMLTextAreaElement){
+          portable.textContent=live.value;
+          continue;
+        }
+
+        if(live instanceof HTMLSelectElement){
+          const liveOptions=[...live.options];
+          const portableOptions=[...portable.options];
+          for(let optionIndex=0;optionIndex<liveOptions.length;optionIndex+=1){
+            const liveOption=liveOptions[optionIndex];
+            const portableOption=portableOptions[optionIndex];
+            if(!portableOption)continue;
+            if(liveOption.selected)portableOption.setAttribute('selected','');
+            else portableOption.removeAttribute('selected');
+          }
+        }
+      }
+    }
+
     return {
       url:location.href,
       title:document.title,
-      html:document.body?.innerHTML??'',
+      html:portableBody?.innerHTML??'',
       css:css.join('\n'),
       externalDependencies
     };

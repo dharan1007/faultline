@@ -1,5 +1,6 @@
 import { semanticUnits, removeUnits, ddminReduce, createRevisionStore } from './reducer-engine.js';
 import { navigationRisk } from './sandbox-policy.js';
+import { validateCaptureArtifact } from './capture-contract.js';
 
 const $ = id => document.getElementById(id);
 const clone = v => JSON.parse(JSON.stringify(v));
@@ -35,9 +36,10 @@ let selectedUnitId = null;
 let experimentLedger = [];
 let experimentQueue = Promise.resolve();
 let previewBootstrapId = null;
+let captureMetadata = null;
 const activeWebMCPOperations = new Map();
-const CANCELLABLE_WEBMCP_TOOLS = new Set(['faultline_run','faultline_probe','faultline_reduce','faultline_autopilot']);
-const revisions = new Map([['r1',{value:clone(fixture),pins:[]}]]);
+const CANCELLABLE_WEBMCP_TOOLS = new Set(['faultline_run','faultline_probe','faultline_reduce','faultline_autopilot','faultline_import_capture']);
+const revisions = new Map([['r1',{value:clone(fixture),pins:[],capture:null}]]);
 
 function value(){ return store.inspect().value; }
 function revision(){ return store.inspect().revision; }
@@ -53,7 +55,7 @@ function trimRuntimeHistory(){
   }
   if(experimentLedger.length>MAX_EXPERIMENT_LEDGER) experimentLedger.splice(0,experimentLedger.length-MAX_EXPERIMENT_LEDGER);
 }
-function rememberRevision(rev,snapshot){ revisions.set(rev,clone(snapshot));trimRuntimeHistory(); }
+function rememberRevision(rev,snapshot){ const next={...clone(snapshot),capture:Object.hasOwn(snapshot,'capture')?clone(snapshot.capture):clone(captureMetadata)};revisions.set(rev,next);trimRuntimeHistory(); }
 function rememberExperiment(entry){ experimentLedger.push(entry);trimRuntimeHistory();return entry; }
 function abortError(){ return new DOMException('WebMCP execution aborted','AbortError'); }
 function throwIfAborted(signal){ if(signal?.aborted)throw abortError(); }
@@ -147,13 +149,14 @@ function persistencePayload(profile=PERSISTENCE_PROFILES[0]){
   trimRuntimeHistory();
   const dumped=store.dump();
   const persistedStore={...dumped,snapshots:clone(dumped.snapshots.slice(-profile.storeSnapshots)),ledger:clone(dumped.ledger.slice(-profile.storeLedger))};
-  return {version:3,store:persistedStore,axis,pins:[...pins],experimentLedger:clone(experimentLedger.slice(-profile.experiments)),revisions:[...revisions.entries()].slice(-profile.runtimeRevisions).map(([rev,snapshot])=>[rev,clone(snapshot)])};
+  return {version:3,store:persistedStore,axis,pins:[...pins],capture:clone(captureMetadata),experimentLedger:clone(experimentLedger.slice(-profile.experiments)),revisions:[...revisions.entries()].slice(-profile.runtimeRevisions).map(([rev,snapshot])=>[rev,clone(snapshot)])};
 }
 function snapshotCanonical(){ return clone(persistencePayload(PERSISTENCE_PROFILES[0])); }
 function restoreCanonical(snapshot){
   store=createRevisionStore(fixture,snapshot.store);
   axis=['html','css','js'].includes(snapshot.axis)?snapshot.axis:'html';
   pins=new Set(Array.isArray(snapshot.pins)?snapshot.pins:[]);
+  captureMetadata=clone(snapshot.capture??null);
   experimentLedger=Array.isArray(snapshot.experimentLedger)?clone(snapshot.experimentLedger.slice(-MAX_EXPERIMENT_LEDGER)):[];
   revisions.clear();
   const maxRevision=Number(revision().slice(1));
@@ -186,6 +189,7 @@ function restoreLocal(){
       store=createRevisionStore(fixture,raw.store);
       axis=['html','css','js'].includes(raw.axis)?raw.axis:'html';
       pins=new Set(Array.isArray(raw.pins)?raw.pins:[]);
+      captureMetadata=clone(raw.capture??null);
       experimentLedger=Array.isArray(raw.experimentLedger)?raw.experimentLedger.slice(-MAX_EXPERIMENT_LEDGER):[];
       revisions.clear();
       const maxRevision=Number(revision().slice(1));
@@ -404,7 +408,7 @@ function runCase(c=value(),{signal}={}){
 
 function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},revision:revision(),at:new Date().toISOString(),...extra};rememberExperiment(entry);persistMutation(before);renderTrace();return entry; }
 async function run({expectedRevision=revision()}={}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const r=await runCase(value(),{signal});throwIfAborted(signal);record('run',r,{revision:testedRevision});renderHealth(r.status);return {...r,testedRevision}; }
-function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.value,pins:[...pins],unitCounts:{html:unitsFor('html',s.value.html).length,css:unitsFor('css',s.value.css).length,js:unitsFor('js',s.value.js).length},latest:experimentLedger.at(-1)||null,webmcp:!!document.modelContext}; }
+function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.value,capture:clone(captureMetadata),pins:[...pins],unitCounts:{html:unitsFor('html',s.value.html).length,css:unitsFor('css',s.value.css).length,js:unitsFor('js',s.value.js).length},latest:experimentLedger.at(-1)||null,webmcp:!!document.modelContext}; }
 function units({targetAxis=axis}={}){
   if(!['html','css','js'].includes(targetAxis))throw new Error('INVALID_AXIS');
   const s=store.inspect();
@@ -418,12 +422,33 @@ function loadCase({expectedRevision=revision(),case:nextCase}){
   store.assertRevision(expectedRevision);
   const before=snapshotCanonical();
   pins.clear();
+  captureMetadata=null;
   const result=store.commit(clone(nextCase),{kind:'case_load'},expectedRevision);
-  rememberRevision(result.revision,{value:clone(result.value),pins:[]});
+  rememberRevision(result.revision,{value:clone(result.value),pins:[],capture:null});
   persistMutation(before);
   render();
   renderPreview();
   return inspect();
+}
+async function importCapture({expectedRevision=revision(),artifact}={}, {signal}={}){
+  const normalized=validateCaptureArtifact(artifact);
+  validateCase(normalized.case);
+  store.assertRevision(expectedRevision);
+  throwIfAborted(signal);
+  const baseline=await runCase(normalized.case,{signal});
+  throwIfAborted(signal);
+  store.assertRevision(expectedRevision);
+  if(baseline.status!=='FAIL')throw new Error(`CAPTURE_BASELINE_NOT_FAILING:${baseline.status}`);
+  const before=snapshotCanonical();
+  pins.clear();
+  captureMetadata={format:normalized.format,version:normalized.version,capturedAt:normalized.capturedAt,provenance:clone(normalized.provenance),capturedBaseline:clone(normalized.baseline),verifiedBaseline:clone(baseline)};
+  const result=store.commit(clone(normalized.case),{kind:'capture_import',source:normalized.provenance.url},expectedRevision);
+  rememberRevision(result.revision,{value:clone(result.value),pins:[],capture:clone(captureMetadata)});
+  persistMutation(before);
+  render();
+  renderPreview();
+  renderHealth('FAIL');
+  return {status:'IMPORTED',revision:result.revision,case:clone(result.value),baseline:clone(baseline),capture:clone(captureMetadata)};
 }
 function resetCase({expectedRevision=revision()}={}){ return loadCase({expectedRevision,case:fixture}); }
 async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const source=value()[targetAxis];const unit=unitsFor(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(pins.has(pinKey(targetAxis,unitId)))throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const result=await runCase(candidate,{signal});throwIfAborted(signal);record('probe',result,{axis:targetAxis,unitId,mutated:false,revision:testedRevision});return {...result,mutated:false,testedRevision,canonicalRevision:revision()}; }
@@ -468,7 +493,7 @@ function listRevisions({limit=MAX_RUNTIME_REVISIONS}={}){
   });
   return {currentRevision,retentionLimit:MAX_RUNTIME_REVISIONS,revisions:items};
 }
-function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();renderPreview();return inspect(); }
+function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);captureMetadata=clone(snap.capture??null);const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins],capture:clone(captureMetadata)});persistMutation(before);render();renderPreview();return inspect(); }
 function exportCase(){const c=value(),safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>${String(c.js).replace(/<\/script/gi,'<\\/script')}<\/script></body></html>`;}
 function validateAxes(axes){if(!Array.isArray(axes)||axes.length<1||axes.length>3||axes.some(targetAxis=>!['html','css','js'].includes(targetAxis))||new Set(axes).size!==axes.length)throw new Error('INVALID_AXES');return axes;}
 async function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){
@@ -533,10 +558,14 @@ const ACTION_STEP_SCHEMA={type:'object',additionalProperties:false,properties:{k
 const ACTION_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}},required:['kind']};
 const ORACLE_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ORACLE_KINDS},selector:{type:'string'},property:{type:'string'},equals:{},action:ACTION_SCHEMA,delayMs:{type:'number',minimum:0,maximum:2000}},required:['kind','action']};
 const CASE_SCHEMA={type:'object',additionalProperties:false,properties:{html:{type:'string'},css:{type:'string'},js:{type:'string'},oracle:ORACLE_SCHEMA},required:['html','css','js','oracle']};
+const CAPTURE_PROVENANCE_SCHEMA={type:'object',additionalProperties:false,properties:{adapter:{type:'string',enum:['faultline-playwright']},adapterVersion:{type:'integer',enum:[1]},url:{type:'string'},title:{type:'string'},userAgent:{type:'string'},viewport:{type:'object',additionalProperties:false,properties:{width:{type:'integer',minimum:1},height:{type:'integer',minimum:1}},required:['width','height']},browser:{type:'string'}},required:['adapter','adapterVersion','url','title','userAgent','viewport','browser']};
+const CAPTURE_BASELINE_SCHEMA={type:'object',additionalProperties:false,properties:{captured:{type:'boolean',enum:[true]},status:{type:'string',enum:['FAIL']},evidence:{type:'object'},note:{type:'string'}},required:['captured','status','evidence','note']};
+const CAPTURE_SCHEMA={type:'object',additionalProperties:false,properties:{format:{type:'string',enum:['faultline.capture']},version:{type:'integer',enum:[1]},capturedAt:{type:'string'},case:CASE_SCHEMA,provenance:CAPTURE_PROVENANCE_SCHEMA,baseline:CAPTURE_BASELINE_SCHEMA},required:['format','version','capturedAt','case','provenance','baseline']};
 const TOOL_DEFS=[
  ['faultline_inspect','Inspect the canonical failure case, revision, pins and semantic-unit counts.',{},async()=>inspect(),true,true],
  ['faultline_units','List actionable semantic units and pin state for one canonical source axis.',{targetAxis:{type:'string',enum:['html','css','js']}},async input=>units(input),true,true,['targetAxis']],
  ['faultline_load_case','Replace the complete canonical HTML, CSS, JavaScript and oracle in one optimistic revision.',{...REVISION_PROPERTY,case:CASE_SCHEMA},async input=>loadCase(input),false,true,['expectedRevision','case']],
+ ['faultline_import_capture','Validate a versioned Playwright capture, independently reproduce its FAIL result inside the deterministic sandbox, then atomically commit source plus provenance.',{...REVISION_PROPERTY,artifact:CAPTURE_SCHEMA},async(input,options)=>importCapture(input,options),false,true,['expectedRevision','artifact']],
  ['faultline_reset_case','Reset to the built-in fixture as one guarded canonical revision while preserving recoverable history.',{...REVISION_PROPERTY},async input=>resetCase(input),false,false,['expectedRevision']],
  ['faultline_run','Execute the locked deterministic failure oracle against the inspected canonical revision. Native WebMCP options.signal cancellation is supported; requestId is an optional compatibility handle for faultline_cancel_active.',{...REVISION_PROPERTY,...REQUEST_PROPERTY},async(input,options)=>run(input,options),false,true,['expectedRevision']],
  ['faultline_cancel_active','Cancel one active long-running FAULTLINE WebMCP operation by its caller-owned requestId without affecting unrelated work.',{...REQUEST_PROPERTY},async input=>cancelActiveWebMCP(input),false,false,['requestId']],
@@ -548,12 +577,12 @@ const TOOL_DEFS=[
  ['faultline_history','Read recent deterministic experiment evidence.',{limit:{type:'integer',minimum:1,maximum:200}},async input=>history(input),true,true],
  ['faultline_revisions','List bounded recoverable canonical revisions with mutation metadata for guarded restore.',{limit:{type:'integer',minimum:1,maximum:16}},async input=>listRevisions(input),true,false],
  ['faultline_restore','Restore a prior canonical revision only if the inspected current revision is still current.',{...REVISION_PROPERTY,targetRevision:{type:'string'}},async input=>restore(input),false,true,['expectedRevision','targetRevision']],
- ['faultline_export','Export the current case as a standalone HTML reproducer.',{},async()=>({html:exportCase()}),true,true],
+ ['faultline_export','Export the current case as a standalone HTML reproducer with capture provenance when available.',{},async()=>({html:exportCase(),capture:clone(captureMetadata)}),true,true],
  ['faultline_autopilot','Run baseline verification and reduce the requested source axes sequentially from one inspected revision. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,axes:{type:'array',items:{type:'string',enum:['html','css','js']},minItems:1,maxItems:3,uniqueItems:true},maxTrialsPerAxis:{type:'integer',minimum:1,maximum:200}},async(input,options)=>autopilot(input,options),false,false,['expectedRevision']]
 ];
 function registerWebMCP(){const mc=document.modelContext;if(!mc?.registerTool){$('webmcp').textContent='WebMCP unavailable';return;}const controllers=[];Promise.all(TOOL_DEFS.map(async([name,description,properties,execute,readOnly,untrustedContent,required=[]])=>{const controller=new AbortController();controllers.push(controller);await mc.registerTool({name,title:name.replace('faultline_','FAULTLINE · '),description,inputSchema:{type:'object',properties,required,additionalProperties:false},execute:async(input,options)=>await (CANCELLABLE_WEBMCP_TOOLS.has(name)?executeWebMCPOperation(name,execute,input||{},options||{}):execute(input||{},options||{})),annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}},{signal:controller.signal});})).then(()=>{$('webmcp').textContent=`WebMCP ready · ${TOOL_DEFS.length} tools`;$('webmcp').dataset.state='ready';}).catch(e=>{$('webmcp').textContent='WebMCP registration error';$('webmcp').title=String(e?.message||e);});window.addEventListener('pagehide',()=>{controllers.forEach(c=>c.abort());abortAllWebMCP();},{once:true});}
 
-window.faultline={inspect,units,loadCase,resetCase,run,defineOracle,applySource,probe,reduce,pin,history,revisions:listRevisions,restore,exportCase,autopilot,manifest:()=>TOOL_DEFS.map(([name,description,properties,,readOnly,untrustedContent,required=[]])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},readOnly,annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}}))};
+window.faultline={inspect,units,loadCase,importCapture,resetCase,run,defineOracle,applySource,probe,reduce,pin,history,revisions:listRevisions,restore,exportCase,autopilot,manifest:()=>TOOL_DEFS.map(([name,description,properties,,readOnly,untrustedContent,required=[]])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},readOnly,annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}}))};
 
 document.querySelectorAll('[data-axis]').forEach(b=>b.onclick=()=>{axis=b.dataset.axis;render();});
 $('apply').onclick=()=>applySource({source:$('source').value});

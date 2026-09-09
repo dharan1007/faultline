@@ -20,18 +20,18 @@ try{
   const errors=[];page.on('pageerror',e=>errors.push(String(e)));
   const response=await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
   assert.equal(response.status(),200);
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===16);
-  assert.deepEqual(await page.evaluate(()=>Object.keys(window.faultline).sort()),['applySource','autopilot','defineOracle','exportCase','history','inspect','loadCase','manifest','pin','probe','reduce','resetCase','restore','revisions','run','units'].sort());
-  assert.equal(await page.locator('#webmcp').textContent(),'WebMCP ready · 16 tools');
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===17);
+  assert.deepEqual(await page.evaluate(()=>Object.keys(window.faultline).sort()),['applySource','autopilot','defineOracle','exportCase','history','importCapture','inspect','loadCase','manifest','pin','probe','reduce','resetCase','restore','revisions','run','units'].sort());
+  assert.equal(await page.locator('#webmcp').textContent(),'WebMCP ready · 17 tools');
   const connectionText=await page.locator('.connection').textContent();
-  assert.match(connectionText,/16 WebMCP tools/i);
+  assert.match(connectionText,/17 WebMCP tools/i);
   assert.match(connectionText,/faultline_load_case/);
   assert.match(connectionText,/faultline_apply_source/);
   assert.match(connectionText,/faultline_units/);
   assert.match(connectionText,/faultline_revisions/);
   assert.match(connectionText,/expectedRevision/);
   const toolContract=await page.evaluate(()=>window.__webmcpTools.map(t=>({name:t.name,execute:typeof t.execute,handler:'handler' in t})));
-  assert.equal(toolContract.length,16);assert.ok(toolContract.every(t=>t.execute==='function'&&!t.handler));
+  assert.equal(toolContract.length,17);assert.ok(toolContract.every(t=>t.execute==='function'&&!t.handler));
 
   const guardedToolNames=['faultline_load_case','faultline_reset_case','faultline_run','faultline_define_oracle','faultline_apply_source','faultline_probe','faultline_reduce','faultline_pin','faultline_restore','faultline_autopilot'];
   const guardedContracts=await page.evaluate(names=>Object.fromEntries(names.map(name=>{const t=window.__webmcpTools.find(tool=>tool.name===name);return [name,{properties:Object.keys(t?.inputSchema?.properties||{}).sort(),required:[...(t?.inputSchema?.required||[])].sort()}]})),guardedToolNames);
@@ -76,7 +76,7 @@ try{
   const after=await page.evaluate(()=>window.faultline.inspect());assert.ok(after.case.html.includes('modal'));assert.ok(!after.case.html.includes('Irrelevant debug noise'));assert.ok(after.revision!==before.revision);
 
   const persistedRevision=after.revision;const persistedHtml=after.case.html;
-  await page.reload({waitUntil:'networkidle'});await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===16);
+  await page.reload({waitUntil:'networkidle'});await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===17);
   const reloaded=await page.evaluate(()=>window.faultline.inspect());assert.equal(reloaded.revision,persistedRevision);assert.equal(reloaded.case.html,persistedHtml);assert.ok((await page.evaluate(()=>window.faultline.history())).length>=3);
 
   const edited=await page.evaluate(()=>window.faultline.applySource({targetAxis:'html',source:window.faultline.inspect().case.html+'<p id="reload-noise">reload noise</p>'}));assert.notEqual(edited.revision,persistedRevision);assert.ok(edited.case.html.includes('reload-noise'));

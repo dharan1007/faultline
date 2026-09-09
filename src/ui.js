@@ -11,7 +11,7 @@ const integrationBadge=document.querySelector('#integration-workspace>summary .t
 const integrationFlow=document.querySelector('#integration-workspace .integration-column:nth-child(2) pre');
 const browserFlow=document.querySelector('#integration-workspace .integration-column:nth-child(1) pre');
 const toolCount=window.faultline.manifest().length;
-const toolCountLabel=({13:'thirteen',14:'fourteen',15:'fifteen',16:'sixteen'})[toolCount]||String(toolCount);
+const toolCountLabel=({13:'thirteen',14:'fourteen',15:'fifteen',16:'sixteen',17:'seventeen'})[toolCount]||String(toolCount);
 
 if(integrationBadge)integrationBadge.textContent=`${toolCount} WebMCP tools`;
 if(integrationNote){
@@ -158,11 +158,11 @@ function installCaseImport(){
       try{artifact=JSON.parse(await file.text());}
       catch{throw new Error('FAULTLINE_CAPTURE_INVALID:JSON');}
       const current=window.faultline.inspect();
-      const imported=window.faultlineCapture.import({artifact,expectedRevision:current.revision});
+      const imported=await window.faultlineCapture.import({artifact,expectedRevision:current.revision});
       const normalized=window.faultlineCapture.validate(artifact);
       editor.value=JSON.stringify(window.faultline.inspect().case,null,2);
       captureProvenance.textContent=provenanceText(normalized);
-      markReady(`Playwright capture imported at ${imported.result.revision}; baseline must be re-run before reduction.`);
+      markReady(`Playwright capture imported at ${imported.revision}; FAIL independently re-verified before commit.`);
     }catch(error){
       reportActionError(error);
     }

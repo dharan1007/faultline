@@ -43,7 +43,8 @@ try{
   assert.equal(schema.properties.action.properties.steps.type,'array','WebMCP schema must advertise structured sequence steps');
   assert.equal(schema.properties.action.properties.steps.minItems,1,'WebMCP sequence schema must reject empty sequences');
   assert.equal(schema.properties.action.properties.steps.maxItems,8,'WebMCP sequence schema must bound interaction sequences');
-  assert.deepEqual(schema.properties.action.properties.steps.items.properties.kind.enum,['click','set_value'],'sequence steps must only advertise deterministic atomic actions');
+  assert.deepEqual(schema.properties.action.properties.steps.items.properties.kind.enum,['click','set_value','wait'],'sequence steps must advertise only deterministic atomic actions and bounded waits');
+  assert.equal(schema.properties.action.properties.steps.items.properties.durationMs.maximum,2000,'wait steps must expose the deterministic per-step ceiling');
   assert.equal(schema.properties.action.additionalProperties,false,'oracle action schema must reject unknown fields');
 
   console.log('Oracle contract validation PASS: invalid oracle definitions are rejected atomically and WebMCP advertises the bounded action-sequence schema.');

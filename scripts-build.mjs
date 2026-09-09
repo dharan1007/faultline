@@ -5,7 +5,9 @@ const productionFiles = [
   'src/runtime.js',
   'src/ui.js',
   'src/reducer-engine.js',
-  'src/sandbox-policy.js'
+  'src/sandbox-policy.js',
+  'src/capture-contract.js',
+  'src/capture-integration.js'
 ];
 
 for (const file of productionFiles) {

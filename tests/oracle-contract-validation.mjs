@@ -38,16 +38,18 @@ try{
   const schema=await page.evaluate(()=>window.__webmcpTools.find(tool=>tool.name==='faultline_define_oracle').inputSchema.properties.oracle);
   assert.deepEqual(schema.properties.kind.enum,['dom_property','computed_style','dom_exists','runtime_error'],'WebMCP schema must enumerate supported oracle kinds');
   assert.equal(schema.additionalProperties,false,'oracle schema must reject unknown top-level fields');
-  assert.deepEqual(schema.properties.action.properties.kind.enum,['none','click','set_value','sequence'],'WebMCP schema must enumerate supported action kinds');
+  assert.deepEqual(schema.properties.action.properties.kind.enum,['none','click','set_value','set_checked','sequence'],'WebMCP schema must enumerate supported action kinds');
   assert.equal(schema.properties.action.properties.value.type,'string','WebMCP schema must advertise set_value action payloads');
+  assert.equal(schema.properties.action.properties.checked.type,'boolean','WebMCP schema must advertise set_checked action payloads');
   assert.equal(schema.properties.action.properties.steps.type,'array','WebMCP schema must advertise structured sequence steps');
   assert.equal(schema.properties.action.properties.steps.minItems,1,'WebMCP sequence schema must reject empty sequences');
   assert.equal(schema.properties.action.properties.steps.maxItems,8,'WebMCP sequence schema must bound interaction sequences');
-  assert.deepEqual(schema.properties.action.properties.steps.items.properties.kind.enum,['click','set_value','wait'],'sequence steps must advertise only deterministic atomic actions and bounded waits');
+  assert.deepEqual(schema.properties.action.properties.steps.items.properties.kind.enum,['click','set_value','set_checked','wait'],'sequence steps must advertise only deterministic atomic actions and bounded waits');
+  assert.equal(schema.properties.action.properties.steps.items.properties.checked.type,'boolean','sequence steps must advertise checked-state payloads');
   assert.equal(schema.properties.action.properties.steps.items.properties.durationMs.maximum,2000,'wait steps must expose the deterministic per-step ceiling');
   assert.equal(schema.properties.action.additionalProperties,false,'oracle action schema must reject unknown fields');
 
-  console.log('Oracle contract validation PASS: invalid oracle definitions are rejected atomically and WebMCP advertises the bounded action-sequence schema.');
+  console.log('Oracle contract validation PASS: invalid oracle definitions are rejected atomically and WebMCP advertises value, checked-state, and bounded action-sequence contracts.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

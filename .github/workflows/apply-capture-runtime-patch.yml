@@ -1,0 +1,35 @@
+name: Apply capture runtime patch
+
+on:
+  push:
+    branches: [feature/playwright-capture-ingestion-20260909]
+    paths:
+      - automation/apply-capture-runtime.py
+      - .github/workflows/apply-capture-runtime-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'chore: apply capture runtime patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python automation/apply-capture-runtime.py
+      - run: node --check src/runtime.js
+      - run: node --test tests/capture-contract.test.js
+      - name: Commit exact asserted patch
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/runtime.js
+          git diff --cached --quiet && { echo 'runtime patch produced no diff'; exit 1; }
+          git commit -m 'feat: import captured failures transactionally'
+          git push origin HEAD:feature/playwright-capture-ingestion-20260909

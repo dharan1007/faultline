@@ -16,8 +16,8 @@ const PERSISTENCE_PROFILES=[
   {storeSnapshots:1,storeLedger:1,runtimeRevisions:1,experiments:1}
 ];
 const ORACLE_KINDS=['dom_property','computed_style','dom_exists','runtime_error'];
-const ACTION_KINDS=['none','click','set_value','sequence'];
-const ACTION_STEP_KINDS=['click','set_value','wait'];
+const ACTION_KINDS=['none','click','set_value','set_checked','sequence'];
+const ACTION_STEP_KINDS=['click','set_value','set_checked','wait'];
 const MAX_SEQUENCE_WAIT_MS=2000;
 const HOST_TIMEOUT_MS=5000;
 const REQUEST_ID_PATTERN=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -101,13 +101,13 @@ function abortAllWebMCP(){ for(const operation of activeWebMCPOperations.values(
 function validateAction(action,{allowSequence=true,allowWait=false}={}){
   if(!action||typeof action!=='object'||Array.isArray(action))throw new Error('INVALID_ORACLE');
   const supported=allowWait?[...ACTION_KINDS,'wait']:ACTION_KINDS;
-  if(!supported.includes(action.kind)||Object.keys(action).some(key=>!['kind','selector','value','steps','durationMs'].includes(key)))throw new Error('INVALID_ORACLE');
+  if(!supported.includes(action.kind)||Object.keys(action).some(key=>!['kind','selector','value','checked','steps','durationMs'].includes(key)))throw new Error('INVALID_ORACLE');
   if(action.kind==='wait'){
     if(!allowWait||Object.keys(action).some(key=>!['kind','durationMs'].includes(key))||!Number.isFinite(action.durationMs)||action.durationMs<0||action.durationMs>MAX_SEQUENCE_WAIT_MS)throw new Error('INVALID_ORACLE');
     return action;
   }
   if(action.kind==='sequence'){
-    if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||Object.hasOwn(action,'durationMs')||!Array.isArray(action.steps)||action.steps.length<1||action.steps.length>8)throw new Error('INVALID_ORACLE');
+    if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||Object.hasOwn(action,'checked')||Object.hasOwn(action,'durationMs')||!Array.isArray(action.steps)||action.steps.length<1||action.steps.length>8)throw new Error('INVALID_ORACLE');
     let totalWait=0;
     for(const step of action.steps){
       if(!ACTION_STEP_KINDS.includes(step?.kind))throw new Error('INVALID_ORACLE');
@@ -118,8 +118,10 @@ function validateAction(action,{allowSequence=true,allowWait=false}={}){
     return action;
   }
   if(Object.hasOwn(action,'steps')||Object.hasOwn(action,'durationMs'))throw new Error('INVALID_ORACLE');
+  if(action.kind!=='set_checked'&&Object.hasOwn(action,'checked'))throw new Error('INVALID_ORACLE');
   if(action.kind==='click'&&(typeof action.selector!=='string'||!action.selector.trim()))throw new Error('INVALID_ORACLE');
   if(action.kind==='set_value'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.value!=='string'))throw new Error('INVALID_ORACLE');
+  if(action.kind==='set_checked'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.checked!=='boolean'||Object.hasOwn(action,'value')))throw new Error('INVALID_ORACLE');
   return action;
 }
 function validateOracle(oracle){
@@ -230,6 +232,10 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  let candidateExecutionStarted=false;
  const nativeFormSubmit=HTMLFormElement.prototype.submit;
  const nativeFormRequestSubmit=HTMLFormElement.prototype.requestSubmit;
+ const NativeInputElement=HTMLInputElement;
+ const nativeInputCheckedSetter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked')?.set;
+ const nativeDispatchEvent=EventTarget.prototype.dispatchEvent;
+ const NativeEvent=Event;
  const captureRuntimeError=value=>runtimeErrors.push(String(value));
  const reportRuntimePolicyViolation=event=>{
   if(runtimePolicyViolation)return;
@@ -308,6 +314,15 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
    valueDescriptor.set.call(target,String(action.value));
    target.dispatchEvent(new Event('input',{bubbles:true,composed:true}));
    target.dispatchEvent(new Event('change',{bubbles:true}));
+   return;
+  }
+  if(action?.kind==='set_checked'){
+   const target=querySelector(action.selector);
+   if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');
+   if(!(target instanceof NativeInputElement)||!['checkbox','radio'].includes(String(target.type).toLowerCase())||!nativeInputCheckedSetter)throw new Error('ACTION_TARGET_NOT_CHECKABLE');
+   nativeInputCheckedSetter.call(target,Boolean(action.checked));
+   nativeDispatchEvent.call(target,new NativeEvent('input',{bubbles:true,composed:true}));
+   nativeDispatchEvent.call(target,new NativeEvent('change',{bubbles:true}));
   }
  };
  const performAction=async action=>{
@@ -508,13 +523,13 @@ function handlePreviewPolicyMessage(event){
 }
 addEventListener('message',handlePreviewNavigationMessage);
 addEventListener('message',handlePreviewPolicyMessage);
-function syncActionControls(){const kind=$('action-kind').value;$('action-selector').disabled=kind==='none'||kind==='sequence';$('action-value').disabled=kind!=='set_value';$('action-sequence').disabled=kind!=='sequence';}
-function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??'';$('action-sequence').value=s.case.oracle.action?.kind==='sequence'?JSON.stringify(s.case.oracle.action.steps,null,2):'';syncActionControls();renderUnits();renderTrace();persistBestEffort();}
+function syncActionControls(){const kind=$('action-kind').value;$('action-selector').disabled=kind==='none'||kind==='sequence';$('action-value').disabled=kind!=='set_value';$('action-checked').disabled=kind!=='set_checked';$('action-sequence').disabled=kind!=='sequence';}
+function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??'';$('action-checked').value=String(s.case.oracle.action?.checked??true);$('action-sequence').value=s.case.oracle.action?.kind==='sequence'?JSON.stringify(s.case.oracle.action.steps,null,2):'';syncActionControls();renderUnits();renderTrace();persistBestEffort();}
 
 const REVISION_PROPERTY={expectedRevision:{type:'string',pattern:'^r[1-9]\\d*$'}};
 const REQUEST_PROPERTY={requestId:{type:'string',pattern:'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}};
-const ACTION_STEP_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_STEP_KINDS},selector:{type:'string'},value:{type:'string'},durationMs:{type:'number',minimum:0,maximum:MAX_SEQUENCE_WAIT_MS}},required:['kind']};
-const ACTION_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}},required:['kind']};
+const ACTION_STEP_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_STEP_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},durationMs:{type:'number',minimum:0,maximum:MAX_SEQUENCE_WAIT_MS}},required:['kind']};
+const ACTION_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}},required:['kind']};
 const ORACLE_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ORACLE_KINDS},selector:{type:'string'},property:{type:'string'},equals:{},action:ACTION_SCHEMA,delayMs:{type:'number',minimum:0,maximum:2000}},required:['kind','action']};
 const CASE_SCHEMA={type:'object',additionalProperties:false,properties:{html:{type:'string'},css:{type:'string'},js:{type:'string'},oracle:ORACLE_SCHEMA},required:['html','css','js','oracle']};
 const TOOL_DEFS=[
@@ -547,7 +562,7 @@ $('pin').onclick=()=>{if(!selectedUnitId)return;const key=pinKey(axis,selectedUn
 $('reduce').onclick=()=>reduce({targetAxis:axis}).then(r=>renderHealth(r.status)).catch(e=>{renderHealth('ERROR');$('summary').textContent=e.message;});
 $('autopilot').onclick=()=>autopilot().then(()=>renderHealth('COMPLETE')).catch(e=>{renderHealth('ERROR');$('summary').textContent=e.message;});
 $('action-kind').onchange=syncActionControls;
-$('lock').onclick=()=>{const actionKind=$('action-kind').value;let action;if(actionKind==='sequence'){try{action={kind:'sequence',steps:JSON.parse($('action-sequence').value)}}catch{renderHealth('ERROR');$('summary').textContent='INVALID_ACTION_SEQUENCE_JSON';return;}}else{action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;}try{defineOracle({oracle:{kind:$('oracle-kind').value,selector:$('oracle-selector').value,property:$('oracle-property').value,equals:normalizeExpected($('oracle-equals').value),action,delayMs:0}})}catch(e){renderHealth('ERROR');$('summary').textContent=String(e?.message||e);}};
+$('lock').onclick=()=>{const actionKind=$('action-kind').value;let action;if(actionKind==='sequence'){try{action={kind:'sequence',steps:JSON.parse($('action-sequence').value)}}catch{renderHealth('ERROR');$('summary').textContent='INVALID_ACTION_SEQUENCE_JSON';return;}}else{action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;if(actionKind==='set_checked')action.checked=$('action-checked').value==='true';}try{defineOracle({oracle:{kind:$('oracle-kind').value,selector:$('oracle-selector').value,property:$('oracle-property').value,equals:normalizeExpected($('oracle-equals').value),action,delayMs:0}})}catch(e){renderHealth('ERROR');$('summary').textContent=String(e?.message||e);}};
 $('export').onclick=()=>{const a=document.createElement('a'),blob=new Blob([exportCase()],{type:'text/html'});a.href=URL.createObjectURL(blob);a.download='faultline-reproducer.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $('reset').onclick=()=>resetCase({expectedRevision:revision()});
 restoreLocal();rememberRevision(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();renderPreview();installPreviewRunner();registerWebMCP();

@@ -1,3 +1,4 @@
+// Applies the approved capture UI slice only when every source precondition matches.
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const path='src/ui.js';

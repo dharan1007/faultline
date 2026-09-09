@@ -27,6 +27,18 @@ try {
   await page.goto(`http://127.0.0.1:${appPort}/`,{waitUntil:'networkidle'});
   await page.waitForFunction(()=>window.faultline);
 
+  const forgedState=await page.evaluate(()=>{
+    const current=window.faultline.inspect();
+    return window.faultline.loadCase({expectedRevision:current.revision,case:{
+      html:'<main id="target">synthetic policy fixture</main>',
+      css:'',
+      js:`dispatchEvent(new SecurityPolicyViolationEvent('securitypolicyviolation',{effectiveDirective:'img-src',violatedDirective:'img-src',blockedURI:'https://forged.invalid/image.png'}));`,
+      oracle:{kind:'dom_exists',selector:'#target',equals:true,action:{kind:'none'},delayMs:40}
+    }});
+  });
+  const forgedResult=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:forgedState.revision});
+  assert.equal(forgedResult.status,'FAIL','candidate-created synthetic CSP events must not forge deterministic unsafe-network evidence');
+
   const state=await page.evaluate(({sinkPort})=>{
     const current=window.faultline.inspect();
     return window.faultline.loadCase({expectedRevision:current.revision,case:{
@@ -64,7 +76,7 @@ try {
   const embeddedResult=await page.evaluate(({revision})=>window.faultline.run({expectedRevision:revision}),{revision:embeddedState.revision});
   assert.equal(embeddedResult.status,'FAIL','CSP-permitted runtime data resources must remain executable with ordinary oracle evidence');
 
-  console.log('Runtime CSP resource containment PASS: dynamically-created blocked dependencies become deterministic unsafe-network evidence while data resources remain runnable.');
+  console.log('Runtime CSP resource containment PASS: trusted browser CSP violations become deterministic unsafe-network evidence, synthetic events cannot forge evidence, and data resources remain runnable.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

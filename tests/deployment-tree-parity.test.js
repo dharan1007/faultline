@@ -11,7 +11,7 @@ const productionFiles = [
   'src/reducer-engine.js',
   'src/sandbox-policy.js',
   'src/capture-contract.js',
-  'vendor/acorn.mjs'
+  'vendor/acorn.js'
 ];
 
 test('production deployment parity verifies every shipped application file before and after promotion', () => {

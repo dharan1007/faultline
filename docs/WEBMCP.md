@@ -21,6 +21,33 @@ FAULTLINE registers 16 causal tools:
 
 The interface exposes causal operations rather than unrestricted browser scripting. UI actions, the `window.faultline` browser API, and WebMCP tools share the same canonical revision-guarded engine. Long-running WebMCP operations support the native execution `AbortSignal`; `faultline_cancel_active` is the compatibility surface for callers that supply a stable `requestId`.
 
+## Playwright capture ingestion
+
+A real Playwright test can package its reducible source/oracle case and observed browser provenance into a versioned `faultline.capture` artifact using `playwright/faultline-capture.mjs` or the `npm run capture -- ...` CLI. The envelope is validated by `src/capture-contract.js`; browser workbench imports use `window.faultlineCapture.import({artifact, expectedRevision})`, which validates first and delegates the only state mutation to canonical `window.faultline.loadCase`.
+
+Agents should not create a parallel mutation path. The WebMCP flow is:
+
+```text
+captureFaultlineCase(...) or npm run capture
+  -> faultline.capture v1 artifact
+validateCaptureArtifact(artifact)
+  -> exact version/envelope/provenance/case-shape validation
+faultline_inspect()
+  -> current expectedRevision
+faultline_load_case({ expectedRevision, case: artifact.case })
+  -> one canonical guarded revision
+faultline_run()
+  -> re-verify baseline inside FAULTLINE's sandbox
+faultline_units / faultline_probe / faultline_reduce / faultline_autopilot
+  -> causal reduction workflow
+faultline_export()
+  -> standalone reproducer
+```
+
+Capture provenance is informational and never grants additional browser capabilities. The artifact records capture time, final page URL, title, user agent, viewport and browser name, but FAULTLINE does not treat those fields as proof that the sandbox baseline still fails. The baseline must be run again after import.
+
+Invalid capture JSON, unknown capture versions, extra envelope fields, malformed provenance or malformed source axes must fail before `loadCase` and therefore must not advance canonical revision state. Capture v1 intentionally does not reconstruct arbitrary module/framework applications from network responses and does not introduce a hosted URL-fetching/browser-control service.
+
 ## Deterministic oracle measurements
 
 FAULTLINE supports DOM property, DOM attribute, computed-style, DOM-existence, and runtime-error measurements. `dom_attribute` reads the named attribute with `Element.getAttribute()` after the configured action and delay. Its expected value must be a string or `null`: strings preserve exact serialized attribute values such as `aria-expanded="true"` or `data-state="open"`, while `null` distinguishes an absent attribute from an attribute whose value is the empty string. Attribute names are passed directly to `getAttribute()` rather than mapped to JavaScript properties, so ARIA, `data-*`, and other serialized state markers retain browser-native attribute semantics.

@@ -4,12 +4,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const workflow = fs.readFileSync('.github/workflows/deploy-production.yml', 'utf8');
+const buildScript = fs.readFileSync('scripts-build.mjs', 'utf8');
 const productionFiles = [
   'index.html',
   'src/runtime.js',
   'src/ui.js',
   'src/reducer-engine.js',
-  'src/sandbox-policy.js'
+  'src/sandbox-policy.js',
+  'src/capture-contract.js'
 ];
 
 test('production deployment parity verifies every shipped application file before and after promotion', () => {
@@ -23,6 +25,12 @@ test('production deployment parity verifies every shipped application file befor
 
   assert.match(workflow, /Smoke-test staged deployment against verified source/);
   assert.match(workflow, /Verify public production alias serves exact tree/);
+});
+
+test('production build stages every runtime module imported by the browser', () => {
+  for (const file of productionFiles.filter(file=>file.startsWith('src/'))) {
+    assert.ok(buildScript.includes(file),`${file} must be copied into the static production tree`);
+  }
 });
 
 test('staged parity authenticates Vercel curl through VERCEL_TOKEN environment only', () => {

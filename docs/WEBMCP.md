@@ -21,6 +21,10 @@ FAULTLINE registers 16 causal tools:
 
 The interface exposes causal operations rather than unrestricted browser scripting. UI actions, the `window.faultline` browser API, and WebMCP tools share the same canonical revision-guarded engine. Long-running WebMCP operations support the native execution `AbortSignal`; `faultline_cancel_active` is the compatibility surface for callers that supply a stable `requestId`.
 
+## Deterministic oracle measurements
+
+FAULTLINE supports DOM property, DOM attribute, computed-style, DOM-existence, and runtime-error measurements. `dom_attribute` reads the named attribute with `Element.getAttribute()` after the configured action and delay. Its expected value must be a string or `null`: strings preserve exact serialized attribute values such as `aria-expanded="true"` or `data-state="open"`, while `null` distinguishes an absent attribute from an attribute whose value is the empty string. This makes ARIA and framework state-marker regressions directly reproducible without mapping attribute names onto unrelated JavaScript properties.
+
 ## Deterministic pre-measurement actions
 
 An oracle may perform one bounded action contract before measurement:

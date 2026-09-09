@@ -15,7 +15,7 @@ const PERSISTENCE_PROFILES=[
   {storeSnapshots:2,storeLedger:4,runtimeRevisions:1,experiments:10},
   {storeSnapshots:1,storeLedger:1,runtimeRevisions:1,experiments:1}
 ];
-const ORACLE_KINDS=['dom_property','computed_style','dom_exists','runtime_error'];
+const ORACLE_KINDS=['dom_property','dom_attribute','computed_style','dom_exists','runtime_error'];
 const ACTION_KINDS=['none','click','set_value','set_checked','sequence'];
 const ACTION_STEP_KINDS=['click','set_value','set_checked','wait'];
 const MAX_SEQUENCE_WAIT_MS=2000;
@@ -130,7 +130,8 @@ function validateOracle(oracle){
   if(Object.keys(oracle).some(key=>!allowed.has(key))||!ORACLE_KINDS.includes(oracle.kind))throw new Error('INVALID_ORACLE');
   validateAction(oracle.action);
   if(oracle.kind!=='runtime_error'&&(typeof oracle.selector!=='string'||!oracle.selector.trim()))throw new Error('INVALID_ORACLE');
-  if(['dom_property','computed_style'].includes(oracle.kind)&&(typeof oracle.property!=='string'||!oracle.property.trim()))throw new Error('INVALID_ORACLE');
+  if(['dom_property','dom_attribute','computed_style'].includes(oracle.kind)&&(typeof oracle.property!=='string'||!oracle.property.trim()))throw new Error('INVALID_ORACLE');
+  if(oracle.kind==='dom_attribute'&&!(typeof oracle.equals==='string'||oracle.equals===null))throw new Error('INVALID_ORACLE');
   if(oracle.delayMs!==undefined&&(!Number.isFinite(oracle.delayMs)||oracle.delayMs<0||oracle.delayMs>2000))throw new Error('INVALID_ORACLE');
   return oracle;
 }
@@ -342,7 +343,7 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
    if(blockedRuntimePolicy(sendResult)||blockedNavigation(sendResult))return;
    let actual;
    if(o.kind==='runtime_error'){const expectedRuntime=o.equals!==undefined?String(o.equals):undefined;actual=expectedRuntime===undefined?(runtimeErrors.at(-1)??null):(runtimeErrors.find(message=>same(message,expectedRuntime))??runtimeErrors.at(-1)??null)}
-   else {const el=querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='computed_style')actual=el?readComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
+   else {const el=querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='dom_attribute')actual=el?el.getAttribute(o.property):undefined;else if(o.kind==='computed_style')actual=el?readComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
    const expected=o.kind==='computed_style'?String(o.equals):o.kind==='runtime_error'&&o.equals!==undefined?String(o.equals):o.equals;
    const fail=o.kind==='runtime_error'?(o.equals===undefined?Boolean(actual):same(actual,expected)):same(actual,expected);
    sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected,kind:o.kind,selector:o.selector,property:o.property}})
@@ -562,7 +563,7 @@ $('pin').onclick=()=>{if(!selectedUnitId)return;const key=pinKey(axis,selectedUn
 $('reduce').onclick=()=>reduce({targetAxis:axis}).then(r=>renderHealth(r.status)).catch(e=>{renderHealth('ERROR');$('summary').textContent=e.message;});
 $('autopilot').onclick=()=>autopilot().then(()=>renderHealth('COMPLETE')).catch(e=>{renderHealth('ERROR');$('summary').textContent=e.message;});
 $('action-kind').onchange=syncActionControls;
-$('lock').onclick=()=>{const actionKind=$('action-kind').value;let action;if(actionKind==='sequence'){try{action={kind:'sequence',steps:JSON.parse($('action-sequence').value)}}catch{renderHealth('ERROR');$('summary').textContent='INVALID_ACTION_SEQUENCE_JSON';return;}}else{action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;if(actionKind==='set_checked')action.checked=$('action-checked').value==='true';}try{defineOracle({oracle:{kind:$('oracle-kind').value,selector:$('oracle-selector').value,property:$('oracle-property').value,equals:normalizeExpected($('oracle-equals').value),action,delayMs:0}})}catch(e){renderHealth('ERROR');$('summary').textContent=String(e?.message||e);}};
+$('lock').onclick=()=>{const actionKind=$('action-kind').value;let action;if(actionKind==='sequence'){try{action={kind:'sequence',steps:JSON.parse($('action-sequence').value)}}catch{renderHealth('ERROR');$('summary').textContent='INVALID_ACTION_SEQUENCE_JSON';return;}}else{action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;if(actionKind==='set_checked')action.checked=$('action-checked').value==='true';}const oracleKind=$('oracle-kind').value,rawEquals=$('oracle-equals').value,equals=oracleKind==='dom_attribute'?(rawEquals==='null'?null:rawEquals):normalizeExpected(rawEquals);try{defineOracle({oracle:{kind:oracleKind,selector:$('oracle-selector').value,property:$('oracle-property').value,equals,action,delayMs:0}})}catch(e){renderHealth('ERROR');$('summary').textContent=String(e?.message||e);}};
 $('export').onclick=()=>{const a=document.createElement('a'),blob=new Blob([exportCase()],{type:'text/html'});a.href=URL.createObjectURL(blob);a.download='faultline-reproducer.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $('reset').onclick=()=>resetCase({expectedRevision:revision()});
 restoreLocal();rememberRevision(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();renderPreview();installPreviewRunner();registerWebMCP();

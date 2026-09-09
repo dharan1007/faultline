@@ -18,17 +18,19 @@ try{
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.click('#boom');
   await page.waitForTimeout(30);
+  await page.evaluate(()=>{for(let i=0;i<250;i+=1)console.error(`FAULTLINE_OVERFLOW_${i}`)});
   const capture=await captureFaultlineCase({page,oracle:{kind:'dom_exists',selector:'#missing',equals:true,action:{kind:'none'},delayMs:0},diagnostics});
-  assert.equal(capture.diagnostics.consoleErrors.length,1,'console.error must survive capture');
+  assert.equal(capture.diagnostics.consoleErrors.length,200,'console diagnostics must stop at the schema entry cap');
   assert.equal(capture.diagnostics.pageErrors.length,1,'pageerror must survive capture');
   assert.match(capture.diagnostics.consoleErrors[0],/^FAULTLINE_CONSOLE_/);
   assert.equal(capture.diagnostics.consoleErrors[0].length,2048,'console diagnostic must be bounded');
   assert.match(capture.diagnostics.pageErrors[0],/FAULTLINE_PAGE_ERROR/);
-  for(let i=0;i<250;i+=1)console.error('host-noise-'+i);
-  assert.ok(capture.diagnostics.consoleErrors.length<=200,'capture diagnostics must remain schema bounded');
+  assert.match(capture.diagnostics.consoleErrors.at(-1),/^FAULTLINE_OVERFLOW_/,'bounded capture must retain the earliest observed diagnostics');
   diagnostics.dispose();
   assert.equal(page.listenerCount('console'),beforeConsole,'dispose must remove console listener');
   assert.equal(page.listenerCount('pageerror'),beforePageError,'dispose must remove pageerror listener');
+  diagnostics.dispose();
+  assert.equal(page.listenerCount('console'),beforeConsole,'dispose must be idempotent');
   assert.throws(()=>diagnostics.snapshot(),/DIAGNOSTICS_DISPOSED/,'disposed sessions must not be reused');
   console.log('Playwright capture diagnostics PASS: armed sessions preserve bounded browser errors and clean up listeners deterministically.');
 }finally{

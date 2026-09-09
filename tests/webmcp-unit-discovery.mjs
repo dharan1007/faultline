@@ -24,7 +24,7 @@ try{
     const unitsTool=window.__webmcpTools.find(tool=>tool.name==='faultline_units');
     const toolListed=JSON.parse(await unitsTool.execute({targetAxis:'html'}));
     const probeTool=window.__webmcpTools.find(tool=>tool.name==='faultline_probe');
-    const candidate=toolListed.units.find(unit=>!unit.pinned);
+    const candidate=toolListed.units.find(unit=>!unit.pinned&&!unit.protectedByDescendant);
     const probe=JSON.parse(await probeTool.execute({expectedRevision:before.revision,requestId:'unit-discovery-probe',targetAxis:'html',unitId:candidate.id}));
     const after=window.faultline.inspect();
     return {before,listed,toolListed,probe,after,manifest:window.faultline.manifest()};
@@ -38,7 +38,10 @@ try{
     assert.ok(unit.id.length>0,'unit id must be non-empty');
     assert.equal(typeof unit.kind,'string');
     assert.equal(typeof unit.text,'string');
+    assert.ok(unit.parentId===null||typeof unit.parentId==='string','parentId must be a structural unit id or null');
+    assert.ok(Number.isInteger(unit.depth)&&unit.depth>=0,'depth must be a non-negative structural depth');
     assert.equal(typeof unit.pinned,'boolean');
+    assert.equal(typeof unit.protectedByDescendant,'boolean');
   }
   assert.deepEqual(result.toolListed,result.listed,'browser API and WebMCP unit discovery must describe the same canonical units');
   assert.ok(['PASS','FAIL','UNRESOLVED'].includes(result.probe.status),'a discovered unit id must be immediately usable by faultline_probe');
@@ -52,7 +55,7 @@ try{
   assert.equal(manifestEntry.annotations.untrustedContentHint,true,'unit text can contain candidate-controlled content');
   assert.deepEqual(manifestEntry.inputSchema.required,['targetAxis']);
 
-  console.log('WebMCP unit discovery PASS: agents can enumerate canonical semantic unit IDs and use them directly with probe without mutating state.');
+  console.log('WebMCP unit discovery PASS: agents receive canonical hierarchy/protection metadata and can probe removable units without mutating state.');
 } finally {
   if(browser)await browser.close();
   server.kill('SIGTERM');

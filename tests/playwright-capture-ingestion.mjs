@@ -82,6 +82,12 @@ try{
   await page.goto(`http://127.0.0.1:${workbenchPort}/`,{waitUntil:'networkidle'});
   await page.waitForFunction(()=>window.faultline&&window.__faultlineTools?.size>0);
 
+  assert.equal(await page.locator('#capture-import-json').count(),1,'human workflow must expose a labelled capture JSON editor');
+  assert.equal(await page.locator('label[for="capture-import-json"]').count(),1,'capture editor must have an accessible label');
+  assert.equal(await page.locator('#import-capture').count(),1,'human workflow must expose explicit capture import');
+  assert.equal(await page.locator('#export-capture-json').count(),1,'capture export control must be discoverable');
+  assert.equal(await page.locator('#export-capture-json').isDisabled(),true,'capture export must remain disabled without provenance');
+
   const before=await page.evaluate(()=>window.faultline.inspect());
   const imported=await page.evaluate(async({expectedRevision,capture})=>window.faultline.importCapture({expectedRevision,capture}),{expectedRevision:before.revision,capture});
   assert.equal(imported.baseline.status,'FAIL','capture must baseline-reproduce before canonical commit');
@@ -91,6 +97,32 @@ try{
   assert.equal(imported.state.case.oracle.action.kind,'sequence');
   assert.equal(await page.evaluate(()=>window.faultline.manifest().some(tool=>tool.name==='faultline_import_capture')),true,'WebMCP manifest must expose capture ingestion');
   assert.equal(await page.evaluate(()=>window.__faultlineTools.has('faultline_import_capture')),true,'native WebMCP registration must expose capture ingestion');
+  assert.equal(await page.evaluate(()=>window.__faultlineTools.get('faultline_import_capture').inputSchema.properties.capture.properties.schema.const),'faultline.capture.v1');
+
+  const afterDirect=await page.evaluate(()=>window.faultline.inspect());
+  const resetToBefore=await page.evaluate(({expectedRevision,original})=>window.faultline.loadCase({expectedRevision,case:original}),{expectedRevision:afterDirect.revision,original:before.case});
+  assert.equal(resetToBefore.captureProvenance,null,'raw case load must deliberately clear capture provenance');
+
+  const webmcpImported=await page.evaluate(async({expectedRevision,capture})=>{
+    const tool=window.__faultlineTools.get('faultline_import_capture');
+    return await tool.execute({expectedRevision,capture,requestId:'capture-e2e'});
+  },{expectedRevision:resetToBefore.revision,capture});
+  const webmcpState=await page.evaluate(()=>window.faultline.inspect());
+  assert.equal(webmcpState.captureProvenance.label,'real form regression','WebMCP import must use canonical provenance state');
+  assert.equal(webmcpImported.content?.[0]?.type||'text','text','native WebMCP result must remain serializable through registered surface');
+
+  const resetAgain=await page.evaluate(({expectedRevision,original})=>window.faultline.loadCase({expectedRevision,case:original}),{expectedRevision:webmcpState.revision,original:before.case});
+  await page.locator('#capture-import-json').fill(JSON.stringify(capture,null,2));
+  await page.locator('#import-capture').click();
+  await page.waitForFunction(previous=>window.faultline.inspect().revision!==previous,resetAgain.revision);
+  const humanState=await page.evaluate(()=>window.faultline.inspect());
+  assert.equal(humanState.captureProvenance.label,'real form regression','human import must use canonical importCapture path');
+  assert.equal(await page.locator('#export-capture-json').isDisabled(),false,'capture export must enable after successful import');
+  assert.match(await page.locator('#summary').textContent(),/baseline.*FAIL/i,'human workflow must visibly confirm baseline failure');
+  const exportedCapture=await page.evaluate(()=>window.faultline.exportCapture());
+  assert.equal(exportedCapture.schema,'faultline.capture.v1');
+  assert.equal(exportedCapture.provenance.url,capture.provenance.url);
+  assert.deepEqual(exportedCapture.source,{html:humanState.case.html,css:humanState.case.css,js:humanState.case.js},'capture export must reflect the current reducible source while retaining provenance');
 
   const canonicalAfter=await page.evaluate(()=>window.faultline.inspect());
   const run=await page.evaluate(()=>window.faultline.run());
@@ -119,7 +151,7 @@ try{
   assert.deepEqual(afterPass.captureProvenance,canonicalAfter.captureProvenance,'non-failing capture must not mutate provenance');
 
   assert.equal(pageErrors.length,0,pageErrors.join('\n'));
-  console.log('Playwright capture ingestion PASS: real-page failure becomes a provenance-bound canonical case only after baseline reproduction.');
+  console.log('Playwright capture ingestion PASS: real-page failure becomes a provenance-bound canonical case through browser API, WebMCP, and accessible human import only after baseline reproduction.');
 } finally {
   if(browser)await browser.close();
   await new Promise(resolve=>fixtureServer.close(resolve));

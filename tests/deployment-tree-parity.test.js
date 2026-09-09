@@ -8,7 +8,9 @@ const productionFiles = [
   'src/runtime.js',
   'src/ui.js',
   'src/reducer-engine.js',
-  'src/sandbox-policy.js'
+  'src/sandbox-policy.js',
+  'src/capture-format.js',
+  'src/capture-runtime.js'
 ];
 
 test('production deployment parity verifies every shipped application file before and after promotion', () => {

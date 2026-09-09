@@ -1,0 +1,21 @@
+name: Hierarchical reduction isolated gate
+
+on:
+  push:
+    branches: [feature/hierarchical-reduction-v1-20260909]
+
+permissions:
+  contents: read
+
+jobs:
+  hierarchical-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/hierarchical-reduction.mjs

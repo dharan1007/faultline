@@ -4,6 +4,7 @@ export const CAPTURE_LIMITS=Object.freeze({
   totalBytes:4*1024*1024,
   diagnosticsEntries:200,
   diagnosticStringChars:2048,
+  metadataStringChars:2048,
   sequenceSteps:8,
   totalWaitMs:2000,
   oracleDelayMs:2000
@@ -12,19 +13,30 @@ export const CAPTURE_LIMITS=Object.freeze({
 const ORACLE_KINDS=new Set(['dom_property','dom_attribute','computed_style','dom_exists','runtime_error']);
 const ACTION_KINDS=new Set(['none','click','set_value','set_checked','sequence']);
 const ACTION_STEP_KINDS=new Set(['click','set_value','set_checked','wait']);
+const CAPTURE_KEYS=new Set(['schema','capturedAt','source','oracle','environment','provenance','diagnostics']);
+const SOURCE_KEYS=new Set(['url','title','html','css','js']);
+const ORACLE_KEYS=new Set(['kind','selector','property','equals','action','delayMs']);
+const ACTION_KEYS=new Set(['kind','selector','value','checked','steps','durationMs']);
+const DIAGNOSTIC_KEYS=new Set(['externalDependencies','consoleErrors','pageErrors']);
 const utf8Size=value=>new TextEncoder().encode(String(value)).byteLength;
 const clone=value=>JSON.parse(JSON.stringify(value));
 const fail=code=>{throw new Error(code)};
+const hasUnknownKeys=(value,allowed)=>Object.keys(value).some(key=>!allowed.has(key));
+
+function validateMetadataString(value,{optional=true}={}){
+  if(value===undefined&&optional)return;
+  if(typeof value!=='string'||value.length>CAPTURE_LIMITS.metadataStringChars)fail('INVALID_CAPTURE');
+}
 
 function validateAction(action,{allowSequence=true,allowWait=false}={}){
-  if(!action||typeof action!=='object'||Array.isArray(action))fail('UNSUPPORTED_CAPTURE_ACTION');
+  if(!action||typeof action!=='object'||Array.isArray(action)||hasUnknownKeys(action,ACTION_KEYS))fail('UNSUPPORTED_CAPTURE_ACTION');
   if(action.kind==='wait'){
     if(!allowWait||Object.keys(action).some(key=>!['kind','durationMs'].includes(key))||!Number.isFinite(action.durationMs)||action.durationMs<0||action.durationMs>CAPTURE_LIMITS.totalWaitMs)fail('UNSUPPORTED_CAPTURE_ACTION');
     return;
   }
   if(!ACTION_KINDS.has(action.kind))fail('UNSUPPORTED_CAPTURE_ACTION');
   if(action.kind==='sequence'){
-    if(!allowSequence||!Array.isArray(action.steps)||action.steps.length<1||action.steps.length>CAPTURE_LIMITS.sequenceSteps)fail('UNSUPPORTED_CAPTURE_ACTION');
+    if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||Object.hasOwn(action,'checked')||Object.hasOwn(action,'durationMs')||!Array.isArray(action.steps)||action.steps.length<1||action.steps.length>CAPTURE_LIMITS.sequenceSteps)fail('UNSUPPORTED_CAPTURE_ACTION');
     let totalWait=0;
     for(const step of action.steps){
       if(!ACTION_STEP_KINDS.has(step?.kind))fail('UNSUPPORTED_CAPTURE_ACTION');
@@ -34,14 +46,16 @@ function validateAction(action,{allowSequence=true,allowWait=false}={}){
     if(totalWait>CAPTURE_LIMITS.totalWaitMs)fail('UNSUPPORTED_CAPTURE_ACTION');
     return;
   }
+  if(Object.hasOwn(action,'steps')||Object.hasOwn(action,'durationMs'))fail('UNSUPPORTED_CAPTURE_ACTION');
+  if(action.kind!=='set_checked'&&Object.hasOwn(action,'checked'))fail('UNSUPPORTED_CAPTURE_ACTION');
   if(action.kind==='none')return;
   if(typeof action.selector!=='string'||!action.selector.trim())fail('UNSUPPORTED_CAPTURE_ACTION');
   if(action.kind==='set_value'&&typeof action.value!=='string')fail('UNSUPPORTED_CAPTURE_ACTION');
-  if(action.kind==='set_checked'&&typeof action.checked!=='boolean')fail('UNSUPPORTED_CAPTURE_ACTION');
+  if(action.kind==='set_checked'&&(typeof action.checked!=='boolean'||Object.hasOwn(action,'value')))fail('UNSUPPORTED_CAPTURE_ACTION');
 }
 
 function validateOracle(oracle){
-  if(!oracle||typeof oracle!=='object'||Array.isArray(oracle)||!ORACLE_KINDS.has(oracle.kind))fail('INVALID_ORACLE');
+  if(!oracle||typeof oracle!=='object'||Array.isArray(oracle)||hasUnknownKeys(oracle,ORACLE_KEYS)||!ORACLE_KINDS.has(oracle.kind))fail('INVALID_ORACLE');
   validateAction(oracle.action);
   if(oracle.kind!=='runtime_error'&&(typeof oracle.selector!=='string'||!oracle.selector.trim()))fail('INVALID_ORACLE');
   if(['dom_property','dom_attribute','computed_style'].includes(oracle.kind)&&(typeof oracle.property!=='string'||!oracle.property.trim()))fail('INVALID_ORACLE');
@@ -50,8 +64,8 @@ function validateOracle(oracle){
 }
 
 function validateDiagnostics(diagnostics={}){
-  if(!diagnostics||typeof diagnostics!=='object'||Array.isArray(diagnostics))fail('INVALID_CAPTURE');
-  for(const key of ['externalDependencies','consoleErrors','pageErrors']){
+  if(!diagnostics||typeof diagnostics!=='object'||Array.isArray(diagnostics)||hasUnknownKeys(diagnostics,DIAGNOSTIC_KEYS))fail('INVALID_CAPTURE');
+  for(const key of DIAGNOSTIC_KEYS){
     const entries=diagnostics[key]??[];
     if(!Array.isArray(entries)||entries.length>CAPTURE_LIMITS.diagnosticsEntries)fail('INVALID_CAPTURE');
     if(entries.some(entry=>typeof entry!=='string'||entry.length>CAPTURE_LIMITS.diagnosticStringChars))fail('INVALID_CAPTURE');
@@ -60,14 +74,20 @@ function validateDiagnostics(diagnostics={}){
 }
 
 export function validateCaptureArtifact(capture){
-  if(!capture||typeof capture!=='object'||Array.isArray(capture))fail('INVALID_CAPTURE');
+  if(!capture||typeof capture!=='object'||Array.isArray(capture)||hasUnknownKeys(capture,CAPTURE_KEYS))fail('INVALID_CAPTURE');
   if(capture.schema!==CAPTURE_SCHEMA)fail('UNSUPPORTED_CAPTURE_SCHEMA');
-  if(!capture.source||typeof capture.source!=='object'||Array.isArray(capture.source))fail('INVALID_CAPTURE');
+  validateMetadataString(capture.capturedAt);
+  if(!capture.source||typeof capture.source!=='object'||Array.isArray(capture.source)||hasUnknownKeys(capture.source,SOURCE_KEYS))fail('INVALID_CAPTURE');
   for(const key of ['html','css','js']){
     if(typeof capture.source[key]!=='string')fail('INVALID_CAPTURE');
     if(utf8Size(capture.source[key])>CAPTURE_LIMITS.sourceBytes)fail('CAPTURE_TOO_LARGE');
   }
-  if(!capture.provenance||typeof capture.provenance!=='object'||Array.isArray(capture.provenance)||typeof capture.provenance.adapter!=='string'||!capture.provenance.adapter.trim())fail('INVALID_CAPTURE');
+  validateMetadataString(capture.source.url);
+  validateMetadataString(capture.source.title);
+  if(capture.environment!==undefined&&(!capture.environment||typeof capture.environment!=='object'||Array.isArray(capture.environment)))fail('INVALID_CAPTURE');
+  if(!capture.provenance||typeof capture.provenance!=='object'||Array.isArray(capture.provenance))fail('INVALID_CAPTURE');
+  validateMetadataString(capture.provenance.adapter,{optional:false});
+  if(!capture.provenance.adapter.trim())fail('INVALID_CAPTURE');
   validateOracle(capture.oracle);
   validateDiagnostics(capture.diagnostics??{});
   let serialized;

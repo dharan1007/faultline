@@ -1,0 +1,87 @@
+name: patch-embedded-object
+on:
+  push:
+    branches: [fix/embedded-object-containment-20260909]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[object-policy-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/embedded-object-containment-20260909
+          fetch-depth: 0
+      - name: Apply minimal policy change
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/sandbox-policy.js')
+          s=p.read_text()
+          anchor="""function isBlockedFrameSource(source){
+            const src=String(source??'').trim();
+            return Boolean(src)&&!/^about:blank(?:[?#]|$)/i.test(src);
+          }
+          """
+          insert="""function containsBlockedEmbeddedObject(source){
+            const html=String(source??'');
+            if(typeof DOMParser==='function'){
+              const doc=new DOMParser().parseFromString(html,'text/html');
+              for(const object of doc.querySelectorAll('object[data]')){
+                if(String(object.getAttribute('data')??'').trim())return true;
+              }
+              for(const embed of doc.querySelectorAll('embed[src]')){
+                if(String(embed.getAttribute('src')??'').trim())return true;
+              }
+              return false;
+            }
+            const withoutComments=html.replace(/<!--[\\s\\S]*?-->/g,'');
+            for(const match of withoutComments.matchAll(/<object\\b[^>]*>/gi)){
+              const data=match[0].match(/\\bdata\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))/i);
+              if(String(data?.[1]??data?.[2]??data?.[3]??'').trim())return true;
+            }
+            for(const match of withoutComments.matchAll(/<embed\\b[^>]*>/gi)){
+              const src=match[0].match(/\\bsrc\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))/i);
+              if(String(src?.[1]??src?.[2]??src?.[3]??'').trim())return true;
+            }
+            return false;
+          }
+
+          """
+          if 'function containsBlockedEmbeddedObject' not in s:
+              if anchor not in s:
+                  raise SystemExit('sandbox policy anchor not found')
+              s=s.replace(anchor,insert+anchor,1)
+          risk_anchor="""  if(containsExternalFrame(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-frame'};
+          """
+          risk_insert="""  if(containsExternalFrame(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-frame'};
+            if(containsBlockedEmbeddedObject(html))return {reason:'UNSAFE_NETWORK',axis:'html',capability:'external-embedded-object'};
+          """
+          if "capability:'external-embedded-object'" not in s:
+              if risk_anchor not in s:
+                  raise SystemExit('navigationRisk anchor not found')
+              s=s.replace(risk_anchor,risk_insert,1)
+          p.write_text(s)
+
+          d=Path('docs/SECURITY.md')
+          t=d.read_text()
+          old='- blocked external script, HTML stylesheet, CSS `@import`, image, media, and embedded-document dependencies are surfaced as structured `UNSAFE_NETWORK` evidence instead of being allowed to produce ordinary oracle PASS/FAIL results'
+          new='- blocked external script, HTML stylesheet, CSS `@import`, image, media, embedded-document, and object/embed dependencies are surfaced as structured `UNSAFE_NETWORK` evidence instead of being allowed to produce ordinary oracle PASS/FAIL results'
+          if old in t:
+              t=t.replace(old,new,1)
+          elif 'object/embed dependencies' not in t:
+              raise SystemExit('security documentation anchor not found')
+          d.write_text(t)
+          PY
+      - name: Commit policy change
+        run: |
+          git config user.name dharan
+          git config user.email 150376358+dharan1007@users.noreply.github.com
+          git add src/sandbox-policy.js docs/SECURITY.md
+          if git diff --cached --quiet; then
+            echo 'No patch required.'
+            exit 0
+          fi
+          git commit -m 'fix: surface blocked object and embed dependencies [object-policy-applied]'
+          git push origin HEAD:fix/embedded-object-containment-20260909

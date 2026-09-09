@@ -1,10 +1,10 @@
 # Hierarchical Reduction v1 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Use the execution/verification skills appropriate to the environment. This plan records the production implementation and its evidence gates.
 
 **Goal:** Replace shallow HTML/CSS reduction with deterministic hierarchical semantic units and coarse-to-fine reduction while preserving FAULTLINE's production invariants.
 
-**Architecture:** `src/reducer-engine.js` owns structural discovery, hierarchy metadata, ancestor closure, frontier reduction and pin-path remapping helpers. `src/runtime.js` remains the canonical orchestration layer: it validates revision/cancellation, evaluates candidates in the existing sandbox, remaps explicit pins transactionally, performs final FAIL verification and commits. WebMCP and the human workbench consume the same richer unit metadata.
+**Architecture:** `src/reducer-engine.js` owns structural discovery, hierarchy metadata, ancestor closure, exact offset pin remapping, and frontier reduction. `src/runtime.js` remains the canonical orchestration layer: it validates revision/cancellation, evaluates candidates in the existing sandbox, remaps explicit pins transactionally, performs final FAIL verification, and commits. WebMCP and the human workbench consume the same richer unit metadata.
 
 **Tech Stack:** Browser-native ES modules, Node 22 tests, Playwright 1.55 Chromium, GitHub Actions, Vercel static deployment.
 
@@ -22,105 +22,65 @@
 
 ---
 
-### Task 1: RED structural discovery contract
+### Task 1: RED structural discovery contract — complete
 
-**Files:**
-- Modify: `tests/reducer-engine.test.js`
+- [x] Add RED tests requiring deterministic nested HTML `depth`/`parentId`, CSS declaration children, and conservative quote/comment/malformed handling.
+- [x] Push tests without implementation and confirm CI fails specifically at `npm test`.
 
-**Interfaces:**
-- Consumes: existing `semanticUnits(axis, source)`.
-- Produces: failing tests requiring `depth`/`parentId`, nested HTML parent ranges, CSS declaration child units, and quote/comment-safe boundaries.
+### Task 2: Deterministic HTML/CSS scanners — complete
 
-- [ ] **Step 1: Add RED tests** asserting `<main><section><p>A</p></section><aside>B</aside></main>` exposes `main`, `section`, `p`, and `aside` with deterministic hierarchy metadata, and `.card{width:300px;color:red}` exposes one rule plus `width` and `color` declaration children.
-- [ ] **Step 2: Add malformed/quoted boundary cases** proving `>` in an HTML attribute, CSS braces in strings/comments, and unbalanced HTML do not create corrupt ranges.
-- [ ] **Step 3: Push tests only and confirm CI fails for the expected missing capability.**
+- [x] Implement quote/comment-aware stack-based HTML scanning with balanced subtrees, void elements, raw-text handling, and conservative malformed boundaries.
+- [x] Implement brace/string/comment-aware CSS rule hierarchy and direct declaration discovery.
+- [x] Preserve current JavaScript behavior with `depth: 0` / `parentId: null`.
+- [x] Confirm structural unit tests pass before moving to runtime integration.
 
-### Task 2: Implement deterministic HTML/CSS scanners
+### Task 3: RED hierarchy reduction and pin semantics — complete
 
-**Files:**
-- Modify: `src/reducer-engine.js`
-- Test: `tests/reducer-engine.test.js`
+- [x] Add RED unit tests for ancestor closure, global trial budget, coarse-to-fine parent/child reduction, and exact pin offset remapping.
+- [x] Add Chromium acceptance covering HTML reduction, CSS declaration reduction, WebMCP metadata, human workbench metadata, pin remapping, final FAIL, and export.
+- [x] Confirm the isolated browser RED fails at the canonical runtime hierarchy boundary rather than at the helper layer.
 
-**Interfaces:**
-- Produces: `semanticUnits(axis, source)` units with `{id,axis,start,end,kind,text,depth,parentId}` for HTML/CSS, preserving current JS behavior with `depth:0,parentId:null`.
+### Task 4: Hierarchy-aware reducer helpers — complete
 
-- [ ] **Step 1: Implement quote/comment-aware HTML tag scanning** with stack-based balanced element ranges, void-element handling and conservative malformed-fragment behavior.
-- [ ] **Step 2: Implement brace/string/comment-aware CSS block scanning** with rule hierarchy and direct declaration child ranges.
-- [ ] **Step 3: Run `npm test` in CI and require all structural discovery tests green.**
+The final interfaces are:
 
-### Task 3: RED hierarchy reduction and pin semantics
+- `protectedHierarchyIds(units, explicitIds) -> Set<string>`
+- `remapUnitAfterRemoval(unit, removedUnits, nextUnits) -> unit | null`
+- `hierarchicalReduce(units, evaluateRemovedIds, {protectedItems,maxTrials}) -> {removedIds,trials,trialCount,frontiers,protectedIds}`
 
-**Files:**
-- Modify: `tests/reducer-engine.test.js`
-- Create: `tests/hierarchical-reduction.mjs`
-- Modify: `package.json`
+The original sibling-index structural-path remapping idea was rejected during implementation because deleting an earlier sibling changes the path. The production design instead transforms exact source ranges by known accepted removals, then requires rediscovery with matching transformed offsets, `kind`, and exact `text`. Duplicate text therefore does not introduce guesswork.
 
-**Interfaces:**
-- Requires future `hierarchicalReduce(...)`, `protectedHierarchyIds(...)`, and structural-path remapping helpers from `src/reducer-engine.js`.
+- [x] Implement ancestor closure.
+- [x] Implement exact range remapping.
+- [x] Implement breadth-first frontier reduction with descendants of removed parents suppressed.
+- [x] Share one explicit `maxTrials` budget across all frontiers and throw `TRIAL_BUDGET_EXHAUSTED` instead of returning a partial search.
+- [x] Confirm helper unit suite is green.
 
-- [ ] **Step 1: Add unit tests** requiring pinned-descendant ancestor closure, overlap-free frontier behavior, global trial-budget exhaustion, and deterministic structural paths.
-- [ ] **Step 2: Add Chromium RED acceptance** that loads a nested case, pins a required descendant, reduces HTML and CSS, and checks WebMCP hierarchy metadata plus canonical/exported source.
-- [ ] **Step 3: Add the browser test to `check` and `test:browser`, push, and confirm the expected RED failures.**
+### Task 5: Canonical runtime integration — complete
 
-### Task 4: Implement hierarchy-aware reducer helpers
+- [x] `units()` exposes `depth`, `parentId`, `pinned`, and `protectedByPin` from canonical discovery.
+- [x] HTML/CSS `reduce()` uses `hierarchicalReduce`; JavaScript remains the flat bounded reducer and is reported as such.
+- [x] Candidate source remains non-mutating during search and executes only through existing `runCase` sandbox boundaries.
+- [x] Final materialized candidate is independently reverified as `FAIL`.
+- [x] Explicit pins are remapped by exact transformed range; any unprovable remap aborts with `PIN_REMAP_FAILED` before commit.
+- [x] Revision is rechecked immediately before canonical mutation.
+- [x] Source + remapped pins use the existing persistence rollback boundary and are recorded in the same revision snapshot.
+- [x] Reduction results expose exact `hierarchical` and `frontiers` metadata without a global-minimality claim.
 
-**Files:**
-- Modify: `src/reducer-engine.js`
+### Task 6: Human/WebMCP surface and documentation — complete
 
-**Interfaces:**
-- Produces:
-  - `protectedHierarchyIds(units, explicitIds) -> Set<string>`
-  - `structuralPathFor(units, unitId) -> string | null`
-  - `findUnitByStructuralPath(units, path) -> unit | null`
-  - `hierarchicalReduce(units, evaluateRemovedIds, {protectedItems,maxTrials}) -> {removedIds,trials,trialCount,frontiers}`
+- [x] Human unit rows remain native focusable buttons, indent by `depth`, and distinguish explicit `pinned` units from ancestors `protected by pin`.
+- [x] WebMCP `faultline_units` uses the same canonical unit result and exposes hierarchy/protection metadata.
+- [x] README, architecture, WebMCP contract, and roadmap describe the shipped HTML/CSS hierarchy and explicit JavaScript limitation.
+- [x] WebMCP documentation reflects the existing 17-tool surface including `faultline_import_capture`.
 
-- [ ] **Step 1: Implement ancestor closure and structural-path helpers.**
-- [ ] **Step 2: Implement breadth-first non-overlapping frontier construction.**
-- [ ] **Step 3: Implement hierarchical ddmin with one shared budget; throw `TRIAL_BUDGET_EXHAUSTED` before returning an incomplete search.**
-- [ ] **Step 4: Run unit tests in CI and require green.**
+### Task 7: Full verification and guarded production promotion — in progress
 
-### Task 5: Integrate canonical runtime transactionally
-
-**Files:**
-- Modify: `src/runtime.js`
-
-**Interfaces:**
-- Consumes hierarchy helpers.
-- `units()` adds `depth`, `parentId`, `protectedByPin`.
-- `reduce()` uses hierarchical reduction for HTML/CSS and flat ddmin for JS.
-
-- [ ] **Step 1: Compute explicit pin structural paths before reduction and ancestor-protected metadata for unit listing.**
-- [ ] **Step 2: Materialize candidate source using only topmost removed ranges and execute through existing `runCase` sandbox.**
-- [ ] **Step 3: Reverify final candidate as `FAIL`; rediscover units; remap explicit pins by structural path; abort with `PIN_REMAP_FAILED` if any explicit pin cannot be recovered.**
-- [ ] **Step 4: Commit source + remapped pins atomically only after all gates pass; preserve stale revision, abort and persistence rollback semantics.**
-- [ ] **Step 5: Return exact `hierarchical` and `frontiers` metadata without overstating global minimality.**
-
-### Task 6: Human/WebMCP surface and documentation
-
-**Files:**
-- Modify: `src/runtime.js`
-- Modify: `README.md`
-- Modify: `docs/ARCHITECTURE.md`
-- Modify: `docs/WEBMCP.md`
-- Modify: `ROADMAP.md`
-
-**Interfaces:**
-- Human unit rows visually indent by `depth` and label `pinned` vs `protected by pin`.
-- WebMCP `faultline_units` emits hierarchy metadata using the canonical `units()` result.
-
-- [ ] **Step 1: Add compact hierarchy indentation and protection labeling without changing overall layout.**
-- [ ] **Step 2: Update docs to state exact HTML/CSS hierarchy/minimality boundary and JS limitation.**
-- [ ] **Step 3: Run `npm run check` and `npm run build` in CI.**
-
-### Task 7: Full verification and guarded production promotion
-
-**Files:**
-- No feature code changes unless a failing gate reveals a real defect.
-
-- [ ] **Step 1: Re-read `main` and confirm it still equals the verified base or can fast-forward safely from it.**
-- [ ] **Step 2: Require exact feature-head CI + CodeQL green, including full Chromium suite.**
-- [ ] **Step 3: Fast-forward `main` without force to the exact green feature SHA.**
-- [ ] **Step 4: Require `main` CI green on the exact SHA.**
-- [ ] **Step 5: Deploy only through the existing `faultline-webmcp` Vercel project and verify project ID `prj_XtQdMYG2kOufYTrZ1SDj61VEExDM` before promotion.**
-- [ ] **Step 6: Fetch the public production artifact and perform real-browser verification of hierarchical unit discovery/reduction.**
-- [ ] **Step 7: Advance `production` branch by non-force fast-forward to the exact deployed SHA only after public verification succeeds.**
+- [ ] Re-read `main` and confirm it still equals the verified base or can fast-forward safely from it.
+- [ ] Require the exact final feature SHA to pass `npm test`, `npm run check`, `npm run build`, full `npm run test:browser`, and CodeQL.
+- [ ] Compare final feature tree against the verified base and confirm only intended production/test/documentation changes exist.
+- [ ] Fast-forward `main` without force to the exact green feature SHA.
+- [ ] Require ordinary `main` CI and the guarded deployment workflow to pass again on that same SHA.
+- [ ] Deploy only through the existing Vercel project `prj_XtQdMYG2kOufYTrZ1SDj61VEExDM` / team `team_APBZJjf6iizHCTuseqHosFnU`.
+- [ ] Require staged/source byte parity, promotion, public/source byte parity, and Vercel `READY` state.
+- [ ] Advance the recoverable `production` branch only after the guarded public verification succeeds.

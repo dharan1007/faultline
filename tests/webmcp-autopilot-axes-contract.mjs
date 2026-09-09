@@ -16,7 +16,7 @@ try{
     window.__webmcpTools=tools;
   });
   await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===16);
+  await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===window.faultline.manifest().length);
 
   const contract=await page.evaluate(()=>{
     const tool=window.__webmcpTools.find(item=>item.name==='faultline_autopilot');

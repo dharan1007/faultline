@@ -1,3 +1,4 @@
+// This isolated-branch patcher applies exact, assertion-guarded edits to the existing runtime.
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const path='src/runtime.js';

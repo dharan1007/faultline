@@ -1,4 +1,4 @@
-import { semanticUnits, removeUnits, ddminReduce, createRevisionStore } from './reducer-engine.js';
+import { semanticUnits, removeUnits, ddminReduce, hierarchicalReduce, protectedHierarchyIds, remapUnitAfterRemoval, createRevisionStore } from './reducer-engine.js';
 import { navigationRisk } from './sandbox-policy.js';
 import { CAPTURE_SCHEMA, CAPTURE_LIMITS, normalizeCaptureArtifact } from './capture-contract.js';
 
@@ -413,7 +413,13 @@ function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.
 function units({targetAxis=axis}={}){
   if(!['html','css','js'].includes(targetAxis))throw new Error('INVALID_AXIS');
   const s=store.inspect();
-  return {revision:s.revision,targetAxis,units:unitsFor(targetAxis,s.value[targetAxis]).map(unit=>({id:unit.id,kind:unit.kind,text:unit.text,pinned:pins.has(pinKey(targetAxis,unit.id))}))};
+  const discovered=unitsFor(targetAxis,s.value[targetAxis]);
+  const explicitIds=discovered.filter(unit=>pins.has(pinKey(targetAxis,unit.id))).map(unit=>unit.id);
+  const protectedIds=protectedHierarchyIds(discovered,explicitIds);
+  return {revision:s.revision,targetAxis,units:discovered.map(unit=>{
+    const pinned=pins.has(pinKey(targetAxis,unit.id));
+    return {id:unit.id,kind:unit.kind,text:unit.text,depth:unit.depth??0,parentId:unit.parentId??null,pinned,protectedByPin:!pinned&&protectedIds.has(unit.id)};
+  })};
 }
 function commitCase(next,event,expectedRevision=revision()){ const before=snapshotCanonical();const result=store.commit(next,event,expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});persistMutation(before);render();renderPreview();return inspect(); }
 function defineOracle({expectedRevision=revision(),oracle}){ validateOracle(oracle);return commitCase({...value(),oracle:clone(oracle)},{kind:'define_oracle'},expectedRevision); }
@@ -458,21 +464,58 @@ function resetCase({expectedRevision=revision()}={}){ return loadCase({expectedR
 async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const source=value()[targetAxis];const unit=unitsFor(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(pins.has(pinKey(targetAxis,unitId)))throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const result=await runCase(candidate,{signal});throwIfAborted(signal);record('probe',result,{axis:targetAxis,unitId,mutated:false,revision:testedRevision});return {...result,mutated:false,testedRevision,canonicalRevision:revision()}; }
 function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);const alreadyPinned=pins.has(key);if(alreadyPinned===pinned)return inspect();const before=snapshotCanonical();pinned?pins.add(key):pins.delete(key);const result=store.commit(value(),{kind:pinned?'pin':'unpin',axis:targetAxis,unitId},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});rememberExperiment({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:result.revision,at:new Date().toISOString()});persistMutation(before);render();return inspect(); }
 async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}={}, {signal}={}){
+  if(!['html','css','js'].includes(targetAxis))throw new Error('INVALID_AXIS');
   store.assertRevision(expectedRevision);throwIfAborted(signal);
   const baseline=clone(value());
-  const source=baseline[targetAxis], all=unitsFor(targetAxis,source);
-  if(!all.length) return {status:'NO_UNITS',before:source.length,after:source.length,reduction:0,trials:0,revision:revision()};
-  const protectedItems=all.filter(u=>pins.has(pinKey(targetAxis,u.id)));
-  const reduced=await ddminReduce(all,async kept=>{throwIfAborted(signal);const keptIds=new Set(kept.map(u=>u.id));const removed=all.filter(u=>!keptIds.has(u.id));return (await runCase({...baseline,[targetAxis]:removeUnits(source,removed)},{signal})).status;},{protectedItems,maxTrials});
+  const source=baseline[targetAxis],all=unitsFor(targetAxis,source);
+  const hierarchical=targetAxis!=='js';
+  if(!all.length)return {status:'NO_UNITS',before:source.length,after:source.length,reduction:0,trials:0,removed:0,hierarchical,frontiers:[],revision:revision()};
+  const explicitlyPinned=all.filter(unit=>pins.has(pinKey(targetAxis,unit.id)));
+  let removed=[];
+  let trialCount=0;
+  let frontiers=[];
+  if(hierarchical){
+    const result=await hierarchicalReduce(all,async removedIds=>{
+      throwIfAborted(signal);
+      const candidateRemoved=all.filter(unit=>removedIds.has(unit.id));
+      return (await runCase({...baseline,[targetAxis]:removeUnits(source,candidateRemoved)},{signal})).status;
+    },{protectedItems:explicitlyPinned.map(unit=>unit.id),maxTrials});
+    removed=all.filter(unit=>result.removedIds.has(unit.id));
+    trialCount=result.trialCount;
+    frontiers=result.frontiers;
+  }else{
+    const reduced=await ddminReduce(all,async kept=>{
+      throwIfAborted(signal);
+      const keptIds=new Set(kept.map(unit=>unit.id));
+      const candidateRemoved=all.filter(unit=>!keptIds.has(unit.id));
+      return (await runCase({...baseline,[targetAxis]:removeUnits(source,candidateRemoved)},{signal})).status;
+    },{protectedItems:explicitlyPinned,maxTrials});
+    const keptIds=new Set(reduced.items.map(unit=>unit.id));
+    removed=all.filter(unit=>!keptIds.has(unit.id));
+    trialCount=reduced.trialCount;
+  }
   throwIfAborted(signal);
-  const keptIds=new Set(reduced.items.map(u=>u.id));const removed=all.filter(u=>!keptIds.has(u.id));const nextSource=removeUnits(source,removed);const final=await runCase({...baseline,[targetAxis]:nextSource},{signal});
-  throwIfAborted(signal);if(final.status!=='FAIL')throw new Error('REDUCTION_LOST_FAILURE');
-  const beforeLength=source.length,after=nextSource.length,before=snapshotCanonical();
-  const committed=store.commit({...baseline,[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reduced.trialCount,removed:removed.length},expectedRevision);
+  const nextSource=removeUnits(source,removed);
+  const final=await runCase({...baseline,[targetAxis]:nextSource},{signal});
+  throwIfAborted(signal);
+  if(final.status!=='FAIL')throw new Error('REDUCTION_LOST_FAILURE');
+
+  const nextUnits=unitsFor(targetAxis,nextSource);
+  const nextPins=new Set([...pins].filter(key=>!key.startsWith(`${targetAxis}|`)));
+  for(const pinnedUnit of explicitlyPinned){
+    const remapped=remapUnitAfterRemoval(pinnedUnit,removed,nextUnits);
+    if(!remapped)throw new Error('PIN_REMAP_FAILED');
+    nextPins.add(pinKey(targetAxis,remapped.id));
+  }
+
+  store.assertRevision(expectedRevision);
+  const beforeLength=source.length,afterLength=nextSource.length,before=snapshotCanonical();
+  pins=nextPins;
+  const committed=store.commit({...baseline,[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:trialCount,removed:removed.length,hierarchical},expectedRevision);
   rememberRevision(committed.revision,{value:clone(committed.value),pins:[...pins]});
-  rememberExperiment({kind:'reduce',status:final.status,evidence:final.evidence||{},revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reduced.trialCount,removed:removed.length,reduction:beforeLength?1-after/beforeLength:0});
+  rememberExperiment({kind:'reduce',status:final.status,evidence:final.evidence||{},revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:trialCount,removed:removed.length,hierarchical,frontiers:clone(frontiers),reduction:beforeLength?1-afterLength/beforeLength:0});
   persistMutation(before);render();renderPreview();renderHealth(final.status);
-  return {status:final.status,before:beforeLength,after,reduction:beforeLength?1-after/beforeLength:0,trials:reduced.trialCount,removed:removed.length,revision:revision()};
+  return {status:final.status,before:beforeLength,after:afterLength,reduction:beforeLength?1-afterLength/beforeLength:0,trials:trialCount,removed:removed.length,hierarchical,frontiers:clone(frontiers),revision:revision()};
 }
 function history({limit=100}={}){ return clone(experimentLedger.slice(-Math.max(1,Math.min(200,Number(limit)||100)))); }
 function listRevisions({limit=MAX_RUNTIME_REVISIONS}={}){
@@ -521,7 +564,19 @@ async function autopilot({expectedRevision=revision(),axes=['html','css','js'],m
 function renderHealth(status){$('health').textContent=status;$('health').dataset.state=status;}
 function renderTrace(){const list=$('trace');list.innerHTML='';for(const e of [...experimentLedger].reverse().slice(0,50)){const li=document.createElement('li');li.innerHTML=`<strong>${e.kind.toUpperCase()} · ${e.status}</strong><span>${e.revision} · ${new Date(e.at).toLocaleTimeString()}</span><code>${escapeHtml(JSON.stringify(e.evidence||{}))}</code>`;list.appendChild(li)}$('summary').textContent=experimentLedger.length?`${experimentLedger.length} evidence events · latest ${experimentLedger.at(-1).status}`:'No experiments yet.';}
 function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-function renderUnits(){const list=$('units'),units=unitsFor();list.innerHTML='';selectedUnitId=null;for(const unit of units){const row=document.createElement('button');row.type='button';row.className='unit';row.dataset.unitId=unit.id;row.setAttribute('aria-pressed','false');const pinned=pins.has(pinKey(axis,unit.id));row.innerHTML=`<span>${escapeHtml(unit.text.trim().replace(/\s+/g,' ').slice(0,120))}</span><small>${unit.kind}${pinned?' · pinned':''}</small>`;row.onclick=()=>{document.querySelectorAll('.unit').forEach(x=>x.setAttribute('aria-pressed','false'));row.setAttribute('aria-pressed','true');selectedUnitId=unit.id;$('probe').disabled=false;$('pin').disabled=false;};list.appendChild(row)}$('unit-count').textContent=`${units.length} units`;}
+function renderUnits(){
+  const list=$('units'),result=units({targetAxis:axis}),discovered=result.units;
+  list.innerHTML='';selectedUnitId=null;
+  for(const unit of discovered){
+    const row=document.createElement('button');row.type='button';row.className='unit';row.dataset.unitId=unit.id;row.setAttribute('aria-pressed','false');
+    row.style.paddingInlineStart=`${12+Math.min(unit.depth,6)*14}px`;
+    const protection=unit.pinned?' · pinned':unit.protectedByPin?' · protected by pin':'';
+    row.innerHTML=`<span>${escapeHtml(unit.text.trim().replace(/\s+/g,' ').slice(0,120))}</span><small>${unit.kind} · depth ${unit.depth}${protection}</small>`;
+    row.onclick=()=>{document.querySelectorAll('.unit').forEach(x=>x.setAttribute('aria-pressed','false'));row.setAttribute('aria-pressed','true');selectedUnitId=unit.id;$('probe').disabled=false;$('pin').disabled=false;};
+    list.appendChild(row);
+  }
+  $('unit-count').textContent=`${discovered.length} units`;
+}
 function renderPreview(executePreview=false){const preview=$('preview');if(!preview)return;previewBootstrapId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;preview.srcdoc=buildSandboxDocument(value(),previewBootstrapId,{previewOnly:true,executePreview});}
 function installPreviewRunner(){
   const toolbar=document.querySelector('.preview-toolbar');

@@ -2,14 +2,22 @@
 
 FAULTLINE's roadmap is ordered around a measurable debugging outcome: **turn a real browser failure into a smaller trustworthy reproducer without changing what is failing.**
 
-## Now — make the current reducer contract undeniable
+## Shipped foundation
 
-- Keep production claims aligned with `src/runtime.js` + `src/reducer-engine.js`.
+- Deterministic PASS / FAIL / UNRESOLVED oracle execution with bounded interaction actions.
+- Revision-guarded local state, evidence/history, recovery checkpoints and canonical case import/export.
+- Native WebMCP causal tool surface sharing the same canonical runtime as the human workbench.
+- Browser-side network/navigation/result-channel containment with real Chromium regression coverage.
+- Versioned `faultline.capture` v1 artifacts, a local Playwright capture helper/CLI, strict capture-envelope validation, browser provenance, and accessible atomic workbench ingestion through canonical `loadCase`.
+- Exact-tree staged/public Vercel parity before advancing the recoverable production branch.
+
+## Now — prove the product on real failures
+
+- Publish a small reproducible browser-failure corpus rather than relying on the built-in example.
+- Add Playwright recipes for browser regressions, component sandboxes and application test failures using the shipped capture artifact workflow.
+- Record original/reduced size, trial count, status preservation and browser/capture environment metadata without inventing benchmark results.
 - Expand deterministic fixtures for HTML, CSS and JavaScript semantic-unit extraction.
-- Add more oracle normalization and runtime-error specificity cases.
-- Keep browser containment tests green for navigation, form submission, result forgery, script/style export boundaries and WebMCP cancellation.
-- Publish a small reproducible browser-failure corpus rather than relying on one built-in example.
-- Measure reduction size, trial count and oracle preservation without claiming global minimality.
+- Keep browser containment, capture ingestion, WebMCP and recovery tests green as the reducer evolves.
 
 ## Next — better semantic reduction
 
@@ -25,11 +33,14 @@ Candidate work:
 
 The repository contains older/experimental depth-aware concepts, but they do not change the production claim until integrated into `src/runtime.js` and release tests.
 
-## Next — browser-test integrations
+## Next — deeper browser-test integrations
 
-- Playwright workflow that takes a deterministic failing case and produces an importable FAULTLINE case.
-- Export metadata suitable for attaching a reduced reproducer to a bug/CI artifact.
-- Recipes for browser regressions, component sandboxes and test failures.
+The first Playwright capture/import bridge is shipped. Follow-on work should increase coverage without pretending that arbitrary bundled applications can be losslessly reconstructed from a browser network trace.
+
+- Framework/component adapters that can provide exact reducible source at the test boundary.
+- CI artifact recipes that attach a `faultline.capture` plus the reduced standalone reproducer to failed jobs.
+- Optional capture-time console/runtime evidence that remains provenance only until re-verified by the FAULTLINE oracle.
+- Cross-browser capture/verification once deterministic semantics are defined for Chromium, Firefox and WebKit differences.
 - A public Web Reduction Benchmark corpus with original/reduced size, trial count, status preservation and environment metadata.
 
 ## Later — stronger isolation / scale
@@ -38,7 +49,7 @@ The repository contains older/experimental depth-aware concepts, but they do not
 - Standards-complete parsing for selected axes where it materially improves reduction quality.
 - Cross-browser validation of reduced cases.
 - Reproducer bundles with deterministic environment metadata.
-- Stable reusable reducer/oracle packages after APIs settle.
+- Stable reusable reducer/oracle/capture packages after APIs settle.
 
 ## Non-goals
 
@@ -49,7 +60,9 @@ FAULTLINE will not:
 - disable containment to reduce more aggressively,
 - claim a browser iframe is equivalent to process/VM isolation,
 - invent reduction percentages for marketing,
-- expose arbitrary remote/browser control merely to appear more agentic.
+- expose arbitrary remote/browser control merely to appear more agentic,
+- claim that browser provenance proves an imported failure still reproduces before the canonical oracle is rerun,
+- silently reconstruct incomplete framework/module source and call it a trustworthy reducer input.
 
 ## Contributing to roadmap work
 

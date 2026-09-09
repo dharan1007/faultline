@@ -30,7 +30,12 @@ try{
   await page.waitForFunction(()=>window.faultline);
   const before=await page.evaluate(()=>window.faultline.inspect().revision);
 
-  assert.ok(await page.locator('#capture-import').count(),'capture import disclosure must exist');
+  const disclosure=page.locator('#capture-import > summary');
+  assert.ok(await disclosure.count(),'capture import disclosure must exist');
+  await disclosure.focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('#capture-import').getAttribute('open'),'','capture import must open from keyboard activation');
+
   const file=page.locator('#capture-file');
   assert.equal(await file.getAttribute('accept'),'.json,.faultline.json');
   const verify=page.locator('#verify-capture');

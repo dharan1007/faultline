@@ -54,3 +54,11 @@ FAULTLINE will not:
 ## Contributing to roadmap work
 
 Small fixtures, oracle cases and accessibility/docs work should become `good first issue` tasks. Parser/reducer semantics, sandbox boundaries and browser integrations should use an issue/RFC with explicit acceptance tests before implementation.
+
+## Real browser ingestion
+
+- [x] Playwright snapshot capture pipeline for bounded DOM-state failures
+- [x] Transactional capture import with canonical FAIL preflight and provenance
+- [x] Browser API, human workbench and WebMCP capture import/export parity
+- [ ] Script-aware capture/replay for failures whose causality cannot be represented by a final DOM snapshot
+- [ ] Framework/dev-server adapters with explicit dependency packaging instead of silent network coupling

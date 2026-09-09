@@ -132,6 +132,88 @@ function installCaseJsonExport(){
   reproducerButton.insertAdjacentElement('beforebegin',button);
 }
 
+function installCaptureImport(){
+  const actionBar=document.querySelector('#case-workspace .action-bar');
+  if(!actionBar||document.getElementById('capture-import'))return;
+  const details=document.createElement('details');
+  details.id='capture-import';
+  details.style.marginTop='12px';
+  details.style.paddingTop='12px';
+  details.style.borderTop='1px solid var(--line)';
+  const summary=document.createElement('summary');
+  summary.className='btn ghost';
+  summary.textContent='Import Playwright capture';
+  const help=document.createElement('p');
+  help.id='capture-import-help';
+  help.className='small';
+  help.textContent='Import faultline.capture.v1 from the local Playwright adapter. FAULTLINE first re-runs the captured case in its canonical sandbox and replaces current state only when the baseline reproduces FAIL.';
+  const fileLabel=document.createElement('label');
+  fileLabel.htmlFor='capture-file';
+  fileLabel.textContent='Capture file';
+  const file=document.createElement('input');
+  file.id='capture-file';
+  file.type='file';
+  file.accept='.json,application/json';
+  file.setAttribute('aria-describedby','capture-import-help');
+  const label=document.createElement('label');
+  label.htmlFor='capture-import-json';
+  label.textContent='Capture JSON';
+  const editor=document.createElement('textarea');
+  editor.id='capture-import-json';
+  editor.spellcheck=false;
+  editor.style.minHeight='190px';
+  editor.setAttribute('aria-describedby','capture-import-help');
+  file.addEventListener('change',async()=>{try{const selected=file.files?.[0];if(selected)editor.value=await selected.text();}catch(error){reportActionError(error);}});
+  const actions=document.createElement('div');
+  actions.className='actions';
+  actions.style.marginTop='10px';
+  const button=document.createElement('button');
+  button.id='import-capture';
+  button.className='btn primary';
+  button.type='button';
+  button.textContent='Verify FAIL and import';
+  button.addEventListener('click',async()=>{
+    try{
+      const capture=JSON.parse(editor.value);
+      const current=window.faultline.inspect();
+      const result=await window.faultline.importCapture({expectedRevision:current.revision,capture});
+      const health=document.getElementById('health');
+      const evidence=document.getElementById('summary');
+      if(health){health.textContent='FAIL';health.dataset.state='FAIL';}
+      if(evidence)evidence.textContent=`CAPTURE VERIFIED · FAIL · ${result.captureProvenance?.provenance?.url||'local capture'}`;
+    }catch(error){reportActionError(error);}
+  });
+  actions.append(button);
+  details.append(summary,help,fileLabel,file,label,editor,actions);
+  actionBar.insertAdjacentElement('afterend',details);
+}
+
+function installCaptureExport(){
+  const reproducerButton=document.getElementById('export');
+  if(!reproducerButton||document.getElementById('export-capture-json'))return;
+  const button=document.createElement('button');
+  button.id='export-capture-json';
+  button.className='btn';
+  button.type='button';
+  button.textContent='Export capture JSON';
+  button.addEventListener('click',()=>{
+    try{
+      const state=window.faultline.inspect();
+      const blob=new Blob([`${JSON.stringify(window.faultline.exportCapture(),null,2)}\n`],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement('a');
+      link.href=url;
+      link.download=`faultline-capture-${state.revision}.json`;
+      link.hidden=true;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),0);
+    }catch(error){reportActionError(error);}
+  });
+  reproducerButton.insertAdjacentElement('beforebegin',button);
+}
+
 function installRevisionRecovery(){
   const actionBar=document.querySelector('#case-workspace .action-bar');
   if(!actionBar||document.getElementById('revision-recovery'))return ()=>{};
@@ -229,7 +311,9 @@ function installPreviewNavigationGuard(){
 }
 
 installCaseImport();
+installCaptureImport();
 installCaseJsonExport();
+installCaptureExport();
 installRevisionRecovery();
 installPreviewNavigationGuard();
 

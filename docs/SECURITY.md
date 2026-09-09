@@ -13,6 +13,10 @@
 - WebMCP schemas are bounded and do not expose arbitrary DOM execution
 - stale revision rejection on state-changing operations
 
+## Capture boundary
+
+The Playwright capture adapter runs locally in the developer environment. The hosted FAULTLINE workbench does not navigate to arbitrary target URLs, receive target-site credentials or gain new network capability. Imported capture content is still evaluated through the existing sandbox/CSP and navigation/network policy, and capture import commits only after a canonical FAIL preflight. Inaccessible stylesheet dependencies are recorded and rejected rather than silently omitted.
+
 ## Known limits
 
 This is not an operating-system sandbox. JavaScript that performs expensive work without a loop (for example pathological recursion or a single extremely expensive native call) can still consume renderer time before the host timeout recovers. Unsupported loop syntax is converted to structured `UNRESOLVED` evidence rather than executed unguarded. The current JavaScript reducer is structural at statement granularity but is not a standards-complete parser. HTML/CSS scanners intentionally target self-contained reproducible cases rather than malformed adversarial language corpora.

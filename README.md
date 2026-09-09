@@ -2,7 +2,7 @@
 
 **Reduce a broken HTML/CSS/JavaScript page to a smaller standalone reproducer while preserving the failure you actually care about.**
 
-FAULTLINE is a local-first causal debugging workbench. You load a deterministic web failure, define an oracle, probe removals, run bounded delta reduction, pin important units, inspect revision/evidence history, restore earlier states and export a standalone HTML reproducer.
+FAULTLINE is a local-first causal debugging workbench. You can load a deterministic web failure directly or capture a real locally reachable page with the Playwright adapter, verify that the captured baseline still fails inside FAULTLINE, then probe removals, run bounded delta reduction, inspect evidence/revision history and export a standalone reproducer with capture provenance.
 
 [**Live Demo**](https://faultline-webmcp.vercel.app/) · [Run locally](#run-locally) · [Security](docs/SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
 
@@ -46,6 +46,18 @@ FAULTLINE makes the preservation condition explicit.
 | "Why was this kept/removed?" | Experiment/evidence ledger |
 | "Give me a bug report" | Export a standalone HTML reproducer |
 | "Let an agent help" | Native WebMCP tools use the same canonical runtime |
+
+## Capture a real browser failure
+
+The production repository includes a local Playwright snapshot adapter so a developer does not have to manually reconstruct every DOM-state failure. Create a config containing the target URL, failure oracle and bounded pre-capture actions, then run:
+
+```bash
+node scripts/capture-playwright.mjs --config ./faultline-capture.config.json
+```
+
+The adapter emits `faultline.capture.v1` with the final DOM, readable CSS, normalized oracle and provenance. Import it through the workbench, `window.faultline.importCapture`, or `faultline_import_capture`. FAULTLINE executes the normalized case in the same canonical sandbox and commits it only if the result is exactly `FAIL`. PASS, UNRESOLVED, stale, malformed or dependency-incomplete captures leave the current case untouched.
+
+Snapshot capture supports DOM property/attribute, existence and computed-style failures after bounded click/value/checked/wait actions. It intentionally does not claim to reconstruct arbitrary framework JavaScript, authentication/backend state, cross-origin stylesheet contents or runtime-error causality. Those captures must be made self-contained first.
 
 ## Try the built-in case
 

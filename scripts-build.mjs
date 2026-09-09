@@ -4,6 +4,7 @@ const productionFiles = [
   'index.html',
   'src/runtime.js',
   'src/ui.js',
+  'src/capture-format.js',
   'src/reducer-engine.js',
   'src/sandbox-policy.js'
 ];

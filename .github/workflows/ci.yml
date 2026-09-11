@@ -5,7 +5,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -13,9 +13,24 @@ jobs:
           node-version: 22
       - run: npm install --no-audit --no-fund
       - run: npm test
-      - run: npm run check
+      - name: Verify all production and evidence scripts parse
+        run: |
+          npm run check
+          node --check tests/reducer-benchmark.mjs
+          node --check tests/cross-browser-production.mjs
       - run: npm run build
-      - name: Install pinned Playwright Chromium
-        run: npx playwright install chromium
-      - name: Verify real browser and WebMCP behavior
+      - name: Verify deterministic reducer performance budget
+        run: node tests/reducer-benchmark.mjs | tee faultline-benchmark.jsonl
+      - name: Upload reducer benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: faultline-reducer-benchmark-${{ github.sha }}
+          path: faultline-benchmark.jsonl
+          retention-days: 30
+          if-no-files-found: error
+      - name: Install pinned Playwright browser families
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Verify complete Chromium and WebMCP behavior
         run: npm run test:browser
+      - name: Verify representative production behavior across Chromium Firefox and WebKit
+        run: node tests/cross-browser-production.mjs

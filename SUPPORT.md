@@ -15,6 +15,12 @@ Use the structured bug form. Include:
 - whether the issue reproduces with the public deployment or current main,
 - relevant console output with private data removed.
 
+## Paid debugging engagements
+
+FAULTLINE offers scoped paid engagements through `/services.html`. Start through the published intake form. Do not submit passwords, API keys, private signing material, session cookies or other production secrets through the public form.
+
+A paid SLA begins only after the request is reviewed, scope is accepted in writing, and payment or invoice terms are confirmed. Public form submission by itself creates no guaranteed response or delivery commitment. Any accepted engagement states its own severity, response target, delivery target, browser matrix, confidentiality boundary and handoff artifacts.
+
 ## Reproducer contributions
 
 Use the failure-case/fixture form for synthetic browser failures that can become public regression cases. Real customer/private source must be reduced/anonymized before submission.
@@ -25,4 +31,4 @@ Potential sandbox, navigation, result-channel, persistence-isolation or WebMCP b
 
 ## Response expectations
 
-FAULTLINE currently has no paid or guaranteed-response SLA. GitHub is the canonical public support path.
+Public GitHub support remains best-effort and has no guaranteed-response SLA. Guaranteed terms exist only inside an accepted paid engagement after payment or invoice confirmation.

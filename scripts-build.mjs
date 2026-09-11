@@ -4,17 +4,20 @@ import {execFileSync} from 'node:child_process';
 
 const productionFiles=[
   'index.html',
+  'services.html',
   'src/runtime.js',
   'src/ui.js',
   'src/reducer-engine.js',
   'src/sandbox-policy.js',
   'src/capture-contract.js',
+  'src/commercial-cta.js',
   'vendor/acorn.js'
 ];
 const SHA=/^[0-9a-f]{40}$/i;
 
 function hash(bytes){return createHash('sha256').update(bytes).digest('hex');}
 function validSha(value){const text=String(value||'').trim();return SHA.test(text)?text.toLowerCase():null;}
+function validHttps(value){try{return new URL(String(value||'')).protocol==='https:';}catch{return false;}}
 function sourceIdentity(){
   const vercelSha=validSha(process.env.VERCEL_GIT_COMMIT_SHA);
   if(process.env.VERCEL==='1'&&vercelSha){
@@ -42,9 +45,7 @@ for(const file of productionFiles){
   if(!existsSync(file)){console.error(`Missing production file: ${file}`);process.exit(1);}
 }
 
-// Capture immutable source evidence before generating or deleting any build output.
 const source=sourceIdentity();
-
 rmSync('public',{recursive:true,force:true});
 mkdirSync('public/src',{recursive:true});
 mkdirSync('public/vendor',{recursive:true});
@@ -55,16 +56,14 @@ for(const file of productionFiles){
   copyFileSync(file,`public/${file}`);
   integrity.assets[`/${file}`]={sha256:hash(bytes),bytes:bytes.length};
 }
+const configuredPayment=String(process.env.FAULTLINE_PAYMENT_LINK||'').trim();
+const commercialConfig={schemaVersion:1,provider:String(process.env.FAULTLINE_PAYMENT_PROVIDER||'').trim()||null,paymentUrl:validHttps(configuredPayment)?configuredPayment:null,intakeUrl:'https://tally.so/r/ZjMEKV'};
+const commercialBytes=Buffer.from(`${JSON.stringify(commercialConfig,null,2)}\n`);
+writeFileSync('public/commercial-config.json',commercialBytes);
+integrity.assets['/commercial-config.json']={sha256:hash(commercialBytes),bytes:commercialBytes.length};
+
 const integrityBytes=Buffer.from(`${JSON.stringify(integrity,null,2)}\n`);
 writeFileSync('public/integrity.json',integrityBytes);
-
-const release={
-  schemaVersion:1,
-  service:'faultline-webmcp',
-  version:'0.9.0',
-  source,
-  evidence:{integrity:{path:'/integrity.json',sha256:hash(integrityBytes),bytes:integrityBytes.length}},
-  runtime:{executionBoundary:'browser-iframe-local-first',arbitraryThirdPartyHostedExecution:false}
-};
+const release={schemaVersion:1,service:'faultline-webmcp',version:'0.9.0',source,evidence:{integrity:{path:'/integrity.json',sha256:hash(integrityBytes),bytes:integrityBytes.length}},runtime:{executionBoundary:'browser-iframe-local-first',arbitraryThirdPartyHostedExecution:false},commercial:{servicesPath:'/services.html',checkoutConfigured:Boolean(commercialConfig.paymentUrl)}};
 writeFileSync('public/release.json',`${JSON.stringify(release,null,2)}\n`);
-console.log(`static production tree verified and staged in public/ (${productionFiles.length} runtime assets, ${source.provenance}/${source.authority})`);
+console.log(`static production tree verified and staged in public/ (${Object.keys(integrity.assets).length} runtime assets, ${source.provenance}/${source.authority})`);

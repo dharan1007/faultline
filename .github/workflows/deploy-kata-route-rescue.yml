@@ -1,0 +1,102 @@
+name: Deploy KATA route rescue
+
+on:
+  push:
+    branches:
+      - ops/deploy-kata-route-2026-09-11
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      TEAM_ID: team_APBZJjf6iizHCTuseqHosFnU
+      PROJECT_ID: prj_uDsXCo9uynyfgRGQKxVp9pVGL29y
+      EXPECTED_SHA: 63b93f52dcd5997b0e5cfd325b2801c829c80fc7
+      CANONICAL_URL: https://kata-webmcp.vercel.app
+    steps:
+      - name: Fail closed without Vercel credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${VERCEL_TOKEN:-}" || { echo "VERCEL_TOKEN is not configured" >&2; exit 1; }
+      - name: Create exact Git-source production deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' > /tmp/deploy-body.json
+          const body={
+            name:'kata-webmcp',
+            project:process.env.PROJECT_ID,
+            target:'production',
+            gitSource:{type:'github',org:'dharan1007',repo:'kata',ref:'main',sha:process.env.EXPECTED_SHA},
+            gitMetadata:{remoteUrl:'https://github.com/dharan1007/kata.git',commitAuthorName:'dharan',commitRef:'main',commitSha:process.env.EXPECTED_SHA,commitMessage:'fix: route public commercial services page',dirty:false}
+          };
+          process.stdout.write(JSON.stringify(body));
+          NODE
+          curl -fsS -X POST "https://api.vercel.com/v13/deployments?teamId=$TEAM_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/deploy-body.json > /tmp/deployment.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const d=JSON.parse(fs.readFileSync('/tmp/deployment.json','utf8'));
+          if(!d.id) throw new Error(JSON.stringify(d));
+          fs.writeFileSync('/tmp/deployment-id',d.id);
+          console.log(`deployment=${d.id} url=${d.url||''}`);
+          NODE
+      - name: Wait for READY and verify provider metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          deployment_id="$(cat /tmp/deployment-id)"
+          ready=0
+          for attempt in $(seq 1 120); do
+            curl -fsS "https://api.vercel.com/v13/deployments/$deployment_id?teamId=$TEAM_ID" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" > /tmp/deployment-status.json
+            state="$(node -e "const d=require('/tmp/deployment-status.json'); process.stdout.write(d.readyState||d.state||'')")"
+            if [ "$state" = READY ]; then ready=1; break; fi
+            if [ "$state" = ERROR ] || [ "$state" = CANCELED ]; then cat /tmp/deployment-status.json; exit 1; fi
+            sleep 5
+          done
+          test "$ready" = 1 || { echo 'KATA deployment did not become READY' >&2; exit 1; }
+          EXPECTED_SHA="$EXPECTED_SHA" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const d=JSON.parse(fs.readFileSync('/tmp/deployment-status.json','utf8'));
+          const m=d.meta||{};
+          if(m.githubCommitOrg!=='dharan1007'||m.githubCommitRepo!=='kata'||m.githubCommitRef!=='main'||m.githubCommitSha!==process.env.EXPECTED_SHA) throw new Error(`provider metadata mismatch: ${JSON.stringify(m)}`);
+          NODE
+      - name: Promote canonical alias
+        shell: bash
+        run: |
+          set -euo pipefail
+          deployment_id="$(cat /tmp/deployment-id)"
+          curl -fsS -X POST "https://api.vercel.com/v2/deployments/$deployment_id/aliases?teamId=$TEAM_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{"alias":"kata-webmcp.vercel.app","redirect":null}' > /tmp/alias.json
+          cat /tmp/alias.json
+      - name: Verify canonical KATA commercial route and exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          converged=0
+          for attempt in $(seq 1 60); do
+            if curl -fsS --retry 2 --retry-all-errors "$CANONICAL_URL/release.json" > /tmp/release.json && \
+               curl -fsS --retry 2 --retry-all-errors "$CANONICAL_URL/services" > /tmp/services.html && \
+               EXPECTED_SHA="$EXPECTED_SHA" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const r=JSON.parse(fs.readFileSync('/tmp/release.json','utf8'));
+          const html=fs.readFileSync('/tmp/services.html','utf8');
+          if(r.source?.sha!==process.env.EXPECTED_SHA) process.exit(1);
+          if(r.source?.provenance!=='source-bound'||r.source?.authority!=='vercel-git'||r.source?.repository!=='dharan1007/kata'||r.source?.ref!=='main') process.exit(1);
+          if(!/Workflow Audit/.test(html)||!/Team Deployment/.test(html)||!/J9Qpxr/.test(html)) process.exit(1);
+          NODE
+            then converged=1; break; fi
+            sleep 5
+          done
+          test "$converged" = 1 || { echo 'Canonical KATA route did not converge to exact release' >&2; exit 1; }

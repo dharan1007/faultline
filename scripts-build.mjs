@@ -25,7 +25,10 @@ function sourceIdentity(){
   const githubSha=validSha(process.env.GITHUB_SHA);
   if(githubSha){
     let head=null,clean=null;
-    try{head=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim().toLowerCase();clean=execFileSync('git',['status','--porcelain=v1','--untracked-files=all'],{encoding:'utf8'}).trim()==='';}catch{}
+    try{
+      head=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim().toLowerCase();
+      clean=execFileSync('git',['status','--porcelain=v1','--untracked-files=all'],{encoding:'utf8'}).trim()==='';
+    }catch{}
     return Object.freeze({sha:githubSha,provenance:head===githubSha&&clean===true?'source-bound':'unverified',authority:'github-actions',repository:String(process.env.GITHUB_REPOSITORY||'').trim()||null,ref:String(process.env.GITHUB_REF_NAME||process.env.GITHUB_REF||'').trim()||null,verification:{headSha:head,headMatches:head===githubSha,clean}});
   }
   try{
@@ -38,6 +41,9 @@ function sourceIdentity(){
 for(const file of productionFiles){
   if(!existsSync(file)){console.error(`Missing production file: ${file}`);process.exit(1);}
 }
+
+// Capture immutable source evidence before generating or deleting any build output.
+const source=sourceIdentity();
 
 rmSync('public',{recursive:true,force:true});
 mkdirSync('public/src',{recursive:true});
@@ -52,7 +58,6 @@ for(const file of productionFiles){
 const integrityBytes=Buffer.from(`${JSON.stringify(integrity,null,2)}\n`);
 writeFileSync('public/integrity.json',integrityBytes);
 
-const source=sourceIdentity();
 const release={
   schemaVersion:1,
   service:'faultline-webmcp',

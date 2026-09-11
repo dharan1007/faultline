@@ -18,6 +18,12 @@ test('FAULTLINE ships a public paid-debugging services surface',()=>{
   assert.doesNotMatch(html,/rzp_(?:test|live)_[A-Za-z0-9]+/,'no Razorpay credential may be embedded in public HTML');
 });
 
+test('main workbench exposes the paid services funnel',()=>{
+  const index=read('index.html');
+  assert.match(index,/href="\/services"/);
+  assert.match(index,/>Services</);
+});
+
 test('commercial checkout fails closed without a configured HTTPS payment URL',()=>{
   assert.equal(existsSync('src/commercial-cta.js'),true,'commercial checkout module must exist');
   const cta=read('src/commercial-cta.js');

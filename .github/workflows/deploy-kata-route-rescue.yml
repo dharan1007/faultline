@@ -16,7 +16,7 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       TEAM_ID: team_APBZJjf6iizHCTuseqHosFnU
       PROJECT_ID: prj_uDsXCo9uynyfgRGQKxVp9pVGL29y
-      EXPECTED_SHA: 63b93f52dcd5997b0e5cfd325b2801c829c80fc7
+      EXPECTED_SHA: c23b6ad8a3fd2dbe1c850841c802e606f1b7ad95
       CANONICAL_URL: https://kata-webmcp.vercel.app
     steps:
       - name: Fail closed without Vercel credential
@@ -34,7 +34,7 @@ jobs:
             project:process.env.PROJECT_ID,
             target:'production',
             gitSource:{type:'github',org:'dharan1007',repo:'kata',ref:'main',sha:process.env.EXPECTED_SHA},
-            gitMetadata:{remoteUrl:'https://github.com/dharan1007/kata.git',commitAuthorName:'dharan',commitRef:'main',commitSha:process.env.EXPECTED_SHA,commitMessage:'fix: route public commercial services page',dirty:false}
+            gitMetadata:{remoteUrl:'https://github.com/dharan1007/kata.git',commitAuthorName:'dharan',commitRef:'main',commitSha:process.env.EXPECTED_SHA,commitMessage:'Use canonical commercial intake',dirty:false}
           };
           process.stdout.write(JSON.stringify(body));
           NODE
@@ -88,13 +88,16 @@ jobs:
           for attempt in $(seq 1 60); do
             if curl -fsS --retry 2 --retry-all-errors "$CANONICAL_URL/release.json" > /tmp/release.json && \
                curl -fsS --retry 2 --retry-all-errors "$CANONICAL_URL/services" > /tmp/services.html && \
+               curl -fsS --retry 2 --retry-all-errors "$CANONICAL_URL/commercial-config.json" > /tmp/commercial-config.json && \
                EXPECTED_SHA="$EXPECTED_SHA" node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const r=JSON.parse(fs.readFileSync('/tmp/release.json','utf8'));
+          const c=JSON.parse(fs.readFileSync('/tmp/commercial-config.json','utf8'));
           const html=fs.readFileSync('/tmp/services.html','utf8');
           if(r.source?.sha!==process.env.EXPECTED_SHA) process.exit(1);
           if(r.source?.provenance!=='source-bound'||r.source?.authority!=='vercel-git'||r.source?.repository!=='dharan1007/kata'||r.source?.ref!=='main') process.exit(1);
-          if(!/Workflow Audit/.test(html)||!/Team Deployment/.test(html)||!/J9Qpxr/.test(html)) process.exit(1);
+          if(!/Workflow Audit/.test(html)||!/Team Deployment/.test(html)||!/xXAa0J/.test(html)) process.exit(1);
+          if(c.intakeUrl!=='https://tally.so/r/xXAa0J') process.exit(1);
           NODE
             then converged=1; break; fi
             sleep 5

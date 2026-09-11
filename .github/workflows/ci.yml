@@ -19,6 +19,8 @@ jobs:
       - name: Reject known high-severity runtime dependency vulnerabilities
         run: npm audit --audit-level=high --omit=dev
       - run: npm test
+      - name: Verify production deployment contract
+        run: node --test tests/deploy-production-contract.test.js
       - name: Verify all production and evidence scripts parse
         run: |
           npm run check

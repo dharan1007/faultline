@@ -2,35 +2,53 @@ name: ci
 on:
   push:
   pull_request:
+permissions:
+  contents: read
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      - run: npm install --no-audit --no-fund
+          cache: npm
+      - name: Install exact locked dependencies
+        run: npm ci --ignore-scripts
+      - name: Reject known high-severity runtime dependency vulnerabilities
+        run: npm audit --audit-level=high --omit=dev
       - run: npm test
       - name: Verify all production and evidence scripts parse
         run: |
           npm run check
           node --check tests/reducer-benchmark.mjs
           node --check tests/cross-browser-production.mjs
+      - name: Verify package exports are loadable
+        run: node --input-type=module -e "await import('faultline-webmcp/capture'); await import('faultline-webmcp/reducer'); await import('faultline-webmcp/playwright-capture');"
       - run: npm run build
+      - name: Generate dependency SBOM from exact lockfile
+        run: npm run sbom
+      - name: Verify installable package surface
+        run: npm run verify:package
       - name: Verify deterministic reducer performance budget
         run: node tests/reducer-benchmark.mjs | tee faultline-benchmark.jsonl
-      - name: Upload reducer benchmark evidence
-        uses: actions/upload-artifact@v4
+      - name: Upload release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
         with:
-          name: faultline-reducer-benchmark-${{ github.sha }}
-          path: faultline-benchmark.jsonl
+          name: faultline-release-evidence-${{ github.sha }}
+          path: |
+            faultline-benchmark.jsonl
+            artifacts/faultline.spdx.json
+            public/release.json
+            public/integrity.json
           retention-days: 30
           if-no-files-found: error
       - name: Install pinned Playwright browser families
-        run: npx playwright install --with-deps chromium firefox webkit
+        run: ./node_modules/.bin/playwright install --with-deps chromium firefox webkit
       - name: Verify complete Chromium and WebMCP behavior
         run: npm run test:browser
       - name: Verify representative production behavior across Chromium Firefox and WebKit
         run: node tests/cross-browser-production.mjs
+      - name: Verify packaged CLI reproduces and reduces a real captured failure
+        run: node tests/cli-browser.mjs

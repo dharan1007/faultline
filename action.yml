@@ -1,0 +1,60 @@
+name: 'FAULTLINE browser failure analysis'
+description: 'Validate, reproduce, causally reduce, and export a faultline.capture.v1 artifact in a contained local browser workbench.'
+author: 'FAULTLINE'
+inputs:
+  capture:
+    description: 'Path to faultline.capture.v1 JSON in the caller workspace.'
+    required: true
+  report:
+    description: 'Output path for the source-minimal CI report.'
+    required: false
+    default: 'faultline-report.json'
+  bundle:
+    description: 'Optional output path for the full standalone reproducer bundle. Leave empty to avoid exporting captured source.'
+    required: false
+    default: ''
+  browser:
+    description: 'Browser engine: chromium, firefox, or webkit.'
+    required: false
+    default: 'chromium'
+  axes:
+    description: 'Comma-separated reduction axes.'
+    required: false
+    default: 'html,css,js'
+  max-trials:
+    description: 'Per-axis maximum causal trials (1-200).'
+    required: false
+    default: '80'
+outputs:
+  report:
+    description: 'Path to the generated CI report.'
+    value: ${{ steps.analyze.outputs.report }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Install exact FAULTLINE dependencies
+      shell: bash
+      run: npm ci --ignore-scripts --prefix "$GITHUB_ACTION_PATH"
+    - name: Materialize pinned parser asset
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/scripts-vendor.mjs"
+    - name: Install selected Playwright browser
+      shell: bash
+      run: "$GITHUB_ACTION_PATH/node_modules/.bin/playwright" install --with-deps "${{ inputs.browser }}"
+    - name: Analyze captured failure
+      id: analyze
+      shell: bash
+      env:
+        FAULTLINE_CAPTURE: ${{ inputs.capture }}
+        FAULTLINE_REPORT: ${{ inputs.report }}
+        FAULTLINE_BUNDLE: ${{ inputs.bundle }}
+        FAULTLINE_BROWSER: ${{ inputs.browser }}
+        FAULTLINE_AXES: ${{ inputs.axes }}
+        FAULTLINE_MAX_TRIALS: ${{ inputs.max-trials }}
+      run: |
+        set -euo pipefail
+        args=(analyze "$FAULTLINE_CAPTURE" --out "$FAULTLINE_REPORT" --browser "$FAULTLINE_BROWSER" --axes "$FAULTLINE_AXES" --max-trials "$FAULTLINE_MAX_TRIALS")
+        if [ -n "$FAULTLINE_BUNDLE" ]; then args+=(--bundle "$FAULTLINE_BUNDLE"); fi
+        node "$GITHUB_ACTION_PATH/bin/faultline.mjs" "${args[@]}"
+        test -s "$FAULTLINE_REPORT"
+        echo "report=$FAULTLINE_REPORT" >> "$GITHUB_OUTPUT"

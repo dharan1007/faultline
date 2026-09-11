@@ -1,116 +1,97 @@
 name: Deploy KATA commercial rescue
-
 on:
   push:
-    branches:
-      - ops/deploy-kata-commercial-2026-09-11
-
+    branches: [ops/deploy-kata-commercial-2026-09-11]
 permissions:
   contents: read
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
-      TEAM_ID: team_APBZJjf6iizHCTuseqHosFnU
-      PROJECT_ID: prj_uDsXCo9uynyfgRGQKxVp9pVGL29y
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_TEAM_ID: team_APBZJjf6iizHCTuseqHosFnU
+      VERCEL_PROJECT_ID: prj_uDsXCo9uynyfgRGQKxVp9pVGL29y
       EXPECTED_SHA: a229f6bf00f3cdd5c5249e5bdd6a453d31031877
       CANONICAL: kata-webmcp.vercel.app
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
-      - name: Require deployment token
+      - name: Create exact Git-source KATA production deployment
         shell: bash
         run: |
           set -euo pipefail
           test -n "${VERCEL_TOKEN:-}"
-
-      - name: Create exact-source KATA production deployment
-        id: deploy
-        shell: bash
-        run: |
-          set -euo pipefail
-          body=$(node - <<'NODE'
-          const sha=process.env.EXPECTED_SHA;
-          process.stdout.write(JSON.stringify({
-            name:'kata-webmcp',
-            project:process.env.PROJECT_ID,
-            target:'production',
-            gitSource:{type:'github',org:'dharan1007',repo:'kata',ref:'main',sha},
-            gitMetadata:{remoteUrl:'https://github.com/dharan1007/kata.git',commitRef:'main',commitSha:sha,dirty:false}
-          }));
-          NODE
-          )
-          response=$(curl --fail-with-body --silent --show-error \
-            -X POST "https://api.vercel.com/v13/deployments?teamId=${TEAM_ID}" \
-            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+          jq -n \
+            --arg name 'kata-webmcp' \
+            --arg project "$VERCEL_PROJECT_ID" \
+            --arg sha "$EXPECTED_SHA" \
+            '{name:$name,project:$project,target:"production",gitSource:{type:"github",org:"dharan1007",repo:"kata",ref:"main",sha:$sha},gitMetadata:{remoteUrl:"https://github.com/dharan1007/kata",commitRef:"main",commitSha:$sha,dirty:false,ci:true,ciType:"github-actions",ciGitProviderUsername:"dharan1007",ciGitRepoVisibility:"public"}}' >/tmp/request.json
+          http_code=$(curl -sS -o /tmp/create.json -w '%{http_code}' \
+            -X POST "https://api.vercel.com/v13/deployments?teamId=$VERCEL_TEAM_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H 'Content-Type: application/json' \
-            --data "$body")
-          printf '%s\n' "$response" > deployment-create.json
-          node -e "const d=require('./deployment-create.json'); if(!d.id) process.exit(1); console.log('deployment',d.id,d.url)"
-          echo "deployment_id=$(node -p \"require('./deployment-create.json').id\")" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for exact deployment to become ready
+            --data-binary @/tmp/request.json)
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "Vercel production deployment creation failed with HTTP $http_code" >&2
+            jq '{error,code,message}' /tmp/create.json >&2 || true
+            exit 1
+          fi
+          deployment_id=$(jq -r '.id // empty' /tmp/create.json)
+          deployment_url=$(jq -r '.url // empty' /tmp/create.json)
+          test -n "$deployment_id"
+          test -n "$deployment_url"
+          echo "deployment_id=$deployment_id" >> "$GITHUB_ENV"
+          echo "deployment_url=$deployment_url" >> "$GITHUB_ENV"
+          echo "Created KATA production deployment $deployment_id for exact SHA $EXPECTED_SHA"
+      - name: Wait for production READY with exact Git metadata
         shell: bash
         run: |
           set -euo pipefail
-          id='${{ steps.deploy.outputs.deployment_id }}'
-          for attempt in $(seq 1 72); do
-            curl --fail-with-body --silent --show-error \
-              "https://api.vercel.com/v13/deployments/${id}?teamId=${TEAM_ID}" \
-              -H "Authorization: Bearer ${VERCEL_TOKEN}" > deployment.json
-            state=$(node -p "require('./deployment.json').readyState || require('./deployment.json').state || ''")
-            echo "attempt=${attempt} state=${state}"
-            if [ "$state" = READY ]; then break; fi
-            if [ "$state" = ERROR ] || [ "$state" = CANCELED ]; then cat deployment.json; exit 1; fi
+          for attempt in $(seq 1 120); do
+            curl -fsS \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              "https://api.vercel.com/v13/deployments/$deployment_id?teamId=$VERCEL_TEAM_ID" \
+              -o /tmp/deployment.json
+            state=$(jq -r '.readyState // .status // empty' /tmp/deployment.json)
+            case "$state" in
+              READY)
+                jq -e --arg sha "$EXPECTED_SHA" '(.meta.githubCommitSha // .gitSource.sha // "") == $sha' /tmp/deployment.json >/dev/null
+                jq -e '.meta.githubCommitRef == "main" and .meta.githubCommitRepo == "kata" and .meta.githubCommitOrg == "dharan1007"' /tmp/deployment.json >/dev/null
+                echo "KATA exact production deployment READY: https://$deployment_url"
+                exit 0
+                ;;
+              ERROR|CANCELED)
+                echo "KATA production deployment ended in $state" >&2
+                jq '{id,url,readyState,status,errorCode,errorMessage,meta,gitSource}' /tmp/deployment.json >&2
+                exit 1
+                ;;
+            esac
             sleep 5
           done
-          node <<'NODE'
-          const d=require('./deployment.json');
-          const meta=d.meta||{};
-          const state=d.readyState||d.state;
-          if(state!=='READY') throw new Error(`deployment did not become READY: ${state}`);
-          if(meta.githubCommitSha!==process.env.EXPECTED_SHA) throw new Error(`provider SHA mismatch: ${meta.githubCommitSha}`);
-          if(meta.githubCommitRef!=='main') throw new Error(`provider ref mismatch: ${meta.githubCommitRef}`);
-          if(meta.githubCommitRepo!=='kata'||meta.githubCommitOrg!=='dharan1007') throw new Error('provider repository mismatch');
-          NODE
-
+          echo 'Timed out waiting for KATA production deployment.' >&2
+          exit 1
       - name: Promote exact deployment to canonical alias
         shell: bash
         run: |
           set -euo pipefail
-          id='${{ steps.deploy.outputs.deployment_id }}'
-          curl --fail-with-body --silent --show-error \
-            -X POST "https://api.vercel.com/v2/deployments/${id}/aliases?teamId=${TEAM_ID}" \
-            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+          http_code=$(curl -sS -o /tmp/alias.json -w '%{http_code}' \
+            -X POST "https://api.vercel.com/v2/deployments/$deployment_id/aliases?teamId=$VERCEL_TEAM_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H 'Content-Type: application/json' \
-            --data "{\"alias\":\"${CANONICAL}\",\"redirect\":null}" > alias.json
-          cat alias.json
-
+            --data "{\"alias\":\"$CANONICAL\",\"redirect\":null}")
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then cat /tmp/alias.json >&2; exit 1; fi
+          cat /tmp/alias.json
       - name: Verify canonical KATA commercial release
         shell: bash
         run: |
           set -euo pipefail
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error "https://${CANONICAL}/release.json?sha=${EXPECTED_SHA}&attempt=${attempt}" -o release.json; then
-              if node - <<'NODE'
-              const r=require('./release.json');
-              const ok=r?.source?.sha===process.env.EXPECTED_SHA && r?.source?.provenance==='source-bound' && r?.source?.authority==='vercel-git' && r?.commercial?.servicesPath==='/services.html';
-              process.exit(ok?0:1);
-              NODE
-              then break; fi
+            if curl -fsS "https://$CANONICAL/release.json?sha=$EXPECTED_SHA&attempt=$attempt" -o /tmp/release.json && \
+               jq -e --arg sha "$EXPECTED_SHA" '.source.sha==$sha and .source.provenance=="source-bound" and .source.authority=="vercel-git" and .commercial.servicesPath=="/services.html"' /tmp/release.json >/dev/null; then
+              break
             fi
             sleep 3
           done
-          node <<'NODE'
-          const r=require('./release.json');
-          if(r.source.sha!==process.env.EXPECTED_SHA) throw new Error(`canonical SHA mismatch: ${r.source.sha}`);
-          if(r.source.provenance!=='source-bound'||r.source.authority!=='vercel-git') throw new Error('canonical provenance mismatch');
-          if(r.commercial?.servicesPath!=='/services.html') throw new Error('commercial services release metadata missing');
-          NODE
-          curl --fail --silent --show-error "https://${CANONICAL}/services.html" | grep -q 'Workflow Audit'
-          curl --fail --silent --show-error "https://${CANONICAL}/commercial-config.json" > commercial.json
-          node <<'NODE'
-          const c=require('./commercial.json');
-          if(c.intakeUrl!=='https://tally.so/r/J9Qpxr') throw new Error('intake URL mismatch');
-          if(c.paymentUrl!==null && !String(c.paymentUrl).startsWith('https://')) throw new Error('unsafe payment URL');
-          NODE
+          jq -e --arg sha "$EXPECTED_SHA" '.source.sha==$sha and .source.provenance=="source-bound" and .source.authority=="vercel-git" and .commercial.servicesPath=="/services.html"' /tmp/release.json >/dev/null
+          curl -fsS "https://$CANONICAL/services.html" | grep -q 'Workflow Audit'
+          curl -fsS "https://$CANONICAL/commercial-config.json" -o /tmp/commercial.json
+          jq -e '.intakeUrl=="https://tally.so/r/J9Qpxr" and (.paymentUrl==null or (.paymentUrl|startswith("https://")))' /tmp/commercial.json >/dev/null

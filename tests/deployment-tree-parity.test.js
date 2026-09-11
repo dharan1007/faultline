@@ -23,18 +23,22 @@ test('production build emits every runtime file plus cryptographic release evide
   assert.match(buildScript,/GITHUB_SHA/);
 });
 
-test('production verification relies on Vercel Git integration without long-lived deployment credentials', () => {
-  assert.doesNotMatch(workflow,/VERCEL_TOKEN/);
+test('production promotion uses a scoped Vercel credential only to create and promote an exact Git-source deployment', () => {
+  assert.match(workflow,/VERCEL_TOKEN:\s*\$\{\{\s*secrets\.VERCEL_TOKEN\s*\}\}/);
+  assert.match(workflow,/api\.vercel\.com\/v13\/deployments/);
+  assert.match(workflow,/gitSource/);
+  assert.match(workflow,/repo:\"faultline\"/);
+  assert.match(workflow,/ref:\"main\"/);
+  assert.match(workflow,/sha:\$sha/);
+  assert.match(workflow,/target:\"production\"/);
+  assert.match(workflow,/api\.vercel\.com\/v2\/deployments\/\$deployment_id\/aliases/);
+  assert.match(workflow,/faultline-webmcp\.vercel\.app/);
   assert.doesNotMatch(workflow,/vercel\s+(?:deploy|build|pull|promote|curl)/);
-  assert.match(workflow,/Vercel Git integration/i);
-  assert.match(workflow,/release\.json/);
-  assert.match(workflow,/integrity\.json/);
-  assert.match(workflow,/EXPECTED_SHA/);
-  assert.match(workflow,/source\?\.authority!=='vercel-git'/);
 });
 
-test('production verifier requires exact canonical source and full runtime integrity', () => {
-  assert.match(workflow,/seq 1 120/);
+test('production verifier requires exact canonical source and full runtime integrity after promotion', () => {
+  assert.match(workflow,/githubCommitSha/);
+  assert.match(workflow,/source\?\.authority!=='vercel-git'/);
   assert.match(workflow,/Canonical production did not converge to the verified FAULTLINE source/);
   assert.match(workflow,/integrity digest mismatch/);
   for (const file of productionFiles) assert.ok(workflow.includes(`/${file}`),`${file} must be represented in canonical integrity verification`);

@@ -1,4 +1,4 @@
-const INTAKE_URL='https://tally.so/r/ZjMEKV';
+const INTAKE_URL='https://tally.so/r/WOL5eP';
 
 function validHttps(value){
   try{return new URL(value).protocol==='https:';}catch{return false;}

@@ -57,7 +57,7 @@ for(const file of productionFiles){
   integrity.assets[`/${file}`]={sha256:hash(bytes),bytes:bytes.length};
 }
 const configuredPayment=String(process.env.FAULTLINE_PAYMENT_LINK||'').trim();
-const commercialConfig={schemaVersion:1,provider:String(process.env.FAULTLINE_PAYMENT_PROVIDER||'').trim()||null,paymentUrl:validHttps(configuredPayment)?configuredPayment:null,intakeUrl:'https://tally.so/r/ZjMEKV'};
+const commercialConfig={schemaVersion:1,provider:String(process.env.FAULTLINE_PAYMENT_PROVIDER||'').trim()||null,paymentUrl:validHttps(configuredPayment)?configuredPayment:null,intakeUrl:'https://tally.so/r/WOL5eP'};
 const commercialBytes=Buffer.from(`${JSON.stringify(commercialConfig,null,2)}\n`);
 writeFileSync('public/commercial-config.json',commercialBytes);
 integrity.assets['/commercial-config.json']={sha256:hash(commercialBytes),bytes:commercialBytes.length};

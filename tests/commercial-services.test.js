@@ -10,7 +10,7 @@ test('FAULTLINE ships a public paid-debugging services surface',()=>{
   assert.match(html,/Single Debug Sprint/);
   assert.match(html,/Production Incident/);
   assert.match(html,/Team Debugging Retainer/);
-  assert.match(html,/https:\/\/tally\.so\/r\/ZjMEKV/);
+  assert.match(html,/https:\/\/tally\.so\/r\/WOL5eP/);
   assert.match(html,/SLA/i);
   assert.match(html,/Playwright/i);
   assert.match(html,/GitHub Action/i);
@@ -24,7 +24,7 @@ test('commercial checkout fails closed without a configured HTTPS payment URL',(
   assert.match(cta,/commercial-config\.json/);
   assert.match(cta,/https:/);
   assert.match(cta,/payment/i);
-  assert.match(cta,/https:\/\/tally\.so\/r\/ZjMEKV/);
+  assert.match(cta,/https:\/\/tally\.so\/r\/WOL5eP/);
 });
 
 test('production build and support contract include commercial assets and paid SLA semantics',()=>{
@@ -33,6 +33,7 @@ test('production build and support contract include commercial assets and paid S
   assert.match(build,/services\.html/);
   assert.match(build,/src\/commercial-cta\.js/);
   assert.match(build,/commercial-config\.json/);
+  assert.match(build,/https:\/\/tally\.so\/r\/WOL5eP/);
   assert.match(support,/paid engagement/i);
   assert.match(support,/SLA/i);
   assert.match(support,/payment|invoice/i);

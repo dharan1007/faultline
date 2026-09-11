@@ -1,176 +1,104 @@
-name: Promote verified FAULTLINE production
+name: Verify FAULTLINE production
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: faultline-production
   cancel-in-progress: false
 
 jobs:
-  verify-deploy-and-promote:
+  verify-production:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
-      VERCEL_ORG_ID: team_APBZJjf6iizHCTuseqHosFnU
-      VERCEL_PROJECT_ID: prj_XtQdMYG2kOufYTrZ1SDj61VEExDM
-      VERCEL_PRODUCTION_BRANCH: production
-      VERCEL_PRODUCTION_URL: https://faultline-webmcp.vercel.app
+      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+      CANONICAL_URL: https://faultline-webmcp.vercel.app
+
     steps:
-      - name: Check out exact production candidate
+      - name: Check out exact verified source
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-
-      - name: Record immutable source SHA
-        run: |
-          set -euo pipefail
-          echo "SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          test "$(git branch --show-current)" = "main"
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Verify deterministic core
-        run: npm test
-
-      - name: Verify JavaScript syntax
-        run: npm run check
-
-      - name: Verify production tree
-        run: npm run build
-
-      - name: Install pinned Playwright Chromium
-        run: npx playwright install chromium
-
-      - name: Verify real browser and WebMCP behavior
-        run: npm run test:browser
-
-      - name: Refuse stale main candidate
+      - name: Verify immutable candidate
+        shell: bash
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main
-          CURRENT_MAIN=$(git rev-parse origin/main)
-          test "$SOURCE_SHA" = "$CURRENT_MAIN" || {
-            echo "main advanced from $SOURCE_SHA to $CURRENT_MAIN while verification ran; refusing stale production deployment"
-            exit 1
-          }
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)" || { echo "verified source checkout is dirty" >&2; exit 1; }
 
-      - name: Verify production branch can fast-forward
+      - name: Re-run deterministic build contract
+        shell: bash
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --heads origin "$VERCEL_PRODUCTION_BRANCH" >/dev/null 2>&1; then
-            git fetch --no-tags origin "$VERCEL_PRODUCTION_BRANCH"
-            git merge-base --is-ancestor "origin/$VERCEL_PRODUCTION_BRANCH" "$SOURCE_SHA" || {
-              echo "production branch is not an ancestor of verified source; refusing non-fast-forward promotion"
-              exit 1
-            }
-          fi
+          npm install --no-audit --no-fund
+          npm test
+          npm run check
+          GITHUB_SHA="$EXPECTED_SHA" GITHUB_REPOSITORY="${{ github.repository }}" GITHUB_REF_NAME=main npm run build
+          EXPECTED_SHA="$EXPECTED_SHA" node --input-type=module -e "import fs from 'node:fs';const r=JSON.parse(fs.readFileSync('public/release.json','utf8'));if(r.source?.sha!==process.env.EXPECTED_SHA.toLowerCase())throw new Error('local release SHA mismatch');if(r.source?.provenance!=='source-bound'||r.source?.authority!=='github-actions')throw new Error('local release is not exact-source bound');"
 
-      - name: Require Vercel deployment credential
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      - name: Wait for Vercel Git integration to converge
+        shell: bash
         run: |
           set -euo pipefail
-          test -n "${VERCEL_TOKEN:-}" || {
-            echo "::error::VERCEL_TOKEN repository secret is required for exact-project production deployment"
-            exit 1
-          }
-
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest
-
-      - name: Bind checkout to existing Vercel project
-        run: |
-          set -euo pipefail
-          mkdir -p .vercel
-          printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
-          cat .vercel/project.json
-
-      - name: Pull production project settings
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-
-      - name: Build exact verified tree for Vercel
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: vercel build --prod --token="$VERCEL_TOKEN"
-
-      - name: Create staged production deployment without moving domains
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          set -euo pipefail
-          DEPLOYMENT_URL=$(vercel deploy --prebuilt --prod --skip-domain --token="$VERCEL_TOKEN")
-          test -n "$DEPLOYMENT_URL"
-          echo "DEPLOYMENT_URL=$DEPLOYMENT_URL" >> "$GITHUB_ENV"
-          echo "Staged exact verified tree at $DEPLOYMENT_URL"
-
-      - name: Smoke-test staged deployment against verified source
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          set -euo pipefail
-          for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js src/capture-contract.js vendor/acorn.js; do
-            if [ "$file" = "index.html" ]; then
-              remote_path="/"
-            else
-              remote_path="/$file"
-            fi
-            output="/tmp/faultline-staged-${file//\//-}"
-            vercel curl "$remote_path" --deployment "$DEPLOYMENT_URL" > "$output"
-            cmp "$file" "$output"
-          done
-
-      - name: Promote staged deployment to production
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: vercel promote "$DEPLOYMENT_URL" --token="$VERCEL_TOKEN"
-
-      - name: Verify public production alias serves exact tree
-        run: |
-          set -euo pipefail
-          MATCHED=0
-          for attempt in $(seq 1 18); do
-            TREE_MATCHED=1
-            for file in index.html src/runtime.js src/ui.js src/reducer-engine.js src/sandbox-policy.js src/capture-contract.js vendor/acorn.js; do
-              if [ "$file" = "index.html" ]; then
-                remote_path="/"
-              else
-                remote_path="/$file"
-              fi
-              output="/tmp/faultline-live-${file//\//-}"
-              if ! curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors "$VERCEL_PRODUCTION_URL$remote_path" -o "$output" || ! cmp -s "$file" "$output"; then
-                TREE_MATCHED=0
-                break
-              fi
-            done
-            if [ "$TREE_MATCHED" = 1 ]; then
-              MATCHED=1
+          converged=0
+          for attempt in $(seq 1 120); do
+            if curl -fsS --retry 2 --retry-all-errors --retry-delay 1 "$CANONICAL_URL/release.json" > /tmp/faultline-release.json && \
+               EXPECTED_SHA="$EXPECTED_SHA" node --input-type=module -e "import fs from 'node:fs';const r=JSON.parse(fs.readFileSync('/tmp/faultline-release.json','utf8'));if(r.source?.sha!==process.env.EXPECTED_SHA.toLowerCase())process.exit(1);if(r.source?.provenance!=='source-bound'||r.source?.authority!=='vercel-git')process.exit(1);if(r.source?.repository!=='dharan1007/faultline'||r.source?.ref!=='main')process.exit(1);"; then
+              converged=1
               break
             fi
             sleep 5
           done
-          test "$MATCHED" = 1 || {
-            echo "::error::Production alias did not converge to the complete verified source tree"
+          if [ "$converged" != 1 ]; then
+            echo "Canonical production did not converge to the verified FAULTLINE source" >&2
             exit 1
-          }
+          fi
 
-      - name: Mark exact deployed tree as production source
+      - name: Verify canonical integrity manifest and every runtime asset
+        shell: bash
         run: |
           set -euo pipefail
-          git push origin "$SOURCE_SHA:refs/heads/$VERCEL_PRODUCTION_BRANCH"
-          echo "Deployed and promoted verified source SHA $SOURCE_SHA"
-          echo "Vercel project: $VERCEL_PROJECT_ID ($VERCEL_ORG_ID)"
-          echo "Production URL: $VERCEL_PRODUCTION_URL"
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 2 "$CANONICAL_URL/integrity.json" -o /tmp/faultline-integrity.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import {createHash} from 'node:crypto';
+          const release=JSON.parse(fs.readFileSync('/tmp/faultline-release.json','utf8'));
+          const bytes=fs.readFileSync('/tmp/faultline-integrity.json');
+          const digest=createHash('sha256').update(bytes).digest('hex');
+          if(release.evidence?.integrity?.sha256!==digest)throw new Error('integrity digest mismatch');
+          if(release.evidence?.integrity?.bytes!==bytes.length)throw new Error('integrity byte count mismatch');
+          const manifest=JSON.parse(bytes);
+          const required=['/index.html','/src/runtime.js','/src/ui.js','/src/reducer-engine.js','/src/sandbox-policy.js','/src/capture-contract.js','/vendor/acorn.js'];
+          for(const path of required){if(!manifest.assets?.[path])throw new Error(`missing integrity entry ${path}`);}
+          NODE
+          for path in /index.html /src/runtime.js /src/ui.js /src/reducer-engine.js /src/sandbox-policy.js /src/capture-contract.js /vendor/acorn.js; do
+            safe="${path//\//-}"
+            curl -fsS --retry 5 --retry-all-errors --retry-delay 2 "$CANONICAL_URL$path" -o "/tmp/$safe"
+            PATH_TO_VERIFY="$path" FILE_TO_VERIFY="/tmp/$safe" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import {createHash} from 'node:crypto';
+          const manifest=JSON.parse(fs.readFileSync('/tmp/faultline-integrity.json','utf8'));
+          const expected=manifest.assets?.[process.env.PATH_TO_VERIFY];
+          const bytes=fs.readFileSync(process.env.FILE_TO_VERIFY);
+          if(!expected)throw new Error(`missing manifest entry ${process.env.PATH_TO_VERIFY}`);
+          if(expected.bytes!==bytes.length)throw new Error(`byte mismatch ${process.env.PATH_TO_VERIFY}`);
+          const digest=createHash('sha256').update(bytes).digest('hex');
+          if(expected.sha256!==digest)throw new Error(`asset digest mismatch ${process.env.PATH_TO_VERIFY}`);
+          NODE
+          done

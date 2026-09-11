@@ -1,0 +1,42 @@
+name: Connect KATA Vercel Git source
+on:
+  push:
+    branches: [ops/connect-kata-vercel-git-2026-09-11]
+permissions:
+  contents: read
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_TEAM_SLUG: tejs-projects-70bb4568
+      VERCEL_PROJECT_ID: prj_uDsXCo9uynyfgRGQKxVp9pVGL29y
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Prepare exact KATA repository and existing Vercel project link
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${VERCEL_TOKEN:-}"
+          git clone --depth=1 --branch main https://github.com/dharan1007/kata.git /tmp/kata
+          mkdir -p /tmp/kata/.vercel
+          cat >/tmp/kata/.vercel/project.json <<JSON
+          {"projectId":"$VERCEL_PROJECT_ID","orgId":"team_APBZJjf6iizHCTuseqHosFnU","projectName":"kata-webmcp"}
+          JSON
+      - name: Connect GitHub source to the existing KATA project
+        shell: bash
+        working-directory: /tmp/kata
+        run: |
+          set -euo pipefail
+          npx --yes vercel@59.15.1 git connect --yes --scope "$VERCEL_TEAM_SLUG" --token "$VERCEL_TOKEN"
+      - name: Verify Git connection is visible to Vercel CLI
+        shell: bash
+        working-directory: /tmp/kata
+        run: |
+          set -euo pipefail
+          npx --yes vercel@59.15.1 git ls --scope "$VERCEL_TEAM_SLUG" --token "$VERCEL_TOKEN" 2>&1 | tee /tmp/kata-git-link.txt
+          grep -Eiq 'github|dharan1007|kata' /tmp/kata-git-link.txt
+          echo 'KATA Vercel Git source connected.'

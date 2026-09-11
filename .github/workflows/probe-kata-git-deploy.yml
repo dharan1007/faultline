@@ -1,0 +1,69 @@
+name: Probe exact KATA Git-source deployment
+on:
+  push:
+    branches: [probe/vercel-auth-2026-09-11]
+permissions:
+  contents: read
+jobs:
+  deploy-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_TEAM_ID: team_APBZJjf6iizHCTuseqHosFnU
+      VERCEL_PROJECT_ID: prj_uDsXCo9uynyfgRGQKxVp9pVGL29y
+      EXPECTED_SHA: a89d7fe2e275dca9b1850a46bc5227d189aacf75
+    steps:
+      - name: Create exact Git-source KATA preview via Vercel REST API
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${VERCEL_TOKEN:-}"
+          jq -n \
+            --arg name 'kata-webmcp' \
+            --arg project "$VERCEL_PROJECT_ID" \
+            --arg sha "$EXPECTED_SHA" \
+            '{name:$name,project:$project,gitSource:{type:"github",org:"dharan1007",repo:"kata",ref:"main",sha:$sha},gitMetadata:{remoteUrl:"https://github.com/dharan1007/kata",commitRef:"main",commitSha:$sha,dirty:false,ci:true,ciType:"github-actions",ciGitProviderUsername:"dharan1007",ciGitRepoVisibility:"public"}}' >/tmp/request.json
+          http_code=$(curl -sS -o /tmp/create.json -w '%{http_code}' \
+            -X POST "https://api.vercel.com/v13/deployments?teamId=$VERCEL_TEAM_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/request.json)
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "Vercel deployment creation failed with HTTP $http_code" >&2
+            jq '{error,code,message}' /tmp/create.json >&2 || true
+            exit 1
+          fi
+          deployment_id=$(jq -r '.id // empty' /tmp/create.json)
+          deployment_url=$(jq -r '.url // empty' /tmp/create.json)
+          test -n "$deployment_id"
+          test -n "$deployment_url"
+          echo "deployment_id=$deployment_id" >> "$GITHUB_ENV"
+          echo "deployment_url=$deployment_url" >> "$GITHUB_ENV"
+          echo "Created preview deployment $deployment_id for exact KATA SHA $EXPECTED_SHA"
+      - name: Wait for exact preview build
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 120); do
+            curl -fsS \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              "https://api.vercel.com/v13/deployments/$deployment_id?teamId=$VERCEL_TEAM_ID" \
+              -o /tmp/deployment.json
+            state=$(jq -r '.readyState // .status // empty' /tmp/deployment.json)
+            case "$state" in
+              READY)
+                jq -e --arg sha "$EXPECTED_SHA" '(.meta.githubCommitSha // .gitSource.sha // "") == $sha' /tmp/deployment.json >/dev/null
+                echo "KATA exact Git-source preview READY: https://$deployment_url"
+                exit 0
+                ;;
+              ERROR|CANCELED)
+                echo "KATA preview deployment ended in $state" >&2
+                jq '{id,url,readyState,status,errorCode,errorMessage,meta,gitSource}' /tmp/deployment.json >&2
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+          echo 'Timed out waiting for KATA preview deployment.' >&2
+          exit 1

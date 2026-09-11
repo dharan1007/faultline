@@ -6,6 +6,8 @@ const workflow = fs.readFileSync('.github/workflows/deploy-production.yml', 'utf
 const buildScript = fs.readFileSync('scripts-build.mjs', 'utf8');
 const productionFiles = [
   'index.html',
+  'commerce.html',
+  'commercial-config.js',
   'src/runtime.js',
   'src/ui.js',
   'src/reducer-engine.js',

@@ -37,3 +37,10 @@ test('production build and support contract include commercial assets and paid S
   assert.match(support,/SLA/i);
   assert.match(support,/payment|invoice/i);
 });
+
+test('clean /services URL is routed to the paid services document',()=>{
+  assert.equal(existsSync('vercel.json'),true,'Vercel routing config must exist');
+  const vercel=read('vercel.json');
+  assert.match(vercel,/"source"\s*:\s*"\/services"/);
+  assert.match(vercel,/"destination"\s*:\s*"\/services\.html"/);
+});

@@ -14,30 +14,28 @@ const productionFiles = [
   'vendor/acorn.js'
 ];
 
-test('production deployment parity verifies every shipped application file before and after promotion', () => {
-  for (const file of productionFiles) {
-    const occurrences = workflow.split(file).length - 1;
-    assert.ok(
-      occurrences >= 2,
-      `${file} must be verified in both staged and live production parity checks; found ${occurrences} workflow references`
-    );
-  }
-
-  assert.match(workflow, /Smoke-test staged deployment against verified source/);
-  assert.match(workflow, /Verify public production alias serves exact tree/);
+test('production build emits every runtime file plus cryptographic release evidence', () => {
+  for (const file of productionFiles) assert.ok(buildScript.includes(file),`${file} must be staged`);
+  assert.match(buildScript,/integrity\.json/);
+  assert.match(buildScript,/release\.json/);
+  assert.match(buildScript,/createHash\(['"]sha256['"]\)/);
+  assert.match(buildScript,/VERCEL_GIT_COMMIT_SHA/);
+  assert.match(buildScript,/GITHUB_SHA/);
 });
 
-test('production build stages every browser runtime dependency', () => {
-  for (const file of productionFiles.filter(file=>file!=='index.html')) {
-    assert.ok(buildScript.includes(file),`${file} must be copied into the static production tree`);
-  }
+test('production verification relies on Vercel Git integration without long-lived deployment credentials', () => {
+  assert.doesNotMatch(workflow,/VERCEL_TOKEN/);
+  assert.doesNotMatch(workflow,/vercel\s+(?:deploy|build|pull|promote|curl)/);
+  assert.match(workflow,/Vercel Git integration/i);
+  assert.match(workflow,/release\.json/);
+  assert.match(workflow,/integrity\.json/);
+  assert.match(workflow,/EXPECTED_SHA/);
+  assert.match(workflow,/source\?\.authority!=='vercel-git'/);
 });
 
-test('staged parity authenticates Vercel curl through VERCEL_TOKEN environment only', () => {
-  const stagedStep = workflow.match(/- name: Smoke-test staged deployment against verified source[\s\S]*?(?=\n      - name: Promote staged deployment to production)/)?.[0];
-  assert.ok(stagedStep, 'staged parity workflow step must exist');
-  assert.match(stagedStep, /VERCEL_TOKEN:\s*\$\{\{ secrets\.VERCEL_TOKEN \}\}/);
-  assert.match(stagedStep, /vercel\s+curl\s+"\$remote_path"\s+--deployment\s+"\$DEPLOYMENT_URL"/);
-  assert.doesNotMatch(stagedStep, /vercel[^\n]*--token/);
-  assert.doesNotMatch(stagedStep, /curl -fsSL/);
+test('production verifier requires exact canonical source and full runtime integrity', () => {
+  assert.match(workflow,/seq 1 120/);
+  assert.match(workflow,/Canonical production did not converge to the verified FAULTLINE source/);
+  assert.match(workflow,/integrity digest mismatch/);
+  for (const file of productionFiles) assert.ok(workflow.includes(`/${file}`),`${file} must be represented in canonical integrity verification`);
 });

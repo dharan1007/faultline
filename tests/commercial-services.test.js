@@ -14,18 +14,17 @@ test('FAULTLINE ships a public paid-debugging services surface',()=>{
   assert.match(html,/SLA/i);
   assert.match(html,/Playwright/i);
   assert.match(html,/GitHub Action/i);
+  assert.match(html,/commercial-cta\.js/);
   assert.doesNotMatch(html,/rzp_(?:test|live)_[A-Za-z0-9]+/,'no Razorpay credential may be embedded in public HTML');
 });
 
-test('commercial CTA is loaded by the product and fails closed without a real payment URL',()=>{
-  assert.equal(existsSync('src/commercial-cta.js'),true,'commercial CTA module must exist');
-  const runtime=read('src/runtime.js');
+test('commercial checkout fails closed without a configured HTTPS payment URL',()=>{
+  assert.equal(existsSync('src/commercial-cta.js'),true,'commercial checkout module must exist');
   const cta=read('src/commercial-cta.js');
-  assert.match(runtime,/commercial-cta\.js/);
-  assert.match(cta,/\/services/);
-  assert.match(cta,/https:\/\/tally\.so\/r\/ZjMEKV/);
-  assert.match(cta,/https:\/\//,'external checkout URLs must require HTTPS');
+  assert.match(cta,/commercial-config\.json/);
+  assert.match(cta,/https:/);
   assert.match(cta,/payment/i);
+  assert.match(cta,/https:\/\/tally\.so\/r\/ZjMEKV/);
 });
 
 test('production build and support contract include commercial assets and paid SLA semantics',()=>{
@@ -33,6 +32,7 @@ test('production build and support contract include commercial assets and paid S
   const support=read('SUPPORT.md');
   assert.match(build,/services\.html/);
   assert.match(build,/src\/commercial-cta\.js/);
+  assert.match(build,/commercial-config\.json/);
   assert.match(support,/paid engagement/i);
   assert.match(support,/SLA/i);
   assert.match(support,/payment|invoice/i);

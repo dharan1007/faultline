@@ -19,10 +19,13 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
       CANONICAL_URL: https://faultline-webmcp.vercel.app
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_TEAM_ID: team_APBZJjf6iizHCTuseqHosFnU
+      VERCEL_PROJECT_ID: prj_XtQdMYG2kOufYTrZ1SDj61VEExDM
 
     steps:
       - name: Check out exact verified source
@@ -42,6 +45,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)" || { echo "verified source checkout is dirty" >&2; exit 1; }
+          test -n "${VERCEL_TOKEN:-}" || { echo "VERCEL_TOKEN is required for production promotion" >&2; exit 1; }
 
       - name: Re-run deterministic build contract
         shell: bash
@@ -54,18 +58,86 @@ jobs:
           GITHUB_SHA="$EXPECTED_SHA" GITHUB_REPOSITORY="${{ github.repository }}" GITHUB_REF_NAME=main npm run build
           EXPECTED_SHA="$EXPECTED_SHA" node --input-type=module -e "import fs from 'node:fs';const r=JSON.parse(fs.readFileSync('public/release.json','utf8'));if(r.source?.sha!==process.env.EXPECTED_SHA.toLowerCase())throw new Error('local release SHA mismatch');if(r.source?.provenance!=='source-bound'||r.source?.authority!=='github-actions')throw new Error('local release is not exact-source bound');"
 
-      - name: Wait for Vercel Git integration to converge
+      - name: Create exact Git-source Vercel production deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg name 'faultline-webmcp' \
+            --arg project "$VERCEL_PROJECT_ID" \
+            --arg sha "$EXPECTED_SHA" \
+            '{name:$name,project:$project,target:"production",gitSource:{type:"github",org:"dharan1007",repo:"faultline",ref:"main",sha:$sha},gitMetadata:{remoteUrl:"https://github.com/dharan1007/faultline",commitRef:"main",commitSha:$sha,dirty:false,ci:true,ciType:"github-actions",ciGitProviderUsername:"dharan1007",ciGitRepoVisibility:"public"}}' >/tmp/faultline-deploy-request.json
+          http_code=$(curl -sS -o /tmp/faultline-deploy-create.json -w '%{http_code}' \
+            -X POST "https://api.vercel.com/v13/deployments?teamId=$VERCEL_TEAM_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/faultline-deploy-request.json)
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "Vercel deployment creation failed with HTTP $http_code" >&2
+            jq '{error,code,message}' /tmp/faultline-deploy-create.json >&2 || true
+            exit 1
+          fi
+          deployment_id=$(jq -r '.id // empty' /tmp/faultline-deploy-create.json)
+          deployment_url=$(jq -r '.url // empty' /tmp/faultline-deploy-create.json)
+          test -n "$deployment_id"
+          test -n "$deployment_url"
+          echo "deployment_id=$deployment_id" >> "$GITHUB_ENV"
+          echo "deployment_url=$deployment_url" >> "$GITHUB_ENV"
+
+      - name: Wait for exact Vercel deployment and atomically assign canonical alias
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=0
+          for attempt in $(seq 1 120); do
+            curl -fsS \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              "https://api.vercel.com/v13/deployments/$deployment_id?teamId=$VERCEL_TEAM_ID" \
+              -o /tmp/faultline-deployment.json
+            state=$(jq -r '.readyState // .status // empty' /tmp/faultline-deployment.json)
+            case "$state" in
+              READY)
+                jq -e --arg sha "$EXPECTED_SHA" '(.meta.githubCommitSha // .gitSource.sha // "") == $sha' /tmp/faultline-deployment.json >/dev/null
+                jq -e '.meta.githubCommitRef == "main" and .meta.githubCommitRepo == "faultline" and .meta.githubCommitOrg == "dharan1007"' /tmp/faultline-deployment.json >/dev/null
+                ready=1
+                break
+                ;;
+              ERROR|CANCELED)
+                echo "Vercel deployment ended in $state" >&2
+                jq '{id,url,readyState,status,errorCode,errorMessage,meta,gitSource}' /tmp/faultline-deployment.json >&2
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+          if [ "$ready" != 1 ]; then
+            echo "Timed out waiting for the exact FAULTLINE production deployment" >&2
+            exit 1
+          fi
+          alias_code=$(curl -sS -o /tmp/faultline-alias.json -w '%{http_code}' \
+            -X POST "https://api.vercel.com/v2/deployments/$deployment_id/aliases?teamId=$VERCEL_TEAM_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{"alias":"faultline-webmcp.vercel.app","redirect":null}')
+          if [ "$alias_code" -lt 200 ] || [ "$alias_code" -ge 300 ]; then
+            echo "Canonical alias assignment failed with HTTP $alias_code" >&2
+            jq '{error,code,message}' /tmp/faultline-alias.json >&2 || true
+            exit 1
+          fi
+          jq -e '.alias == "faultline-webmcp.vercel.app"' /tmp/faultline-alias.json >/dev/null
+
+      - name: Verify canonical exact source
         shell: bash
         run: |
           set -euo pipefail
           converged=0
-          for attempt in $(seq 1 120); do
+          for attempt in $(seq 1 60); do
             if curl -fsS --retry 2 --retry-all-errors --retry-delay 1 "$CANONICAL_URL/release.json" > /tmp/faultline-release.json && \
                EXPECTED_SHA="$EXPECTED_SHA" node --input-type=module -e "import fs from 'node:fs';const r=JSON.parse(fs.readFileSync('/tmp/faultline-release.json','utf8'));if(r.source?.sha!==process.env.EXPECTED_SHA.toLowerCase())process.exit(1);if(r.source?.provenance!=='source-bound'||r.source?.authority!=='vercel-git')process.exit(1);if(r.source?.repository!=='dharan1007/faultline'||r.source?.ref!=='main')process.exit(1);"; then
               converged=1
               break
             fi
-            sleep 5
+            sleep 2
           done
           if [ "$converged" != 1 ]; then
             echo "Canonical production did not converge to the verified FAULTLINE source" >&2

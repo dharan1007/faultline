@@ -15,3 +15,23 @@ test('production verifier pins third-party GitHub Actions to immutable commit SH
   assert.ok(uses.length>=2,'expected checkout/setup-node actions');
   for(const action of uses){assert.match(action,/@[0-9a-f]{40}$/i,`un-pinned action: ${action}`);}
 });
+
+test('production workflow actively deploys the verified exact Git SHA through Vercel REST rather than waiting on an absent Git link',()=>{
+  assert.match(workflow,/VERCEL_TOKEN:\s*\$\{\{\s*secrets\.VERCEL_TOKEN\s*\}\}/);
+  assert.match(workflow,/https:\/\/api\.vercel\.com\/v13\/deployments/);
+  assert.match(workflow,/gitSource/);
+  assert.match(workflow,/"github"/);
+  assert.match(workflow,/dharan1007/);
+  assert.match(workflow,/faultline/);
+  assert.match(workflow,/EXPECTED_SHA/);
+  assert.match(workflow,/target:\s*"production"|target:\"production\"|target:"production"/);
+  assert.match(workflow,/githubCommitSha/);
+});
+
+test('production workflow atomically assigns the public canonical alias only after the exact deployment is READY',()=>{
+  assert.match(workflow,/https:\/\/api\.vercel\.com\/v2\/deployments\/\$deployment_id\/aliases/);
+  assert.match(workflow,/faultline-webmcp\.vercel\.app/);
+  const readyIndex=workflow.indexOf('READY)');
+  const aliasIndex=workflow.indexOf('/v2/deployments/$deployment_id/aliases');
+  assert.ok(readyIndex>=0&&aliasIndex>readyIndex,'canonical alias must be assigned only after Vercel reports the exact deployment READY');
+});

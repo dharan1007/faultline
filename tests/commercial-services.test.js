@@ -45,3 +45,12 @@ test('clean /services URL is routed to the paid services document',()=>{
   assert.match(vercel,/"source"\s*:\s*"\/services"/);
   assert.match(vercel,/"destination"\s*:\s*"\/services\.html"/);
 });
+
+test('paid services are discoverable and use the approved public Razorpay checkout',()=>{
+  const index=read('index.html');
+  const build=read('scripts-build.mjs');
+  assert.match(index,/href="\/services"[^>]*>Services<\/a>/);
+  assert.match(build,/https:\/\/rzp\.io\/rzp\/NYIbiiT/);
+  assert.match(build,/Razorpay/);
+  assert.doesNotMatch(build,/rzp_(?:test|live)_[A-Za-z0-9]+/,'no Razorpay API credential may be embedded in the build');
+});

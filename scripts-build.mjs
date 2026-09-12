@@ -14,6 +14,7 @@ const productionFiles=[
   'vendor/acorn.js'
 ];
 const SHA=/^[0-9a-f]{40}$/i;
+const DEFAULT_PAYMENT='https://rzp.io/rzp/NYIbiiT';
 
 function hash(bytes){return createHash('sha256').update(bytes).digest('hex');}
 function validSha(value){const text=String(value||'').trim();return SHA.test(text)?text.toLowerCase():null;}
@@ -56,8 +57,8 @@ for(const file of productionFiles){
   copyFileSync(file,`public/${file}`);
   integrity.assets[`/${file}`]={sha256:hash(bytes),bytes:bytes.length};
 }
-const configuredPayment=String(process.env.FAULTLINE_PAYMENT_LINK||'').trim();
-const commercialConfig={schemaVersion:1,provider:String(process.env.FAULTLINE_PAYMENT_PROVIDER||'').trim()||null,paymentUrl:validHttps(configuredPayment)?configuredPayment:null,intakeUrl:'https://tally.so/r/WOL5eP'};
+const configuredPayment=String(process.env.FAULTLINE_PAYMENT_LINK||DEFAULT_PAYMENT).trim();
+const commercialConfig={schemaVersion:1,provider:String(process.env.FAULTLINE_PAYMENT_PROVIDER||'Razorpay').trim()||'Razorpay',paymentUrl:validHttps(configuredPayment)?configuredPayment:null,intakeUrl:'https://tally.so/r/WOL5eP'};
 const commercialBytes=Buffer.from(`${JSON.stringify(commercialConfig,null,2)}\n`);
 writeFileSync('public/commercial-config.json',commercialBytes);
 integrity.assets['/commercial-config.json']={sha256:hash(commercialBytes),bytes:commercialBytes.length};

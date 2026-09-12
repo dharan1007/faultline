@@ -1,0 +1,41 @@
+name: Patch commercial services nav
+
+on:
+  push:
+    branches:
+      - commercial-services-discoverability
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: commercial-services-discoverability
+          fetch-depth: 0
+      - name: Add paid services to product navigation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('index.html')
+          text=path.read_text()
+          old='<nav class="product-nav" aria-label="Product sections"><a href="#case-workspace">Workbench</a><a href="#evidence-workspace">Evidence</a><a href="#integration-workspace">Integrate</a></nav>'
+          new='<nav class="product-nav" aria-label="Product sections"><a href="#case-workspace">Workbench</a><a href="#evidence-workspace">Evidence</a><a href="#integration-workspace">Integrate</a><a href="/services">Services</a></nav>'
+          if old not in text:
+              raise SystemExit('expected product navigation contract not found')
+          path.write_text(text.replace(old,new,1))
+          PY
+          git rm .github/workflows/patch-commercial-services-nav.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html
+          git diff --cached --check
+          git commit -m 'fix: expose paid services from workbench'
+          git push origin HEAD:commercial-services-discoverability

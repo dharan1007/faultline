@@ -1,6 +1,8 @@
 # Faultline UI/UX Release Status
 
-Release: 0.5.0
+> Update 2026-09-14: workbench verified live at https://faultline-webmcp.vercel.app (production Ready, 2026-09-12 deploy from main@c7ce0a4). Historical 0.5.0 notes below are superseded; current package version is 0.9.0.
+
+Release: 0.5.0 (superseded — see above)
 
 ## Verified in this release
 - redesigned desktop/tablet/mobile workspace

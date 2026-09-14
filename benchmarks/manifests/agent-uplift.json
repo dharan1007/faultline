@@ -1,0 +1,37 @@
+{
+  "suite": "agent-uplift",
+  "description": "Main commercial benchmark: same coding model, Control (original repo + test + normal trace) vs Treatment (same inputs + Faultline minimal repro + causal evidence). Measure valid fix rate, root-cause accuracy, regression pass rate, tokens, context bytes, tool calls, wall time, cost, incorrect patches. Desired result: correct fixes X->Y while cutting agent context by Z% (Rules A, C, D).",
+  "benchmarkRepo": "https://github.com/dharan1007/faultline",
+  "benchmarkCommit": "0000000000000000000000000000000000000000",
+  "benchmarkCommitNote": "Pin the Faultline commit under test in each results manifest (sourceCommit). Control and treatment share model, seed, scaffold, budgets.",
+  "container": null,
+  "containerDigest": null,
+  "conditions": {
+    "sameModel": true,
+    "sameSeed": true,
+    "samePromptScaffold": true,
+    "sameToolCallBudget": true,
+    "sameTokenBudget": true,
+    "sameWallClockTimeout": true,
+    "recordHumanInterventions": true,
+    "recordCost": true,
+    "recordRawOutputs": true,
+    "recordAllFailures": true
+  },
+  "metrics": [
+    "validFixRate",
+    "rootCauseAccuracy",
+    "regressionPassRate",
+    "tokensConsumed",
+    "contextBytes",
+    "toolCalls",
+    "wallTimeSec",
+    "costUsd",
+    "incorrectPatches"
+  ],
+  "targets": {
+    "uplift": "statistically significant positive debugging-agent uplift required for PRODUCTION",
+    "regressionValidation": "validate agent fix on original unreduced test"
+  },
+  "excludedFailures": []
+}

@@ -15,14 +15,14 @@
       "id": "deterministic-oracle",
       "title": "Deterministic failure oracles (5 classes + causal fingerprint v1)",
       "status": "EXPERIMENTAL",
-      "evidence": "dom_property/attribute/exists/computed_style/runtime_error with PASS/FAIL/UNRESOLVED; causal fingerprint added 2026-09-14, needs release-corpus validation.",
+      "evidence": "dom_property/attribute/exists/computed_style/runtime_error with PASS/FAIL/UNRESOLVED; every runCase result now carries a causal fingerprint (oracleIdentity + error name/stack surfaced from sandbox); release-corpus validation pending.",
       "nextEvidence": "benchmarks/manifests/agent-uplift.json"
     },
     {
       "id": "hierarchical-reduction",
       "title": "Hierarchical HTML/CSS/JS reduction with pins and re-verification",
       "status": "EXPERIMENTAL",
-      "evidence": "Structural scanners + ddmin + ancestor pin closure + final FAIL re-verify. SAME_CAUSE acceptance now required; 0 false-equivalent target not yet measured on release corpus.",
+      "evidence": "Structural scanners + ddmin + ancestor pin closure + commit-level SAME_CAUSE enforcement (REDUCTION_LOST_FAILURE on cause drift); per-trial cause tracking planned; 0 false-equivalent target not yet measured on release corpus.",
       "nextEvidence": "benchmarks/manifests/web-debug-bench.json"
     },
     {

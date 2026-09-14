@@ -22,3 +22,27 @@ export function planReduction(scope = {}) {
 
 export const MINIMALITY_DISCLAIMER =
   'FAULTLINE claims bounded 1-minimality over the tested semantic frontier and trial budget only — never a globally shortest program.';
+
+// Final minimality verdict vocabulary (area: minimality verification).
+// LOCALLY_MINIMAL: ddmin ran to fixpoint — no single remaining unit in the
+//   supported local domain could be removed without losing SAME_CAUSE FAIL.
+// BUDGET_LIMITED: trial budget exhausted before fixpoint; the engine throws
+//   TRIAL_BUDGET_EXHAUSTED and commits nothing — a budget-limited result is
+//   never reported as minimal.
+// TIME_LIMITED / ORACLE_LIMITED / UNRESOLVED: reserved for the reduction
+//   scheduler (time-boxed runs, oracle-scope limits, inconclusive runs).
+export const MINIMALITY_STATUSES = Object.freeze([
+  'LOCALLY_MINIMAL', 'BUDGET_LIMITED', 'TIME_LIMITED', 'ORACLE_LIMITED', 'UNRESOLVED',
+]);
+
+export function describeMinimality(status) {
+  const meanings = {
+    LOCALLY_MINIMAL: 'fixpoint reached: every remaining unit in the declared domain was tested and required for SAME_CAUSE FAIL',
+    BUDGET_LIMITED: 'trial budget exhausted before fixpoint; nothing committed; never reported as minimal',
+    TIME_LIMITED: 'wall-clock budget exhausted before fixpoint (scheduler runs)',
+    ORACLE_LIMITED: 'oracle scope bounds what can be removed (e.g. pinned/protected units cover the domain)',
+    UNRESOLVED: 'minimality could not be determined',
+  };
+  if (!meanings[status]) throw new Error(`UNKNOWN_MINIMALITY_STATUS:${status}`);
+  return { status, meaning: meanings[status] };
+}

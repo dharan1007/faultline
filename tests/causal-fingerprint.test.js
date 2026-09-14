@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFingerprint, compareFingerprints, verdictForReduction } from '../src/causal-fingerprint.js';
+import { buildFingerprint, compareFingerprints, verdictForReduction, signalsFromOracleEvidence, hashString, stableStringify } from '../src/causal-fingerprint.js';
 
 const sig = (over = {}) => ({
   exceptionClass: 'TypeError', stack: 'TypeError: x\n    at pay (app.js:10:5)\n    at checkout (app.js:20:3)',
@@ -40,4 +40,41 @@ test('missing fingerprint rejects rather than guessing', () => {
 test('fingerprints are deterministic', () => {
   assert.equal(buildFingerprint(sig()).signature, buildFingerprint(sig()).signature);
   assert.equal(compareFingerprints(buildFingerprint(sig()), buildFingerprint(sig())).sameCause, true);
+});
+
+test('oracleIdentity separates same-outcome different-oracle failures', () => {
+  const oracleA = { kind: 'dom_attribute', selector: '#save', property: 'aria-disabled', equals: 'true' };
+  const oracleB = { kind: 'dom_attribute', selector: '#other', property: 'aria-disabled', equals: 'true' };
+  const a = buildFingerprint({ oracle: oracleA, domInvariant: { actual: 'true', expected: 'true' } });
+  const b = buildFingerprint({ oracle: oracleB, domInvariant: { actual: 'true', expected: 'true' } });
+  const v = verdictForReduction({ status: 'FAIL', fingerprint: a }, { status: 'FAIL', fingerprint: b });
+  assert.equal(v.accept, false);
+  assert.match(v.reason, /STRONG_MISMATCH:oracleIdentity/);
+});
+
+test('same oracle plus same invariant accepts (simple DOM fixture shape)', () => {
+  const oracle = { kind: 'dom_property', selector: '#modal', property: 'open', equals: true };
+  const ev = { actual: true, expected: true, kind: 'dom_property', selector: '#modal', property: 'open' };
+  const a = buildFingerprint(signalsFromOracleEvidence(ev, oracle));
+  const b = buildFingerprint(signalsFromOracleEvidence({ ...ev }, { ...oracle }));
+  const v = verdictForReduction({ status: 'FAIL', fingerprint: a }, { status: 'FAIL', fingerprint: b });
+  assert.equal(v.accept, true);
+  assert.equal(v.reason, 'SAME_CAUSE');
+});
+
+test('signalsFromOracleEvidence maps runtime error name and stack', () => {
+  const signals = signalsFromOracleEvidence(
+    { actual: 'boom', kind: 'runtime_error', errorName: 'TypeError', errorStack: 'TypeError: boom\n    at pay (app.js:10:5)' },
+    { kind: 'runtime_error' },
+  );
+  assert.equal(signals.exceptionClass, 'TypeError');
+  assert.match(signals.stack, /TypeError/);
+  const fp = buildFingerprint(signals);
+  assert.ok(fp.dimensions.exceptionClass);
+  assert.ok(fp.dimensions.stackSignature);
+});
+
+test('hash helpers are deterministic and key-order insensitive', () => {
+  assert.equal(hashString('faultline'), hashString('faultline'));
+  assert.equal(stableStringify({ b: 1, a: 2 }), stableStringify({ a: 2, b: 1 }));
 });

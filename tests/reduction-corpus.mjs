@@ -76,7 +76,7 @@ try{
     assert.equal(baseline.status,'FAIL',`${fixture.id}: baseline must independently reproduce FAIL`);
 
     const originalSource=loaded.case[fixture.axis];
-    const originalUnits=await page.evaluate(axis=>window.faultline.units({targetAxis:axis}).length,fixture.axis);
+    const originalUnits=await page.evaluate(axis=>window.faultline.units({targetAxis:axis}).units.length,fixture.axis);
     assert.ok(originalUnits>=1,`${fixture.id}: expected at least one semantic unit`);
 
     const started=performance.now();
@@ -88,7 +88,7 @@ try{
     const verified=await page.evaluate(rev=>window.faultline.run({expectedRevision:rev}),after.revision);
     assert.equal(verified.status,'FAIL',`${fixture.id}: final candidate must re-verify FAIL`);
     const reducedSource=after.case[fixture.axis];
-    const reducedUnits=await page.evaluate(axis=>window.faultline.units({targetAxis:axis}).length,fixture.axis);
+    const reducedUnits=await page.evaluate(axis=>window.faultline.units({targetAxis:axis}).units.length,fixture.axis);
     const originalBytes=bytes(originalSource);
     const reducedBytes=bytes(reducedSource);
     assert.ok(reducedBytes<originalBytes,`${fixture.id}: reducer made no byte progress (${originalBytes} -> ${reducedBytes})`);

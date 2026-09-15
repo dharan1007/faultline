@@ -1,0 +1,12 @@
+{
+  "suite": "web-debug-bench",
+  "asOf": "2026-04",
+  "source": "Replay published results (vendor reference, not independent proof)",
+  "references": [
+    { "system": "Claude Code Opus 4.6 + Replay MCP", "score": 0.76 },
+    { "system": "Codex GPT-5.4", "score": 0.68 },
+    { "system": "Claude Code Opus 4.6", "score": 0.61 },
+    { "system": "Gemini 3", "score": 0.48 }
+  ],
+  "ruleD": "Faultline release gate fails unless its run under identical conditions exceeds the comparable published score. 91% vs 94% reference = gate failed, not production-ready."
+}

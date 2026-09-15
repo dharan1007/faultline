@@ -1,0 +1,21 @@
+{
+  "suite": "web-debug-bench",
+  "description": "Replay of published Web Debug Bench (April 2026, 177 problems). Vendor-published references: Claude Code Opus 4.6 + Replay MCP 76%, Codex GPT-5.4 68%, Claude Code Opus 4.6 61%, Gemini 3 48%. Treat 76% as vendor reference, not independent proof. Faultline must run same benchmark under equivalent conditions (Rules B, C, D).",
+  "benchmarkRepo": "https://github.com/replayio/web-debug-bench",
+  "benchmarkCommit": "0000000000000000000000000000000000000000",
+  "benchmarkCommitNote": "REPLACE with exact pinned upstream SHA before any commercial claim. 40-char SHA required by contract-gate.",
+  "container": null,
+  "containerDigest": null,
+  "budgets": {
+    "toolCallBudget": 100,
+    "wallClockTimeoutSec": 1200,
+    "tokenBudget": 200000,
+    "retryPolicy": "none-without-record"
+  },
+  "targets": {
+    "primary": "agent debugging uplift vs same-model control; reduction median >=80% structural size; p50 <=5min, p95 <=20min on pinned hardware",
+    "releaseGate": "Do not market 'better than Replay' until result exceeds comparable published score under identical conditions (Rule D)."
+  },
+  "excludedFailures": [],
+  "forbidden": "Do not edit tasks, expected outputs, or special-case task IDs (Rule B)."
+}

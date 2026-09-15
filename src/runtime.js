@@ -1,6 +1,8 @@
 import { semanticUnits, removeUnits, ddminReduce, createRevisionStore } from './reducer-engine.js';
 import { navigationRisk } from './sandbox-policy.js';
 import { CAPTURE_SCHEMA, CAPTURE_LIMITS, normalizeCaptureArtifact } from './capture-contract.js';
+import { buildFingerprint, verdictForReduction, signalsFromOracleEvidence } from './causal-fingerprint.js';
+import { buildDependencyGraph } from './causal-dependency-graph.js';
 
 const $ = id => document.getElementById(id);
 const clone = v => JSON.parse(JSON.stringify(v));
@@ -333,7 +335,8 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  const resultChannel=${previewOnly?'null':'new MessageChannel()'};
  const resultPort=resultChannel?.port1||null;
  const send=resultPort?resultPort.postMessage.bind(resultPort):null;
- const runtimeErrors=[];
+  const runtimeErrors=[];
+  const runtimeErrorDetails=[];
  const navigationAttempts=[];
  let runtimePolicyViolation=null;
  let candidateExecutionStarted=false;
@@ -343,7 +346,8 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  const nativeInputCheckedSetter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked')?.set;
  const nativeDispatchEvent=EventTarget.prototype.dispatchEvent;
  const NativeEvent=Event;
- const captureRuntimeError=value=>runtimeErrors.push(String(value));
+  const captureRuntimeError=(value,name,stack)=>{runtimeErrors.push(String(value));if(runtimeErrorDetails.length<8)runtimeErrorDetails.push({message:String(value).slice(0,500),name:String(name||'Error').slice(0,120),stack:String(stack||'').slice(0,2000)});};
+  const runtimeErrorEvidence=actual=>{const detail=runtimeErrorDetails.find(d=>d.message===String(actual))||runtimeErrorDetails.at(-1);return detail?{errorName:detail.name,errorStack:detail.stack}:{};};
  const reportRuntimePolicyViolation=event=>{
   if(runtimePolicyViolation)return;
   const directive=String(event.effectiveDirective||event.violatedDirective||'csp').trim().toLowerCase()||'csp';
@@ -406,9 +410,9 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  addEventListener('click',captureNavigationAttempt,true);
  addEventListener('submit',captureFormNavigationAttempt,true);
  addEventListener('securitypolicyviolation',reportRuntimePolicyViolation,true);
- addEventListener('error',e=>{captureRuntimeError(e.error?.message??e.message??e.error??'runtime error');e.preventDefault()});
- addEventListener('unhandledrejection',e=>{captureRuntimeError(e.reason?.message??e.reason??'unhandled rejection');e.preventDefault()});
- const executeCandidate=()=>{candidateExecutionStarted=true;try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e)}};
+  addEventListener('error',e=>{const err=e.error;captureRuntimeError(err?.message??e.message??err??'runtime error',err?.name,err?.stack);e.preventDefault()});
+  addEventListener('unhandledrejection',e=>{const r=e.reason;captureRuntimeError(r?.message??r??'unhandled rejection',r?.name,r?.stack);e.preventDefault()});
+  const executeCandidate=()=>{candidateExecutionStarted=true;try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e,e?.name,e?.stack)}};
  const waitActionTurn=durationMs=>new Promise(resolve=>schedule(resolve,durationMs));
  const performAtomicAction=action=>{
   if(action?.kind==='click'){const target=querySelector(action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click();return}
@@ -452,7 +456,7 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
    else {const el=querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='dom_attribute')actual=el?el.getAttribute(o.property):undefined;else if(o.kind==='computed_style')actual=el?readComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
    const expected=o.kind==='computed_style'?String(o.equals):o.kind==='runtime_error'&&o.equals!==undefined?String(o.equals):o.equals;
    const fail=o.kind==='runtime_error'?(o.equals===undefined?Boolean(actual):same(actual,expected)):same(actual,expected);
-   sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected,kind:o.kind,selector:o.selector,property:o.property}})
+    sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected,kind:o.kind,selector:o.selector,property:o.property,...(o.kind==='runtime_error'?runtimeErrorEvidence(actual):{})}})
   }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},Number(o.delayMs)||0)
  }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},0);
  const start=()=>{${previewOnly&&!executePreview?'':'executeCandidate();'}if(send)measure(send)};
@@ -496,6 +500,9 @@ function executeCase(c,{signal}={}){
     experiment.srcdoc=buildSandboxDocument(c,bootstrapId);
   });
 }
+function fingerprintFor(result,caseSnapshot){
+  try{return buildFingerprint(signalsFromOracleEvidence(result?.evidence,caseSnapshot?.oracle));}catch{return null;}
+}
 function runCase(c=value(),{signal}={}){
   const snapshot=clone(c);
   const task=experimentQueue.then(()=>{
@@ -503,12 +510,12 @@ function runCase(c=value(),{signal}={}){
     const risk=navigationRisk(snapshot);
     if(risk)return {status:'UNRESOLVED',evidence:{reason:'UNSAFE_NAVIGATION',...risk}};
     return executeCase(snapshot,{signal});
-  });
+  }).then(result=>({...result,fingerprint:fingerprintFor(result,snapshot)}));
   experimentQueue=task.then(()=>undefined,()=>undefined);
   return task;
 }
 
-function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},revision:revision(),at:new Date().toISOString(),...extra};rememberExperiment(entry);persistMutation(before);renderTrace();return entry; }
+function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},fingerprint:result.fingerprint||null,revision:revision(),at:new Date().toISOString(),...extra};rememberExperiment(entry);persistMutation(before);renderTrace();return entry; }
 async function run({expectedRevision=revision()}={}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const r=await runCase(value(),{signal});throwIfAborted(signal);record('run',r,{revision:testedRevision});renderHealth(r.status);return {...r,testedRevision}; }
 function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.value,pins:[...pins],captureProvenance:clone(captureProvenance),unitCounts:{html:unitsFor('html',s.value.html).length,css:unitsFor('css',s.value.css).length,js:unitsFor('js',s.value.js).length},latest:experimentLedger.at(-1)||null,webmcp:!!document.modelContext}; }
 function units({targetAxis=axis}={}){
@@ -556,13 +563,16 @@ async function importCapture({expectedRevision=revision(),capture}, {signal}={})
   return {status:'IMPORTED',revision:result.revision,baseline:clone(baseline),captureProvenance:clone(captureProvenance)};
 }
 function resetCase({expectedRevision=revision()}={}){ return loadCase({expectedRevision,case:fixture}); }
-async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const source=value()[targetAxis];const unit=annotatedUnits(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(unit.pinned||unit.protectedByDescendant)throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const result=await runCase(candidate,{signal});throwIfAborted(signal);record('probe',result,{axis:targetAxis,unitId,mutated:false,revision:testedRevision});return {...result,mutated:false,testedRevision,canonicalRevision:revision()}; }
+async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const source=value()[targetAxis];const unit=annotatedUnits(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(unit.pinned||unit.protectedByDescendant)throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const baselineResult=await runCase(value(),{signal});const result=await runCase(candidate,{signal});throwIfAborted(signal);const cause=verdictForReduction(baselineResult,result);record('probe',result,{axis:targetAxis,unitId,mutated:false,revision:testedRevision,sameCause:cause.accept,cause:cause.reason});return {...result,mutated:false,testedRevision,canonicalRevision:revision(),sameCause:cause.accept,cause:cause.reason}; }
 function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);const alreadyPinned=pins.has(key);if(alreadyPinned===pinned)return inspect();const before=snapshotCanonical();pinned?pins.add(key):pins.delete(key);const result=store.commit(value(),{kind:pinned?'pin':'unpin',axis:targetAxis,unitId},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});rememberExperiment({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:result.revision,at:new Date().toISOString()});persistMutation(before);render();return inspect(); }
 async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}={}, {signal}={}){
   store.assertRevision(expectedRevision);throwIfAborted(signal);
   const baseline=clone(value());
+  const baselineResult=await runCase(baseline,{signal});
+  throwIfAborted(signal);
+  if(baselineResult.status!=='FAIL')throw new Error('BASELINE_NOT_FAILING');
   const source=baseline[targetAxis],all=unitsFor(targetAxis,source);
-  if(!all.length)return {status:'NO_UNITS',before:source.length,after:source.length,reduction:0,trials:0,removed:0,passes:0,revision:revision()};
+  if(!all.length)return {status:'NO_UNITS',before:source.length,after:source.length,reduction:0,trials:0,removed:0,passes:0,revision:revision(),minimality:'LOCALLY_MINIMAL'};
   const pinDescriptors=capturePinDescriptors(targetAxis,source);
   let nextSource,reducedTrialCount,removedCount,passes=[];
   if(targetAxis==='html'||targetAxis==='css'){
@@ -578,16 +588,18 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
   const remappedPinIds=resolvePinDescriptors(targetAxis,nextSource,pinDescriptors);
   const final=await runCase({...baseline,[targetAxis]:nextSource},{signal});
   throwIfAborted(signal);if(final.status!=='FAIL')throw new Error('REDUCTION_LOST_FAILURE');
+  const causeVerdict=verdictForReduction(baselineResult,final);
+  if(!causeVerdict.accept)throw new Error(`REDUCTION_LOST_FAILURE:${causeVerdict.reason}`);
   store.assertRevision(expectedRevision);
   const beforeLength=source.length,after=nextSource.length,before=snapshotCanonical();
   const nextPins=new Set([...pins].filter(key=>!key.startsWith(`${targetAxis}|`)));
   for(const id of remappedPinIds)nextPins.add(pinKey(targetAxis,id));
   pins=nextPins;
-  const committed=store.commit({...baseline,[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length},expectedRevision);
+  const committed=store.commit({...baseline,[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length,cause:causeVerdict.reason,sameCause:true,minimality:'LOCALLY_MINIMAL'},expectedRevision);
   rememberRevision(committed.revision,{value:clone(committed.value),pins:[...pins]});
-  rememberExperiment({kind:'reduce',status:final.status,evidence:final.evidence||{},revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length,reduction:beforeLength?1-after/beforeLength:0});
+  rememberExperiment({kind:'reduce',status:final.status,evidence:final.evidence||{},fingerprint:final.fingerprint||null,revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length,reduction:beforeLength?1-after/beforeLength:0,cause:causeVerdict.reason,sameCause:true,minimality:'LOCALLY_MINIMAL'});
   persistMutation(before);render();renderPreview();renderHealth(final.status);
-  return {status:final.status,before:beforeLength,after,reduction:beforeLength?1-after/beforeLength:0,trials:reducedTrialCount,removed:removedCount,passes:passes.length,revision:revision()};
+  return {status:final.status,before:beforeLength,after,reduction:beforeLength?1-after/beforeLength:0,trials:reducedTrialCount,removed:removedCount,passes:passes.length,revision:revision(),cause:causeVerdict.reason,sameCause:true,fingerprint:final.fingerprint||null,minimality:'LOCALLY_MINIMAL'};
 }
 function history({limit=100}={}){ return clone(experimentLedger.slice(-Math.max(1,Math.min(200,Number(limit)||100)))); }
 function listRevisions({limit=MAX_RUNTIME_REVISIONS}={}){
@@ -614,7 +626,9 @@ function listRevisions({limit=MAX_RUNTIME_REVISIONS}={}){
 }
 function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);captureProvenance=snap.captureProvenance?clone(snap.captureProvenance):null;const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins],captureProvenance:clone(captureProvenance)});persistMutation(before);render();renderPreview();return inspect(); }
 function exportCase(){const c=value(),safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>${String(c.js).replace(/<\/script/gi,'<\\/script')}<\/script></body></html>`;}
-function exportBundle(){return {schema:'faultline.export.v1',revision:revision(),case:clone(value()),standaloneHtml:exportCase(),captureProvenance:clone(captureProvenance),history:history({limit:200})};}
+function latestFingerprint(){return experimentLedger.filter(e=>e.fingerprint).at(-1)?.fingerprint??null;}
+function dependencyGraph(){const s=store.inspect();const slim=list=>list.map(u=>({id:u.id,kind:u.kind,parentId:u.parentId,depth:u.depth}));return buildDependencyGraph({oracle:s.value.oracle,unitsByAxis:{html:slim(annotatedUnits('html',s.value.html)),css:slim(annotatedUnits('css',s.value.css)),js:slim(annotatedUnits('js',s.value.js))}});}
+function exportBundle(){return {schema:'faultline.export.v1',revision:revision(),case:clone(value()),standaloneHtml:exportCase(),captureProvenance:clone(captureProvenance),causalFingerprint:latestFingerprint(),dependencyGraph:dependencyGraph(),history:history({limit:200})};}
 function validateAxes(axes){if(!Array.isArray(axes)||axes.length<1||axes.length>3||axes.some(targetAxis=>!['html','css','js'].includes(targetAxis))||new Set(axes).size!==axes.length)throw new Error('INVALID_AXES');return axes;}
 async function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){
   validateAxes(axes);store.assertRevision(expectedRevision);throwIfAborted(signal);
@@ -711,7 +725,7 @@ const TOOL_DEFS=[
 ];
 function registerWebMCP(){const mc=document.modelContext;if(!mc?.registerTool){$('webmcp').textContent='WebMCP unavailable';return;}const controllers=[];Promise.all(TOOL_DEFS.map(async([name,description,properties,execute,readOnly,untrustedContent,required=[]])=>{const controller=new AbortController();controllers.push(controller);await mc.registerTool({name,title:name.replace('faultline_','FAULTLINE · '),description,inputSchema:{type:'object',properties,required,additionalProperties:false},execute:async(input,options)=>await (CANCELLABLE_WEBMCP_TOOLS.has(name)?executeWebMCPOperation(name,execute,input||{},options||{}):execute(input||{},options||{})),annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}},{signal:controller.signal});})).then(()=>{$('webmcp').textContent=`WebMCP ready · ${TOOL_DEFS.length} tools`;$('webmcp').dataset.state='ready';}).catch(e=>{$('webmcp').textContent='WebMCP registration error';$('webmcp').title=String(e?.message||e);});window.addEventListener('pagehide',()=>{controllers.forEach(c=>c.abort());abortAllWebMCP();},{once:true});}
 
-window.faultline={inspect,units,loadCase,importCapture,resetCase,run,defineOracle,applySource,probe,reduce,pin,history,revisions:listRevisions,restore,exportCase,exportBundle,autopilot,manifest:()=>TOOL_DEFS.map(([name,description,properties,,readOnly,untrustedContent,required=[]])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},readOnly,annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}}))};
+window.faultline={inspect,units,loadCase,importCapture,resetCase,run,defineOracle,applySource,probe,reduce,pin,history,revisions:listRevisions,restore,exportCase,exportBundle,dependencyGraph,autopilot,manifest:()=>TOOL_DEFS.map(([name,description,properties,,readOnly,untrustedContent,required=[]])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},readOnly,annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}}))};
 
 document.querySelectorAll('[data-axis]').forEach(b=>b.onclick=()=>{axis=b.dataset.axis;render();});
 $('apply').onclick=()=>applySource({source:$('source').value});

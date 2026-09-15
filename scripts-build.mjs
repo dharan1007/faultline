@@ -10,6 +10,8 @@ const productionFiles=[
   'src/reducer-engine.js',
   'src/sandbox-policy.js',
   'src/capture-contract.js',
+  'src/causal-fingerprint.js',
+  'src/causal-dependency-graph.js',
   'src/commercial-cta.js',
   'vendor/acorn.js'
 ];

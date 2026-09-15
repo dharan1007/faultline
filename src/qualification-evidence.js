@@ -34,7 +34,16 @@ export function validateQualificationManifest(manifest){
   if(!isObject(manifest)||manifest.schema!=='faultline.external-corpus.v1'||!Array.isArray(manifest.cases))fail('FAULTLINE_QUALIFICATION_INVALID_MANIFEST');
   if(manifest.cases.length>500)fail('FAULTLINE_QUALIFICATION_TOO_MANY_CASES');
   const ids=new Set();
-  const cases=manifest.cases.map(entry=>{const normalized=validateExternalCase(entry);if(ids.has(normalized.id))fail('FAULTLINE_QUALIFICATION_DUPLICATE_CASE');ids.add(normalized.id);return normalized;});
+  const upstreamCases=new Set();
+  const cases=manifest.cases.map(entry=>{
+    const normalized=validateExternalCase(entry);
+    if(ids.has(normalized.id))fail('FAULTLINE_QUALIFICATION_DUPLICATE_CASE');
+    ids.add(normalized.id);
+    const upstreamIdentity=qualificationDigest({repository:normalized.repository,commit:normalized.commit,reproduction:normalized.reproduction});
+    if(upstreamCases.has(upstreamIdentity))fail('FAULTLINE_QUALIFICATION_DUPLICATE_UPSTREAM_CASE');
+    upstreamCases.add(upstreamIdentity);
+    return normalized;
+  });
   return {schema:manifest.schema,cases,digest:qualificationDigest({schema:manifest.schema,cases})};
 }
 
@@ -51,6 +60,7 @@ export function summarizeQualification(results){
   const normalized=results.map(result=>{
     if(!isObject(result))fail('FAULTLINE_QUALIFICATION_INVALID_RESULT');
     const id=nonEmpty(result.id,'FAULTLINE_QUALIFICATION_RESULT_ID_REQUIRED',256);if(ids.has(id))fail('FAULTLINE_QUALIFICATION_DUPLICATE_RESULT');ids.add(id);
+    if(!['portable','live'].includes(result.mode))fail('FAULTLINE_QUALIFICATION_INVALID_MODE');
     if(!['SUPPORTED','UNSUPPORTED','UNRESOLVED'].includes(result.classification))fail('FAULTLINE_QUALIFICATION_INVALID_CLASSIFICATION');
     if(typeof result.baselineReproduced!=='boolean')fail('FAULTLINE_QUALIFICATION_BASELINE_REQUIRED');
     if(typeof result.accepted!=='boolean')fail('FAULTLINE_QUALIFICATION_ACCEPTANCE_REQUIRED');
@@ -59,7 +69,7 @@ export function summarizeQualification(results){
     if(!Number.isFinite(result.reduction)||result.reduction<0||result.reduction>1)fail('FAULTLINE_QUALIFICATION_INVALID_REDUCTION');
     if(!Number.isFinite(result.wallTimeMs)||result.wallTimeMs<0)fail('FAULTLINE_QUALIFICATION_INVALID_TIMING');
     if(result.accepted&&(!result.baselineReproduced||!result.sameCause||result.classification!=='SUPPORTED'))fail('FAULTLINE_QUALIFICATION_INVALID_ACCEPTED_RESULT');
-    return {id,classification:result.classification,baselineReproduced:result.baselineReproduced,accepted:result.accepted,sameCause:result.sameCause,falseEquivalent:result.falseEquivalent,reduction:result.reduction,wallTimeMs:result.wallTimeMs};
+    return {id,mode:result.mode,classification:result.classification,baselineReproduced:result.baselineReproduced,accepted:result.accepted,sameCause:result.sameCause,falseEquivalent:result.falseEquivalent,reduction:result.reduction,wallTimeMs:result.wallTimeMs};
   });
   const supported=normalized.filter(result=>result.classification==='SUPPORTED');
   const reproduced=supported.filter(result=>result.baselineReproduced);
@@ -68,13 +78,17 @@ export function summarizeQualification(results){
   const sameCauseAccepted=accepted.filter(result=>result.sameCause).length;
   const reproductionRate=supported.length?reproduced.length/supported.length:0;
   const sameCauseRate=accepted.length?sameCauseAccepted/accepted.length:0;
-  const reductions=accepted.map(result=>result.reduction);
+  const portableReductions=accepted.filter(result=>result.mode==='portable').map(result=>result.reduction);
+  const liveReductions=accepted.filter(result=>result.mode==='live').map(result=>result.reduction);
+  const medianPortableReduction=percentile(portableReductions,50);
+  const medianLiveReduction=percentile(liveReductions,50);
+  const usefulReduction=(medianPortableReduction!==null&&medianPortableReduction>=0.60)||(medianLiveReduction!==null&&medianLiveReduction>=0.30);
   const timings=normalized.map(result=>result.wallTimeMs);
-  const productionEligible=normalized.length>=30&&accepted.length>=10&&falseEquivalents===0&&sameCauseRate>=0.99&&reproductionRate>=0.90;
+  const productionEligible=normalized.length>=30&&accepted.length>=10&&falseEquivalents===0&&sameCauseRate>=0.99&&reproductionRate>=0.90&&usefulReduction;
   return Object.freeze({
     schema:'faultline.qualification-summary.v1',
     totalCases:normalized.length,supportedCases:supported.length,reproducedSupportedCases:reproduced.length,acceptedReductions:accepted.length,falseEquivalents,
-    reproductionRate,sameCauseRate,medianReduction:percentile(reductions,50),p50WallTimeMs:percentile(timings,50),p95WallTimeMs:percentile(timings,95),productionEligible,
+    reproductionRate,sameCauseRate,medianPortableReduction,medianLiveReduction,p50WallTimeMs:percentile(timings,50),p95WallTimeMs:percentile(timings,95),productionEligible,
     evidenceDigest:qualificationDigest(normalized)
   });
 }

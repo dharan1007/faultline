@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 const workflow=await readFile(new URL('../.github/workflows/deploy-production.yml',import.meta.url),'utf8');
+const integrityWorkflow=await readFile(new URL('../.github/workflows/production-integrity.yml',import.meta.url),'utf8');
 
 test('production verifier installs from the exact lockfile and audits runtime dependencies',()=>{
   assert.match(workflow,/npm ci --ignore-scripts/);
@@ -34,4 +35,24 @@ test('production workflow atomically assigns the public canonical alias only aft
   const readyIndex=workflow.indexOf('READY)');
   const aliasIndex=workflow.indexOf('/v2/deployments/$deployment_id/aliases');
   assert.ok(readyIndex>=0&&aliasIndex>readyIndex,'canonical alias must be assigned only after Vercel reports the exact deployment READY');
+});
+
+test('continuous production integrity follows main and fails closed on release drift',()=>{
+  assert.match(integrityWorkflow,/schedule:/);
+  assert.match(integrityWorkflow,/workflow_dispatch:/);
+  assert.match(integrityWorkflow,/ref:\s*main/);
+  assert.match(integrityWorkflow,/git rev-parse HEAD/);
+  assert.match(integrityWorkflow,/release\.source\?\.sha!==process\.env\.EXPECTED_SHA\.toLowerCase\(\)/);
+  assert.match(integrityWorkflow,/source-bound/);
+  assert.match(integrityWorkflow,/vercel-git/);
+  assert.match(integrityWorkflow,/dharan1007\/faultline/);
+});
+
+test('continuous production integrity verifies the manifest binding and every declared asset',()=>{
+  assert.match(integrityWorkflow,/release\.evidence\?\.integrity\?\.sha256!==digest/);
+  assert.match(integrityWorkflow,/release\.evidence\?\.integrity\?\.bytes!==bytes\.length/);
+  assert.match(integrityWorkflow,/Object\.keys\(manifest\.assets\)/);
+  assert.match(integrityWorkflow,/expected\.bytes!==bytes\.length/);
+  assert.match(integrityWorkflow,/expected\.sha256!==digest/);
+  assert.match(integrityWorkflow,/FAULTLINE_CANONICAL_WORKBENCH_INVALID/);
 });

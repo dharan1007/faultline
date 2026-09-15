@@ -1,63 +1,84 @@
 {
   "repository": "faultline",
-  "contractVersion": "A-G/1",
-  "updatedAt": "2026-09-14",
-  "note": "No capability is PRODUCTION until external benchmark + real-workload evidence exists (Rules A, D, F). Core reduction is EXPERIMENTAL pending Web Debug Bench replay + agent-uplift study under identical conditions.",
+  "contractVersion": "A-G/2",
+  "updatedAt": "2026-09-15",
+  "note": "No capability is PRODUCTION until immutable external real-workload evidence satisfies the qualification thresholds. Repository tests and synthetic browser corpora are correctness gates, not substitutes for external field evidence.",
   "capabilities": [
     {
       "id": "playwright-capture-v1",
       "title": "Bounded Playwright capture to faultline.capture.v1",
       "status": "EXPERIMENTAL",
-      "evidence": "Caller-owned page adapter with 1MiB/axis + 4MiB total bounds; browser ingestion tests green. External benchmark pending.",
+      "evidence": "Caller-owned page adapter with bounded DOM/CSS/diagnostics and explicit dependency rejection. External-case capture/replay coverage is not yet large enough for production qualification.",
       "nextEvidence": "benchmarks/manifests/upstream-playwright.json"
     },
     {
-      "id": "deterministic-oracle",
-      "title": "Deterministic failure oracles (5 classes + causal fingerprint v1)",
+      "id": "portable-browser-actions-v2",
+      "title": "Deterministic portable action protocol",
       "status": "EXPERIMENTAL",
-      "evidence": "dom_property/attribute/exists/computed_style/runtime_error with PASS/FAIL/UNRESOLVED; every runCase result now carries a causal fingerprint (oracleIdentity + error name/stack surfaced from sandbox); release-corpus validation pending.",
-      "nextEvidence": "benchmarks/manifests/agent-uplift.json"
+      "evidence": "Contract/runtime now cover click, hover, pointer move, value/checked changes, key press, focus/blur, scroll, select option and bounded sequences. Browser-runner execution remains pending on the current hardening SHA.",
+      "nextEvidence": "tests/oracle-pointer-keyboard-actions.mjs"
+    },
+    {
+      "id": "deterministic-oracle",
+      "title": "Deterministic failure oracles + causal fingerprint v1",
+      "status": "EXPERIMENTAL",
+      "evidence": "Every executed case carries a causal fingerprint; reductions reject different failures and require an independent final rerun. External false-equivalence measurement is pending.",
+      "nextEvidence": "benchmarks/manifests/upstream-playwright.json"
     },
     {
       "id": "hierarchical-reduction",
-      "title": "Hierarchical HTML/CSS/JS reduction with pins and re-verification",
+      "title": "Hierarchical HTML/CSS/JS reduction with per-trial SAME_CAUSE enforcement",
       "status": "EXPERIMENTAL",
-      "evidence": "Structural scanners + ddmin + ancestor pin closure + commit-level SAME_CAUSE enforcement (REDUCTION_LOST_FAILURE on cause drift); per-trial cause tracking planned; 0 false-equivalent target not yet measured on release corpus.",
+      "evidence": "Structural scanners + ddmin + ancestor pin closure now evaluate every candidate against the original causal fingerprint rather than accepting arbitrary FAIL states. External release-corpus evidence remains pending.",
       "nextEvidence": "benchmarks/manifests/web-debug-bench.json"
     },
     {
-      "id": "sandbox-containment",
-      "title": "Sandboxed candidate execution (iframe, no same-origin, restrictive CSP)",
+      "id": "playwright-live-v1",
+      "title": "Caller-owned in-situ Playwright execution",
       "status": "EXPERIMENTAL",
-      "evidence": "Extensive containment regression suite green on Chromium gate. Browser boundary only — not VM isolation; multi-tenant hostile use is UNSUPPORTED.",
+      "evidence": "Live runner and runtime-bound action reducer are implemented with reset-before-trial, richer Playwright-native interactions, causal fingerprints and explicit UNRESOLVED outcomes. Browser qualification has not yet executed on this SHA.",
+      "nextEvidence": "tests/playwright-live.mjs"
+    },
+    {
+      "id": "runtime-reproducer-v1",
+      "title": "Runtime-bound reproducer evidence artifact",
+      "status": "EXPERIMENTAL",
+      "evidence": "Artifact is explicitly non-portable, binds immutable source commit/reset identity/fingerprints/metrics, strips URL query/hash credentials and rejects placeholder source SHAs.",
+      "nextEvidence": "tests/runtime-reproducer-artifact.test.js"
+    },
+    {
+      "id": "external-qualification-v1",
+      "title": "Immutable external-case production qualification",
+      "status": "EXPERIMENTAL",
+      "evidence": "Qualification code rejects mutable/placeholder case identities and blocks any PRODUCTION capability claim unless sample-size, reproduction, same-cause and false-equivalence thresholds are satisfied. Qualifying external corpus has not yet executed.",
+      "nextEvidence": "artifacts/faultline-qualification-summary.json"
+    },
+    {
+      "id": "sandbox-containment",
+      "title": "Sandboxed portable candidate execution",
+      "status": "EXPERIMENTAL",
+      "evidence": "Browser iframe boundary remains restrictive and network/navigation attempts fail closed. This is browser containment, not VM isolation.",
       "nextEvidence": "benchmarks/manifests/upstream-playwright.json"
     },
     {
       "id": "webmcp-agent-surface",
-      "title": "17-tool WebMCP + window.faultline agent surface",
+      "title": "WebMCP + window.faultline agent surface",
       "status": "EXPERIMENTAL",
-      "evidence": "Revision-guarded canonical runtime shared with UI; cancellation/revision tests green. Agent-uplift benchmark pending.",
+      "evidence": "Revision-guarded canonical runtime and cancellation surface retained; organisational hardening SHA still requires executable runner verification.",
       "nextEvidence": "benchmarks/manifests/agent-uplift.json"
     },
     {
       "id": "cli-ci-action",
-      "title": "CLI + GitHub Action reproduce/reduce/verify",
+      "title": "CLI + CI reproduce/reduce/verify",
       "status": "EXPERIMENTAL",
-      "evidence": "validate/inspect/analyze with stable exit classes; packaged CLI browser test green. Cross-browser + SBOM gates green on main.",
-      "nextEvidence": "benchmarks/manifests/upstream-playwright.json"
-    },
-    {
-      "id": "minimal-reproducer-bundle",
-      "title": "One-command minimal reproducer (faultline-repro/)",
-      "status": "PLANNED",
-      "evidence": "Spec + writer landed 2026-09-14; OCI/Dockerfile + run.sh/run.ps1 + oracle/fingerprint/provenance format defined, needs field validation.",
-      "nextEvidence": "benchmarks/manifests/agent-uplift.json"
+      "evidence": "CLI, hosted CI and a trusted self-hosted production-ci qualification path are defined. Hosted verification is currently blocked by account quota and the self-hosted runner is not yet registered.",
+      "nextEvidence": ".github/workflows/self-hosted-qualification.yml"
     },
     {
       "id": "multi-tenant-hostile-execution",
       "title": "Shared multi-tenant hostile-code execution service",
       "status": "UNSUPPORTED",
-      "evidence": "Explicit non-goal. Requires process/VM isolation, identity, quotas, namespaces, scheduling — outside browser-only architecture."
+      "evidence": "Explicit non-goal. Requires process/VM isolation, identity, quotas, namespaces and scheduling outside the current browser-local architecture."
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { semanticUnits, removeUnits, ddminReduce, createRevisionStore } from './reducer-engine.js';
 import { navigationRisk } from './sandbox-policy.js';
-import { CAPTURE_SCHEMA, CAPTURE_LIMITS, normalizeCaptureArtifact } from './capture-contract.js';
+import { CAPTURE_SCHEMA, CAPTURE_LIMITS, normalizeCaptureArtifact, ACTION_KINDS as CAPTURE_ACTION_KINDS, ACTION_STEP_KINDS as CAPTURE_ACTION_STEP_KINDS, validateCaptureAction } from './capture-contract.js';
 import { buildFingerprint, verdictForReduction, signalsFromOracleEvidence } from './causal-fingerprint.js';
 import { buildDependencyGraph } from './causal-dependency-graph.js';
 
@@ -19,10 +19,11 @@ const PERSISTENCE_PROFILES=[
   {storeSnapshots:1,storeLedger:1,runtimeRevisions:1,experiments:1}
 ];
 const ORACLE_KINDS=['dom_property','dom_attribute','computed_style','dom_exists','runtime_error'];
-const ACTION_KINDS=['none','click','set_value','set_checked','sequence'];
-const ACTION_STEP_KINDS=['click','set_value','set_checked','wait'];
-const MAX_SEQUENCE_WAIT_MS=2000;
-const HOST_TIMEOUT_MS=5000;
+const ACTION_KINDS=[...CAPTURE_ACTION_KINDS];
+const ACTION_STEP_KINDS=[...CAPTURE_ACTION_STEP_KINDS];
+const MAX_SEQUENCE_WAIT_MS=CAPTURE_LIMITS.totalWaitMs;
+const MAX_SEQUENCE_STEPS=CAPTURE_LIMITS.sequenceSteps;
+const HOST_TIMEOUT_MS=7000;
 const REQUEST_ID_PATTERN=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const fixture = {
   html:'<dialog id="modal" open><button id="save">Save</button></dialog><p id="noise">Irrelevant debug noise</p>',
@@ -204,30 +205,7 @@ function cancelActiveWebMCP({requestId}={}){
 }
 function abortAllWebMCP(){ for(const operation of activeWebMCPOperations.values())operation.controller.abort(); }
 function validateAction(action,{allowSequence=true,allowWait=false}={}){
-  if(!action||typeof action!=='object'||Array.isArray(action))throw new Error('INVALID_ORACLE');
-  const supported=allowWait?[...ACTION_KINDS,'wait']:ACTION_KINDS;
-  if(!supported.includes(action.kind)||Object.keys(action).some(key=>!['kind','selector','value','checked','steps','durationMs'].includes(key)))throw new Error('INVALID_ORACLE');
-  if(action.kind==='wait'){
-    if(!allowWait||Object.keys(action).some(key=>!['kind','durationMs'].includes(key))||!Number.isFinite(action.durationMs)||action.durationMs<0||action.durationMs>MAX_SEQUENCE_WAIT_MS)throw new Error('INVALID_ORACLE');
-    return action;
-  }
-  if(action.kind==='sequence'){
-    if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||Object.hasOwn(action,'checked')||Object.hasOwn(action,'durationMs')||!Array.isArray(action.steps)||action.steps.length<1||action.steps.length>8)throw new Error('INVALID_ORACLE');
-    let totalWait=0;
-    for(const step of action.steps){
-      if(!ACTION_STEP_KINDS.includes(step?.kind))throw new Error('INVALID_ORACLE');
-      validateAction(step,{allowSequence:false,allowWait:true});
-      if(step.kind==='wait')totalWait+=step.durationMs;
-    }
-    if(totalWait>MAX_SEQUENCE_WAIT_MS)throw new Error('INVALID_ORACLE');
-    return action;
-  }
-  if(Object.hasOwn(action,'steps')||Object.hasOwn(action,'durationMs'))throw new Error('INVALID_ORACLE');
-  if(action.kind!=='set_checked'&&Object.hasOwn(action,'checked'))throw new Error('INVALID_ORACLE');
-  if(action.kind==='click'&&(typeof action.selector!=='string'||!action.selector.trim()))throw new Error('INVALID_ORACLE');
-  if(action.kind==='set_value'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.value!=='string'))throw new Error('INVALID_ORACLE');
-  if(action.kind==='set_checked'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.checked!=='boolean'||Object.hasOwn(action,'value')))throw new Error('INVALID_ORACLE');
-  return action;
+  try{return validateCaptureAction(action,{allowSequence,allowWait});}catch{throw new Error('INVALID_ORACLE');}
 }
 function validateOracle(oracle){
   if(!oracle||typeof oracle!=='object'||Array.isArray(oracle))throw new Error('INVALID_ORACLE');
@@ -237,7 +215,7 @@ function validateOracle(oracle){
   if(oracle.kind!=='runtime_error'&&(typeof oracle.selector!=='string'||!oracle.selector.trim()))throw new Error('INVALID_ORACLE');
   if(['dom_property','dom_attribute','computed_style'].includes(oracle.kind)&&(typeof oracle.property!=='string'||!oracle.property.trim()))throw new Error('INVALID_ORACLE');
   if(oracle.kind==='dom_attribute'&&!(typeof oracle.equals==='string'||oracle.equals===null))throw new Error('INVALID_ORACLE');
-  if(oracle.delayMs!==undefined&&(!Number.isFinite(oracle.delayMs)||oracle.delayMs<0||oracle.delayMs>2000))throw new Error('INVALID_ORACLE');
+  if(oracle.delayMs!==undefined&&(!Number.isFinite(oracle.delayMs)||oracle.delayMs<0||oracle.delayMs>CAPTURE_LIMITS.oracleDelayMs))throw new Error('INVALID_ORACLE');
   return oracle;
 }
 function validateCase(candidate){
@@ -335,19 +313,23 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  const resultChannel=${previewOnly?'null':'new MessageChannel()'};
  const resultPort=resultChannel?.port1||null;
  const send=resultPort?resultPort.postMessage.bind(resultPort):null;
-  const runtimeErrors=[];
-  const runtimeErrorDetails=[];
+ const runtimeErrors=[];
+ const runtimeErrorDetails=[];
  const navigationAttempts=[];
  let runtimePolicyViolation=null;
  let candidateExecutionStarted=false;
  const nativeFormSubmit=HTMLFormElement.prototype.submit;
  const nativeFormRequestSubmit=HTMLFormElement.prototype.requestSubmit;
  const NativeInputElement=HTMLInputElement;
+ const NativeSelectElement=HTMLSelectElement;
  const nativeInputCheckedSetter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked')?.set;
  const nativeDispatchEvent=EventTarget.prototype.dispatchEvent;
  const NativeEvent=Event;
-  const captureRuntimeError=(value,name,stack)=>{runtimeErrors.push(String(value));if(runtimeErrorDetails.length<8)runtimeErrorDetails.push({message:String(value).slice(0,500),name:String(name||'Error').slice(0,120),stack:String(stack||'').slice(0,2000)});};
-  const runtimeErrorEvidence=actual=>{const detail=runtimeErrorDetails.find(d=>d.message===String(actual))||runtimeErrorDetails.at(-1);return detail?{errorName:detail.name,errorStack:detail.stack}:{};};
+ const NativeMouseEvent=MouseEvent;
+ const NativeKeyboardEvent=KeyboardEvent;
+ const NativePointerEvent=globalThis.PointerEvent||MouseEvent;
+ const captureRuntimeError=(value,name,stack)=>{runtimeErrors.push(String(value));if(runtimeErrorDetails.length<8)runtimeErrorDetails.push({message:String(value).slice(0,500),name:String(name||'Error').slice(0,120),stack:String(stack||'').slice(0,2000)});};
+ const runtimeErrorEvidence=actual=>{const detail=runtimeErrorDetails.find(d=>d.message===String(actual))||runtimeErrorDetails.at(-1);return detail?{errorName:detail.name,errorStack:detail.stack}:{};};
  const reportRuntimePolicyViolation=event=>{
   if(runtimePolicyViolation)return;
   const directive=String(event.effectiveDirective||event.violatedDirective||'csp').trim().toLowerCase()||'csp';
@@ -410,15 +392,31 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  addEventListener('click',captureNavigationAttempt,true);
  addEventListener('submit',captureFormNavigationAttempt,true);
  addEventListener('securitypolicyviolation',reportRuntimePolicyViolation,true);
-  addEventListener('error',e=>{const err=e.error;captureRuntimeError(err?.message??e.message??err??'runtime error',err?.name,err?.stack);e.preventDefault()});
-  addEventListener('unhandledrejection',e=>{const r=e.reason;captureRuntimeError(r?.message??r??'unhandled rejection',r?.name,r?.stack);e.preventDefault()});
-  const executeCandidate=()=>{candidateExecutionStarted=true;try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e,e?.name,e?.stack)}};
+ addEventListener('error',e=>{const err=e.error;captureRuntimeError(err?.message??e.message??err??'runtime error',err?.name,err?.stack);e.preventDefault()});
+ addEventListener('unhandledrejection',e=>{const r=e.reason;captureRuntimeError(r?.message??r??'unhandled rejection',r?.name,r?.stack);e.preventDefault()});
+ const executeCandidate=()=>{candidateExecutionStarted=true;try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e,e?.name,e?.stack)}};
  const waitActionTurn=durationMs=>new Promise(resolve=>schedule(resolve,durationMs));
+ const targetFor=action=>{const target=querySelector(action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');return target;};
+ const pointerCoordinates=(target,action)=>{const rect=target?.getBoundingClientRect?.();return {clientX:Number.isFinite(action.x)?Number(action.x):(rect?rect.left+rect.width/2:0),clientY:Number.isFinite(action.y)?Number(action.y):(rect?rect.top+rect.height/2:0)};};
+ const dispatchHover=(target,coords)=>{
+  nativeDispatchEvent.call(target,new NativePointerEvent('pointerover',{bubbles:true,composed:true,...coords}));
+  nativeDispatchEvent.call(target,new NativeMouseEvent('mouseover',{bubbles:true,composed:true,...coords}));
+  nativeDispatchEvent.call(target,new NativePointerEvent('pointerenter',{bubbles:false,composed:true,...coords}));
+  nativeDispatchEvent.call(target,new NativeMouseEvent('mouseenter',{bubbles:false,composed:true,...coords}));
+ };
  const performAtomicAction=action=>{
-  if(action?.kind==='click'){const target=querySelector(action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click();return}
+  if(action?.kind==='click'){targetFor(action).click();return}
+  if(action?.kind==='hover'){const target=targetFor(action);dispatchHover(target,pointerCoordinates(target,action));return}
+  if(action?.kind==='pointer_move'){
+   let target=action.selector?targetFor(action):null;
+   const coords=pointerCoordinates(target,action);
+   if(!target)target=document.elementFromPoint(coords.clientX,coords.clientY)||document.body;
+   nativeDispatchEvent.call(target,new NativePointerEvent('pointermove',{bubbles:true,composed:true,...coords}));
+   nativeDispatchEvent.call(target,new NativeMouseEvent('mousemove',{bubbles:true,composed:true,...coords}));
+   return;
+  }
   if(action?.kind==='set_value'){
-   const target=querySelector(action.selector);
-   if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');
+   const target=targetFor(action);
    let prototype=target,valueDescriptor=null;
    while((prototype=Object.getPrototypeOf(prototype))&&!valueDescriptor)valueDescriptor=Object.getOwnPropertyDescriptor(prototype,'value');
    if(!valueDescriptor?.set)throw new Error('ACTION_TARGET_NOT_VALUE_CONTROL');
@@ -428,10 +426,36 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
    return;
   }
   if(action?.kind==='set_checked'){
-   const target=querySelector(action.selector);
-   if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');
+   const target=targetFor(action);
    if(!(target instanceof NativeInputElement)||!['checkbox','radio'].includes(String(target.type).toLowerCase())||!nativeInputCheckedSetter)throw new Error('ACTION_TARGET_NOT_CHECKABLE');
    nativeInputCheckedSetter.call(target,Boolean(action.checked));
+   nativeDispatchEvent.call(target,new NativeEvent('input',{bubbles:true,composed:true}));
+   nativeDispatchEvent.call(target,new NativeEvent('change',{bubbles:true}));
+   return;
+  }
+  if(action?.kind==='key_press'){
+   const target=action.selector?targetFor(action):(document.activeElement||document.body);
+   target.focus?.();
+   const init={key:String(action.key),bubbles:true,composed:true,cancelable:true};
+   nativeDispatchEvent.call(target,new NativeKeyboardEvent('keydown',init));
+   nativeDispatchEvent.call(target,new NativeKeyboardEvent('keypress',init));
+   nativeDispatchEvent.call(target,new NativeKeyboardEvent('keyup',init));
+   return;
+  }
+  if(action?.kind==='focus'){targetFor(action).focus();return}
+  if(action?.kind==='blur'){targetFor(action).blur();return}
+  if(action?.kind==='scroll'){
+   const x=Number.isFinite(action.x)?Number(action.x):0;
+   const y=Number.isFinite(action.y)?Number(action.y):0;
+   if(action.selector){const target=targetFor(action);if(typeof target.scrollTo==='function')target.scrollTo(x,y);else {target.scrollLeft=x;target.scrollTop=y;}nativeDispatchEvent.call(target,new NativeEvent('scroll'));}
+   else {if(typeof window.scrollTo==='function')window.scrollTo(x,y);else {document.documentElement.scrollLeft=x;document.documentElement.scrollTop=y;}nativeDispatchEvent.call(document,new NativeEvent('scroll'));}
+   return;
+  }
+  if(action?.kind==='select_option'){
+   const target=targetFor(action);
+   if(!(target instanceof NativeSelectElement))throw new Error('ACTION_TARGET_NOT_SELECT');
+   target.value=String(action.value);
+   if(target.value!==String(action.value))throw new Error('ACTION_OPTION_NOT_FOUND');
    nativeDispatchEvent.call(target,new NativeEvent('input',{bubbles:true,composed:true}));
    nativeDispatchEvent.call(target,new NativeEvent('change',{bubbles:true}));
   }
@@ -456,7 +480,7 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
    else {const el=querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='dom_attribute')actual=el?el.getAttribute(o.property):undefined;else if(o.kind==='computed_style')actual=el?readComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
    const expected=o.kind==='computed_style'?String(o.equals):o.kind==='runtime_error'&&o.equals!==undefined?String(o.equals):o.equals;
    const fail=o.kind==='runtime_error'?(o.equals===undefined?Boolean(actual):same(actual,expected)):same(actual,expected);
-    sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected,kind:o.kind,selector:o.selector,property:o.property,...(o.kind==='runtime_error'?runtimeErrorEvidence(actual):{})}})
+   sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected,kind:o.kind,selector:o.selector,property:o.property,...(o.kind==='runtime_error'?runtimeErrorEvidence(actual):{})}})
   }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},Number(o.delayMs)||0)
  }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},0);
  const start=()=>{${previewOnly&&!executePreview?'':'executeCandidate();'}if(send)measure(send)};
@@ -514,6 +538,7 @@ function runCase(c=value(),{signal}={}){
   experimentQueue=task.then(()=>undefined,()=>undefined);
   return task;
 }
+function preservedTrialStatus(baselineResult,candidateResult){return verdictForReduction(baselineResult,candidateResult).accept?'FAIL':candidateResult.status==='UNRESOLVED'?'UNRESOLVED':'PASS';}
 
 function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},fingerprint:result.fingerprint||null,revision:revision(),at:new Date().toISOString(),...extra};rememberExperiment(entry);persistMutation(before);renderTrace();return entry; }
 async function run({expectedRevision=revision()}={}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const r=await runCase(value(),{signal});throwIfAborted(signal);record('run',r,{revision:testedRevision});renderHealth(r.status);return {...r,testedRevision}; }
@@ -575,12 +600,13 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
   if(!all.length)return {status:'NO_UNITS',before:source.length,after:source.length,reduction:0,trials:0,removed:0,passes:0,revision:revision(),minimality:'LOCALLY_MINIMAL'};
   const pinDescriptors=capturePinDescriptors(targetAxis,source);
   let nextSource,reducedTrialCount,removedCount,passes=[];
+  const evaluateCandidate=async candidateSource=>{throwIfAborted(signal);const candidateResult=await runCase({...baseline,[targetAxis]:candidateSource},{signal});return preservedTrialStatus(baselineResult,candidateResult);};
   if(targetAxis==='html'||targetAxis==='css'){
-    const reduced=await hierarchicalReduceSource(targetAxis,source,async candidateSource=>{throwIfAborted(signal);return (await runCase({...baseline,[targetAxis]:candidateSource},{signal})).status;},{maxTrials});
+    const reduced=await hierarchicalReduceSource(targetAxis,source,evaluateCandidate,{maxTrials});
     nextSource=reduced.source;reducedTrialCount=reduced.trialCount;removedCount=reduced.removedCount;passes=reduced.passes;
   }else{
     const protectedItems=all.filter(unit=>pins.has(pinKey(targetAxis,unit.id)));
-    const reduced=await ddminReduce(all,async kept=>{throwIfAborted(signal);const keptIds=new Set(kept.map(unit=>unit.id));const removed=all.filter(unit=>!keptIds.has(unit.id));return (await runCase({...baseline,[targetAxis]:removeUnits(source,removed)},{signal})).status;},{protectedItems,maxTrials});
+    const reduced=await ddminReduce(all,async kept=>{throwIfAborted(signal);const keptIds=new Set(kept.map(unit=>unit.id));const removed=all.filter(unit=>!keptIds.has(unit.id));return evaluateCandidate(removeUnits(source,removed));},{protectedItems,maxTrials});
     const keptIds=new Set(reduced.items.map(unit=>unit.id)),removed=all.filter(unit=>!keptIds.has(unit.id));
     nextSource=removeUnits(source,removed);reducedTrialCount=reduced.trialCount;removedCount=removed.length;
   }
@@ -590,16 +616,20 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
   throwIfAborted(signal);if(final.status!=='FAIL')throw new Error('REDUCTION_LOST_FAILURE');
   const causeVerdict=verdictForReduction(baselineResult,final);
   if(!causeVerdict.accept)throw new Error(`REDUCTION_LOST_FAILURE:${causeVerdict.reason}`);
+  const independentFinal=await runCase({...baseline,[targetAxis]:nextSource},{signal});
+  throwIfAborted(signal);
+  const independentCause=verdictForReduction(baselineResult,independentFinal);
+  if(!independentCause.accept)throw new Error(`REDUCTION_FINAL_RERUN_FAILED:${independentCause.reason}`);
   store.assertRevision(expectedRevision);
   const beforeLength=source.length,after=nextSource.length,before=snapshotCanonical();
   const nextPins=new Set([...pins].filter(key=>!key.startsWith(`${targetAxis}|`)));
   for(const id of remappedPinIds)nextPins.add(pinKey(targetAxis,id));
   pins=nextPins;
-  const committed=store.commit({...baseline,[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length,cause:causeVerdict.reason,sameCause:true,minimality:'LOCALLY_MINIMAL'},expectedRevision);
+  const committed=store.commit({...baseline,[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length,cause:causeVerdict.reason,sameCause:true,minimality:'LOCALLY_MINIMAL',independentRerun:true},expectedRevision);
   rememberRevision(committed.revision,{value:clone(committed.value),pins:[...pins]});
-  rememberExperiment({kind:'reduce',status:final.status,evidence:final.evidence||{},fingerprint:final.fingerprint||null,revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length,reduction:beforeLength?1-after/beforeLength:0,cause:causeVerdict.reason,sameCause:true,minimality:'LOCALLY_MINIMAL'});
-  persistMutation(before);render();renderPreview();renderHealth(final.status);
-  return {status:final.status,before:beforeLength,after,reduction:beforeLength?1-after/beforeLength:0,trials:reducedTrialCount,removed:removedCount,passes:passes.length,revision:revision(),cause:causeVerdict.reason,sameCause:true,fingerprint:final.fingerprint||null,minimality:'LOCALLY_MINIMAL'};
+  rememberExperiment({kind:'reduce',status:independentFinal.status,evidence:independentFinal.evidence||{},fingerprint:independentFinal.fingerprint||null,revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length,reduction:beforeLength?1-after/beforeLength:0,cause:independentCause.reason,sameCause:true,minimality:'LOCALLY_MINIMAL',independentRerun:true});
+  persistMutation(before);render();renderPreview();renderHealth(independentFinal.status);
+  return {status:independentFinal.status,before:beforeLength,after,reduction:beforeLength?1-after/beforeLength:0,trials:reducedTrialCount,removed:removedCount,passes:passes.length,revision:revision(),cause:independentCause.reason,sameCause:true,fingerprint:independentFinal.fingerprint||null,minimality:'LOCALLY_MINIMAL',independentRerun:true};
 }
 function history({limit=100}={}){ return clone(experimentLedger.slice(-Math.max(1,Math.min(200,Number(limit)||100)))); }
 function listRevisions({limit=MAX_RUNTIME_REVISIONS}={}){
@@ -613,13 +643,7 @@ function listRevisions({limit=MAX_RUNTIME_REVISIONS}={}){
       revision:rev,
       current:rev===currentRevision,
       event:event?clone(event):null,
-      summary:{
-        htmlChars:String(c.html??'').length,
-        cssChars:String(c.css??'').length,
-        jsChars:String(c.js??'').length,
-        oracleKind:c.oracle?.kind||null,
-        pinCount:Array.isArray(snapshot?.pins)?snapshot.pins.length:0
-      }
+      summary:{htmlChars:String(c.html??'').length,cssChars:String(c.css??'').length,jsChars:String(c.js??'').length,oracleKind:c.oracle?.kind||null,pinCount:Array.isArray(snapshot?.pins)?snapshot.pins.length:0}
     };
   });
   return {currentRevision,retentionLimit:MAX_RUNTIME_REVISIONS,revisions:items};
@@ -652,58 +676,25 @@ function renderTrace(){const list=$('trace');list.innerHTML='';for(const e of [.
 function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 function renderUnits(){const list=$('units'),listed=units({targetAxis:axis}).units;list.innerHTML='';selectedUnitId=null;for(const unit of listed){const row=document.createElement('button');row.type='button';row.className='unit';row.dataset.unitId=unit.id;row.dataset.depth=String(unit.depth);row.setAttribute('aria-pressed','false');row.style.paddingInlineStart=`calc(12px + ${Math.min(unit.depth,6)} * 14px)`;const protection=unit.pinned?' · pinned':unit.protectedByDescendant?' · protected by pinned descendant':'';row.innerHTML=`<span>${escapeHtml(unit.text.trim().replace(/\s+/g,' ').slice(0,120))}</span><small>${unit.kind} · depth ${unit.depth}${protection}</small>`;row.onclick=()=>{document.querySelectorAll('.unit').forEach(x=>x.setAttribute('aria-pressed','false'));row.setAttribute('aria-pressed','true');selectedUnitId=unit.id;$('probe').disabled=unit.pinned||unit.protectedByDescendant;$('pin').disabled=false;};list.appendChild(row)}$('unit-count').textContent=`${listed.length} units`;}
 function renderPreview(executePreview=false){const preview=$('preview');if(!preview)return;previewBootstrapId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;preview.srcdoc=buildSandboxDocument(value(),previewBootstrapId,{previewOnly:true,executePreview});}
-function installPreviewRunner(){
-  const toolbar=document.querySelector('.preview-toolbar');
-  if(!toolbar||$('preview-run'))return;
-  const button=document.createElement('button');
-  button.id='preview-run';
-  button.type='button';
-  button.className='btn ghost';
-  button.textContent='Run preview JS';
-  button.setAttribute('aria-label','Run canonical JavaScript in isolated preview');
-  button.style.marginLeft='auto';
-  const label=toolbar.querySelector('.preview-label');
-  if(label)label.style.marginLeft='0';
-  button.onclick=()=>renderPreview(true);
-  toolbar.appendChild(button);
-}
-function handlePreviewNavigationMessage(event){
-  const preview=$('preview');
-  if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-navigation-blocked'||event.data.bootstrapId!==previewBootstrapId)return;
-  const risk=event.data.risk||{};
-  renderHealth('UNRESOLVED');
-  $('summary').textContent=`UNSAFE_NAVIGATION · ${risk.axis||'html'} · ${risk.capability||'navigation'}`;
-}
-function handlePreviewPolicyMessage(event){
-  const preview=$('preview');
-  if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-policy-blocked'||event.data.bootstrapId!==previewBootstrapId)return;
-  const risk=event.data.risk||{};
-  renderHealth('UNRESOLVED');
-  $('summary').textContent=`UNSAFE_NETWORK · ${risk.axis||'js'} · ${risk.capability||'runtime-csp-resource'}${risk.directive?` · ${risk.directive}`:''}`;
-}
+function installPreviewRunner(){const toolbar=document.querySelector('.preview-toolbar');if(!toolbar||$('preview-run'))return;const button=document.createElement('button');button.id='preview-run';button.type='button';button.className='btn ghost';button.textContent='Run preview JS';button.setAttribute('aria-label','Run canonical JavaScript in isolated preview');button.style.marginLeft='auto';const label=toolbar.querySelector('.preview-label');if(label)label.style.marginLeft='0';button.onclick=()=>renderPreview(true);toolbar.appendChild(button);}
+function handlePreviewNavigationMessage(event){const preview=$('preview');if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-navigation-blocked'||event.data.bootstrapId!==previewBootstrapId)return;const risk=event.data.risk||{};renderHealth('UNRESOLVED');$('summary').textContent=`UNSAFE_NAVIGATION · ${risk.axis||'html'} · ${risk.capability||'navigation'}`;}
+function handlePreviewPolicyMessage(event){const preview=$('preview');if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-policy-blocked'||event.data.bootstrapId!==previewBootstrapId)return;const risk=event.data.risk||{};renderHealth('UNRESOLVED');$('summary').textContent=`UNSAFE_NETWORK · ${risk.axis||'js'} · ${risk.capability||'runtime-csp-resource'}${risk.directive?` · ${risk.directive}`:''}`;}
 addEventListener('message',handlePreviewNavigationMessage);
 addEventListener('message',handlePreviewPolicyMessage);
-function syncActionControls(){const kind=$('action-kind').value;$('action-selector').disabled=kind==='none'||kind==='sequence';$('action-value').disabled=kind!=='set_value';$('action-checked').disabled=kind!=='set_checked';$('action-sequence').disabled=kind!=='sequence';}
-function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??'';$('action-checked').value=String(s.case.oracle.action?.checked??true);$('action-sequence').value=s.case.oracle.action?.kind==='sequence'?JSON.stringify(s.case.oracle.action.steps,null,2):'';syncActionControls();renderUnits();renderTrace();persistBestEffort();}
+function syncActionControls(){const kind=$('action-kind').value;$('action-selector').disabled=kind==='none'||kind==='sequence'||kind==='scroll';$('action-value').disabled=!['set_value','select_option'].includes(kind);$('action-checked').disabled=kind!=='set_checked';$('action-sequence').disabled=kind!=='sequence';}
+function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');if([...$('action-kind').options].some(option=>option.value===s.case.oracle.action?.kind))$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??s.case.oracle.action?.key??'';$('action-checked').value=String(s.case.oracle.action?.checked??true);$('action-sequence').value=s.case.oracle.action?.kind==='sequence'?JSON.stringify(s.case.oracle.action.steps,null,2):'';syncActionControls();renderUnits();renderTrace();persistBestEffort();}
 
 const REVISION_PROPERTY={expectedRevision:{type:'string',pattern:'^r[1-9]\\d*$'}};
 const REQUEST_PROPERTY={requestId:{type:'string',pattern:'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}};
-const ACTION_STEP_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_STEP_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},durationMs:{type:'number',minimum:0,maximum:MAX_SEQUENCE_WAIT_MS}},required:['kind']};
-const ACTION_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}},required:['kind']};
-const ORACLE_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ORACLE_KINDS},selector:{type:'string'},property:{type:'string'},equals:{},action:ACTION_SCHEMA,delayMs:{type:'number',minimum:0,maximum:2000}},required:['kind','action']};
+const ACTION_PROPERTIES={kind:{type:'string'},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},durationMs:{type:'number',minimum:0,maximum:MAX_SEQUENCE_WAIT_MS},key:{type:'string',minLength:1,maxLength:64},x:{type:'number'},y:{type:'number'}};
+const ACTION_STEP_SCHEMA={type:'object',additionalProperties:false,properties:{...ACTION_PROPERTIES,kind:{type:'string',enum:ACTION_STEP_KINDS}},required:['kind']};
+const ACTION_SCHEMA={type:'object',additionalProperties:false,properties:{...ACTION_PROPERTIES,kind:{type:'string',enum:ACTION_KINDS},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:MAX_SEQUENCE_STEPS}},required:['kind']};
+const ORACLE_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ORACLE_KINDS},selector:{type:'string'},property:{type:'string'},equals:{},action:ACTION_SCHEMA,delayMs:{type:'number',minimum:0,maximum:CAPTURE_LIMITS.oracleDelayMs}},required:['kind','action']};
 const CASE_SCHEMA={type:'object',additionalProperties:false,properties:{html:{type:'string'},css:{type:'string'},js:{type:'string'},oracle:ORACLE_SCHEMA},required:['html','css','js','oracle']};
 const CAPTURE_STRING={type:'string',maxLength:CAPTURE_LIMITS.sourceBytes};
 const CAPTURE_METADATA_STRING={type:'string',maxLength:2048};
 const CAPTURE_DIAGNOSTIC_ARRAY={type:'array',maxItems:CAPTURE_LIMITS.diagnosticsEntries,items:CAPTURE_METADATA_STRING};
-const CAPTURE_ARTIFACT_SCHEMA={type:'object',additionalProperties:false,properties:{
- schema:{type:'string',enum:[CAPTURE_SCHEMA]},
- capturedAt:CAPTURE_METADATA_STRING,
- source:{type:'object',additionalProperties:false,properties:{url:CAPTURE_METADATA_STRING,title:CAPTURE_METADATA_STRING,html:CAPTURE_STRING,css:CAPTURE_STRING,js:CAPTURE_STRING},required:['html','css','js']},
- oracle:ORACLE_SCHEMA,
- environment:{type:'object',additionalProperties:true},
- provenance:{type:'object',additionalProperties:true,properties:{adapter:CAPTURE_METADATA_STRING},required:['adapter']},
- diagnostics:{type:'object',additionalProperties:false,properties:{externalDependencies:CAPTURE_DIAGNOSTIC_ARRAY,consoleErrors:CAPTURE_DIAGNOSTIC_ARRAY,pageErrors:CAPTURE_DIAGNOSTIC_ARRAY}}
-},required:['schema','source','oracle','provenance']};
+const CAPTURE_ARTIFACT_SCHEMA={type:'object',additionalProperties:false,properties:{schema:{type:'string',enum:[CAPTURE_SCHEMA]},capturedAt:CAPTURE_METADATA_STRING,source:{type:'object',additionalProperties:false,properties:{url:CAPTURE_METADATA_STRING,title:CAPTURE_METADATA_STRING,html:CAPTURE_STRING,css:CAPTURE_STRING,js:CAPTURE_STRING},required:['html','css','js']},oracle:ORACLE_SCHEMA,environment:{type:'object',additionalProperties:true},provenance:{type:'object',additionalProperties:true,properties:{adapter:CAPTURE_METADATA_STRING},required:['adapter']},diagnostics:{type:'object',additionalProperties:false,properties:{externalDependencies:CAPTURE_DIAGNOSTIC_ARRAY,consoleErrors:CAPTURE_DIAGNOSTIC_ARRAY,pageErrors:CAPTURE_DIAGNOSTIC_ARRAY}}},required:['schema','source','oracle','provenance']};
 const TOOL_DEFS=[
  ['faultline_inspect','Inspect the canonical failure case, revision, pins and semantic-unit counts.',{},async()=>inspect(),true,true],
  ['faultline_units','List canonical semantic units with hierarchy, direct pin state, and ancestor protection for one source axis.',{targetAxis:{type:'string',enum:['html','css','js']}},async input=>units(input),true,true,['targetAxis']],
@@ -715,7 +706,7 @@ const TOOL_DEFS=[
  ['faultline_define_oracle','Replace the deterministic failure oracle using an optimistic revision guard.',{...REVISION_PROPERTY,oracle:ORACLE_SCHEMA},async input=>defineOracle(input),false,true,['expectedRevision','oracle']],
  ['faultline_apply_source','Replace one canonical HTML, CSS, or JavaScript source axis using an optimistic revision guard.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},source:{type:'string'}},async input=>applySource(input),false,true,['expectedRevision','targetAxis','source']],
  ['faultline_probe','Test removing one semantic unit from the inspected canonical revision without mutating canonical state; the probe evidence trail is persisted. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'}},async(input,options)=>probe(input,options),false,true,['expectedRevision','targetAxis','unitId']],
- ['faultline_reduce','Delta-debug one source axis while preserving the failing oracle and rejecting stale revisions. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},maxTrials:{type:'integer',minimum:1,maximum:200}},async(input,options)=>reduce(input,options),false,false,['expectedRevision','targetAxis']],
+ ['faultline_reduce','Delta-debug one source axis while preserving the same causal failure and rejecting stale revisions. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},maxTrials:{type:'integer',minimum:1,maximum:200}},async(input,options)=>reduce(input,options),false,false,['expectedRevision','targetAxis']],
  ['faultline_pin','Pin or unpin a semantic unit so reduction cannot remove it, guarded by canonical revision.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'},pinned:{type:'boolean'}},async input=>pin(input),false,true,['expectedRevision','targetAxis','unitId']],
  ['faultline_history','Read recent deterministic experiment evidence.',{limit:{type:'integer',minimum:1,maximum:200}},async input=>history(input),true,true],
  ['faultline_revisions','List bounded recoverable canonical revisions with mutation metadata for guarded restore.',{limit:{type:'integer',minimum:1,maximum:16}},async input=>listRevisions(input),true,false],
@@ -735,7 +726,7 @@ $('pin').onclick=()=>{if(!selectedUnitId)return;const key=pinKey(axis,selectedUn
 $('reduce').onclick=()=>reduce({targetAxis:axis}).then(r=>renderHealth(r.status)).catch(e=>{renderHealth('ERROR');$('summary').textContent=e.message;});
 $('autopilot').onclick=()=>autopilot().then(()=>renderHealth('COMPLETE')).catch(e=>{renderHealth('ERROR');$('summary').textContent=e.message;});
 $('action-kind').onchange=syncActionControls;
-$('lock').onclick=()=>{const actionKind=$('action-kind').value;let action;if(actionKind==='sequence'){try{action={kind:'sequence',steps:JSON.parse($('action-sequence').value)}}catch{renderHealth('ERROR');$('summary').textContent='INVALID_ACTION_SEQUENCE_JSON';return;}}else{action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;if(actionKind==='set_checked')action.checked=$('action-checked').value==='true';}const oracleKind=$('oracle-kind').value,rawEquals=$('oracle-equals').value,equals=oracleKind==='dom_attribute'?(rawEquals==='null'?null:rawEquals):normalizeExpected(rawEquals);try{defineOracle({oracle:{kind:oracleKind,selector:$('oracle-selector').value,property:$('oracle-property').value,equals,action,delayMs:0}})}catch(e){renderHealth('ERROR');$('summary').textContent=String(e?.message||e);}};
+$('lock').onclick=()=>{const actionKind=$('action-kind').value;let action;if(actionKind==='sequence'){try{action={kind:'sequence',steps:JSON.parse($('action-sequence').value)}}catch{renderHealth('ERROR');$('summary').textContent='INVALID_ACTION_SEQUENCE_JSON';return;}}else{action={kind:actionKind};const selector=$('action-selector').value;if(selector)action.selector=selector;if(['set_value','select_option'].includes(actionKind))action.value=$('action-value').value;if(actionKind==='set_checked')action.checked=$('action-checked').value==='true';if(actionKind==='key_press')action.key=$('action-value').value;if(actionKind==='scroll')action.y=Number($('action-value').value)||0;}const oracleKind=$('oracle-kind').value,rawEquals=$('oracle-equals').value,equals=oracleKind==='dom_attribute'?(rawEquals==='null'?null:rawEquals):normalizeExpected(rawEquals);try{defineOracle({oracle:{kind:oracleKind,selector:$('oracle-selector').value,property:$('oracle-property').value,equals,action,delayMs:0}})}catch(e){renderHealth('ERROR');$('summary').textContent=String(e?.message||e);}};
 $('export').onclick=()=>{const a=document.createElement('a'),blob=new Blob([exportCase()],{type:'text/html'});a.href=URL.createObjectURL(blob);a.download='faultline-reproducer.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $('reset').onclick=()=>resetCase({expectedRevision:revision()});
 restoreLocal();rememberRevision(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();renderPreview();installPreviewRunner();registerWebMCP();

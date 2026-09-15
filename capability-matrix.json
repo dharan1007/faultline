@@ -1,0 +1,63 @@
+{
+  "repository": "faultline",
+  "contractVersion": "A-G/1",
+  "updatedAt": "2026-09-14",
+  "note": "No capability is PRODUCTION until external benchmark + real-workload evidence exists (Rules A, D, F). Core reduction is EXPERIMENTAL pending Web Debug Bench replay + agent-uplift study under identical conditions.",
+  "capabilities": [
+    {
+      "id": "playwright-capture-v1",
+      "title": "Bounded Playwright capture to faultline.capture.v1",
+      "status": "EXPERIMENTAL",
+      "evidence": "Caller-owned page adapter with 1MiB/axis + 4MiB total bounds; browser ingestion tests green. External benchmark pending.",
+      "nextEvidence": "benchmarks/manifests/upstream-playwright.json"
+    },
+    {
+      "id": "deterministic-oracle",
+      "title": "Deterministic failure oracles (5 classes + causal fingerprint v1)",
+      "status": "EXPERIMENTAL",
+      "evidence": "dom_property/attribute/exists/computed_style/runtime_error with PASS/FAIL/UNRESOLVED; every runCase result now carries a causal fingerprint (oracleIdentity + error name/stack surfaced from sandbox); release-corpus validation pending.",
+      "nextEvidence": "benchmarks/manifests/agent-uplift.json"
+    },
+    {
+      "id": "hierarchical-reduction",
+      "title": "Hierarchical HTML/CSS/JS reduction with pins and re-verification",
+      "status": "EXPERIMENTAL",
+      "evidence": "Structural scanners + ddmin + ancestor pin closure + commit-level SAME_CAUSE enforcement (REDUCTION_LOST_FAILURE on cause drift); per-trial cause tracking planned; 0 false-equivalent target not yet measured on release corpus.",
+      "nextEvidence": "benchmarks/manifests/web-debug-bench.json"
+    },
+    {
+      "id": "sandbox-containment",
+      "title": "Sandboxed candidate execution (iframe, no same-origin, restrictive CSP)",
+      "status": "EXPERIMENTAL",
+      "evidence": "Extensive containment regression suite green on Chromium gate. Browser boundary only — not VM isolation; multi-tenant hostile use is UNSUPPORTED.",
+      "nextEvidence": "benchmarks/manifests/upstream-playwright.json"
+    },
+    {
+      "id": "webmcp-agent-surface",
+      "title": "17-tool WebMCP + window.faultline agent surface",
+      "status": "EXPERIMENTAL",
+      "evidence": "Revision-guarded canonical runtime shared with UI; cancellation/revision tests green. Agent-uplift benchmark pending.",
+      "nextEvidence": "benchmarks/manifests/agent-uplift.json"
+    },
+    {
+      "id": "cli-ci-action",
+      "title": "CLI + GitHub Action reproduce/reduce/verify",
+      "status": "EXPERIMENTAL",
+      "evidence": "validate/inspect/analyze with stable exit classes; packaged CLI browser test green. Cross-browser + SBOM gates green on main.",
+      "nextEvidence": "benchmarks/manifests/upstream-playwright.json"
+    },
+    {
+      "id": "minimal-reproducer-bundle",
+      "title": "One-command minimal reproducer (faultline-repro/)",
+      "status": "PLANNED",
+      "evidence": "Spec + writer landed 2026-09-14; OCI/Dockerfile + run.sh/run.ps1 + oracle/fingerprint/provenance format defined, needs field validation.",
+      "nextEvidence": "benchmarks/manifests/agent-uplift.json"
+    },
+    {
+      "id": "multi-tenant-hostile-execution",
+      "title": "Shared multi-tenant hostile-code execution service",
+      "status": "UNSUPPORTED",
+      "evidence": "Explicit non-goal. Requires process/VM isolation, identity, quotas, namespaces, scheduling — outside browser-only architecture."
+    }
+  ]
+}

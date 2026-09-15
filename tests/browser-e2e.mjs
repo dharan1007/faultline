@@ -21,7 +21,7 @@ try{
   const response=await page.goto(`http://127.0.0.1:${port}/`,{waitUntil:'networkidle'});
   assert.equal(response.status(),200);
   await page.waitForFunction(()=>window.faultline && window.__webmcpTools?.length===17);
-  assert.deepEqual(await page.evaluate(()=>Object.keys(window.faultline).sort()),['applySource','autopilot','defineOracle','exportBundle','exportCase','history','importCapture','inspect','loadCase','manifest','pin','probe','reduce','resetCase','restore','revisions','run','units'].sort());
+  assert.deepEqual(await page.evaluate(()=>Object.keys(window.faultline).sort()),['applySource','autopilot','defineOracle','dependencyGraph','exportBundle','exportCase','history','importCapture','inspect','loadCase','manifest','pin','probe','reduce','resetCase','restore','revisions','run','units'].sort());
   assert.equal(await page.locator('#webmcp').textContent(),'WebMCP ready · 17 tools');
   const connectionText=await page.locator('.connection').textContent();
   assert.match(connectionText,/17 WebMCP tools/i);

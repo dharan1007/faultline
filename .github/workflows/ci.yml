@@ -24,11 +24,15 @@ jobs:
       - name: Verify all production and evidence scripts parse
         run: |
           npm run check
+          node --check scripts/qualification-gate.mjs
           node --check tests/reducer-benchmark.mjs
           node --check tests/reduction-corpus.mjs
           node --check tests/cross-browser-production.mjs
+          node --check tests/playwright-live.mjs
       - name: Verify package exports are loadable
-        run: node --input-type=module -e "await import('faultline-webmcp/capture'); await import('faultline-webmcp/reducer'); await import('faultline-webmcp/playwright-capture');"
+        run: node --input-type=module -e "await import('faultline-webmcp/capture'); await import('faultline-webmcp/reducer'); await import('faultline-webmcp/playwright-capture'); await import('faultline-webmcp/playwright-live'); await import('faultline-webmcp/live-reducer'); await import('faultline-webmcp/runtime-reproducer'); await import('faultline-webmcp/qualification');"
+      - name: Enforce honest evidence-derived capability status
+        run: node scripts/qualification-gate.mjs
       - run: npm run build
       - name: Generate dependency SBOM from exact lockfile
         run: npm run sbom
@@ -38,6 +42,8 @@ jobs:
         run: node tests/reducer-benchmark.mjs | tee faultline-benchmark.jsonl
       - name: Install pinned Playwright browser families
         run: ./node_modules/.bin/playwright install --with-deps chromium firefox webkit
+      - name: Verify caller-owned live Playwright interactions
+        run: node tests/playwright-live.mjs | tee faultline-live-browser.jsonl
       - name: Verify real-browser reduction quality corpus
         run: node tests/reduction-corpus.mjs | tee faultline-browser-corpus.jsonl
       - name: Verify complete Chromium and WebMCP behavior
@@ -52,7 +58,9 @@ jobs:
           name: faultline-release-evidence-${{ github.sha }}
           path: |
             faultline-benchmark.jsonl
+            faultline-live-browser.jsonl
             faultline-browser-corpus.jsonl
+            artifacts/faultline-qualification-summary.json
             artifacts/faultline.spdx.json
             public/release.json
             public/integrity.json

@@ -1,0 +1,87 @@
+name: self-hosted-branch-verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or exact commit to verify
+        required: true
+        default: hardening/production-100-20260915
+        type: string
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  verify:
+    runs-on: [self-hosted, Linux, X64, production-ci]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=high --omit=dev
+      - name: Core verification
+        run: |
+          npm test
+          npm run check
+          node --test tests/deploy-production-contract.test.js
+          npm run build
+          npm run sbom
+          npm run verify:package
+      - name: Install pinned browser binaries
+        run: ./node_modules/.bin/playwright install chromium firefox webkit
+      - name: Browser qualification
+        run: |
+          node tests/playwright-live.mjs | tee faultline-live-browser.jsonl
+          node tests/reduction-corpus.mjs | tee faultline-browser-corpus.jsonl
+          npm run test:browser
+          node tests/cross-browser-production.mjs
+          node tests/cli-browser.mjs
+      - name: Upload branch verification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: faultline-branch-verify-${{ github.run_id }}
+          path: |
+            faultline-live-browser.jsonl
+            faultline-browser-corpus.jsonl
+            artifacts/faultline.spdx.json
+            public/release.json
+            public/integrity.json
+          retention-days: 30
+          if-no-files-found: error
+
+  codeql:
+    runs-on: [self-hosted, Linux, X64, production-ci]
+    timeout-minutes: 60
+    permissions:
+      security-events: write
+      packages: read
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v3
+        with:
+          languages: javascript-typescript
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run check
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v3
+        with:
+          category: /language:javascript-typescript

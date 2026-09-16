@@ -44,6 +44,9 @@ jobs:
         run: |
           npm test
           npm run check
+          node --check src/external-qualification-runner.js
+          node --check scripts/run-external-qualification.mjs
+          node --test tests/external-qualification-runner.test.js
           node --test tests/deploy-production-contract.test.js
       - name: Build and package evidence
         run: |

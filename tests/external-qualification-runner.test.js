@@ -32,7 +32,49 @@ test('accepts an immutable untouched external case with a separate capture adapt
   assert.equal(validated.cases[0].commit, sha);
   assert.equal(validated.cases[0].reproduction, 'npm test -- --grep original-case');
   assert.equal(validated.cases[0].adapter.capturePath, '.faultline/capture.json');
+  assert.equal(validated.cases[0].adapter.kind, 'command');
   assert.match(validated.digest, /^[0-9a-f]{64}$/);
+});
+
+test('accepts a Faultline-owned loopback Playwright adapter without modifying upstream source', () => {
+  const validated = validateExternalRunnerManifest(manifest([externalCase({
+    adapter: {
+      kind: 'playwright-live',
+      launchCommand: 'npm run dev -- --host 127.0.0.1 --port 4173',
+      readyUrl: 'http://127.0.0.1:4173/repro',
+      browser: 'chromium',
+      recipe: [{ kind: 'click', selector: '#trigger' }],
+      oracle: { kind: 'runtime_error', equals: 'boom' },
+      capturePath: '.faultline/capture.json',
+      mode: 'portable'
+    }
+  })]));
+  const adapter = validated.cases[0].adapter;
+  assert.equal(adapter.kind, 'playwright-live');
+  assert.equal(adapter.readyUrl, 'http://127.0.0.1:4173/repro');
+  assert.equal(adapter.browser, 'chromium');
+  assert.deepEqual(adapter.recipe, [{ kind: 'click', selector: '#trigger' }]);
+});
+
+test('playwright-live external adapter is restricted to loopback and declarative browser input', () => {
+  assert.throws(() => validateExternalRunnerManifest(manifest([externalCase({
+    adapter: {
+      kind: 'playwright-live', launchCommand: 'npm start', readyUrl: 'https://example.com/repro', browser: 'chromium',
+      recipe: [], oracle: { kind: 'runtime_error', equals: 'boom' }, capturePath: '.faultline/capture.json'
+    }
+  })])), /PLAYWRIGHT_READY_URL_LOOPBACK_REQUIRED/);
+  assert.throws(() => validateExternalRunnerManifest(manifest([externalCase({
+    adapter: {
+      kind: 'playwright-live', launchCommand: 'npm start', readyUrl: 'http://127.0.0.1:4173', browser: 'magic',
+      recipe: [], oracle: { kind: 'runtime_error', equals: 'boom' }, capturePath: '.faultline/capture.json'
+    }
+  })])), /PLAYWRIGHT_BROWSER_INVALID/);
+  assert.throws(() => validateExternalRunnerManifest(manifest([externalCase({
+    adapter: {
+      kind: 'playwright-live', launchCommand: 'npm start', readyUrl: 'http://localhost:4173', browser: 'chromium',
+      recipe: 'click everything', oracle: { kind: 'runtime_error', equals: 'boom' }, capturePath: '.faultline/capture.json'
+    }
+  })])), /PLAYWRIGHT_RECIPE_INVALID/);
 });
 
 test('rejects credentials in source repository URL and unsafe adapter definitions', () => {

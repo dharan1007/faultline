@@ -2,15 +2,19 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { isAbsolute, join, resolve, sep } from 'node:path';
 import { spawn } from 'node:child_process';
+import { chromium, firefox, webkit } from 'playwright';
 import { validateQualificationManifest, qualificationDigest } from './qualification-evidence.js';
+import { captureFaultlineCase, armFaultlineDiagnostics } from '../integrations/playwright-capture/index.js';
+import { executeLiveAction, validateLiveRecipe } from '../integrations/playwright-live/index.js';
 
 const fail = code => { throw new Error(code); };
 const clone = value => value === undefined ? undefined : structuredClone(value);
 const HASH40 = /^[0-9a-f]{40}$/i;
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_CAPTURE_BYTES = 4 * 1024 * 1024;
+const BROWSERS = Object.freeze({ chromium, firefox, webkit });
 
 function isObject(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
 function nonEmpty(value, code, max = 8192) { if (typeof value !== 'string' || !value.trim() || value.length > max) fail(code); return value.trim(); }
@@ -37,13 +41,48 @@ function normalizeRunnerExpectation(value) {
   return Object.freeze(out);
 }
 
+function normalizeMode(value) {
+  const mode = value == null ? 'portable' : nonEmpty(value, 'FAULTLINE_EXTERNAL_INVALID_MODE', 32);
+  if (!['portable', 'live'].includes(mode)) fail('FAULTLINE_EXTERNAL_INVALID_MODE');
+  return mode;
+}
+
+function normalizeReadyUrl(value) {
+  let url;
+  try { url = new URL(nonEmpty(value, 'FAULTLINE_EXTERNAL_PLAYWRIGHT_READY_URL_REQUIRED', 2048)); }
+  catch { fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_READY_URL_INVALID'); }
+  if (!['http:', 'https:'].includes(url.protocol)) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_READY_URL_INVALID');
+  const hostname = url.hostname.toLowerCase();
+  if (!['127.0.0.1', 'localhost', '::1'].includes(hostname)) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_READY_URL_LOOPBACK_REQUIRED');
+  if (url.username || url.password) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_READY_URL_INVALID');
+  return url.toString();
+}
+
+function normalizePlaywrightAdapter(value) {
+  const launchCommand = nonEmpty(value.launchCommand, 'FAULTLINE_EXTERNAL_PLAYWRIGHT_LAUNCH_COMMAND_REQUIRED', 16384);
+  const readyUrl = normalizeReadyUrl(value.readyUrl);
+  const browser = value.browser == null ? 'chromium' : nonEmpty(value.browser, 'FAULTLINE_EXTERNAL_PLAYWRIGHT_BROWSER_INVALID', 32).toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(BROWSERS, browser)) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_BROWSER_INVALID');
+  if (!Array.isArray(value.recipe)) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_RECIPE_INVALID');
+  let recipe;
+  try { recipe = clone(validateLiveRecipe(value.recipe)); } catch { fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_RECIPE_INVALID'); }
+  if (!isObject(value.oracle)) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_ORACLE_REQUIRED');
+  const oracle = clone(value.oracle);
+  const capturePath = nonEmpty(value.capturePath, 'FAULTLINE_EXTERNAL_CAPTURE_PATH_REQUIRED', 4096);
+  const mode = normalizeMode(value.mode);
+  const readyTimeoutMs = value.readyTimeoutMs == null ? 60_000 : Number(value.readyTimeoutMs);
+  if (!Number.isSafeInteger(readyTimeoutMs) || readyTimeoutMs < 1_000 || readyTimeoutMs > 10 * 60_000) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_READY_TIMEOUT_INVALID');
+  return Object.freeze({ kind: 'playwright-live', launchCommand, readyUrl, browser, recipe: Object.freeze(recipe), oracle: Object.freeze(oracle), capturePath, mode, readyTimeoutMs });
+}
+
 function normalizeAdapter(value) {
   if (!isObject(value)) fail('FAULTLINE_EXTERNAL_CAPTURE_ADAPTER_REQUIRED');
+  const kind = value.kind == null ? 'command' : nonEmpty(value.kind, 'FAULTLINE_EXTERNAL_CAPTURE_ADAPTER_KIND_INVALID', 64);
+  if (kind === 'playwright-live') return normalizePlaywrightAdapter(value);
+  if (kind !== 'command') fail('FAULTLINE_EXTERNAL_CAPTURE_ADAPTER_KIND_INVALID');
   const command = nonEmpty(value.command, 'FAULTLINE_EXTERNAL_CAPTURE_COMMAND_REQUIRED', 16384);
   const capturePath = nonEmpty(value.capturePath, 'FAULTLINE_EXTERNAL_CAPTURE_PATH_REQUIRED', 4096);
-  const mode = value.mode == null ? 'portable' : nonEmpty(value.mode, 'FAULTLINE_EXTERNAL_INVALID_MODE', 32);
-  if (!['portable', 'live'].includes(mode)) fail('FAULTLINE_EXTERNAL_INVALID_MODE');
-  return Object.freeze({ command, capturePath, mode });
+  return Object.freeze({ kind: 'command', command, capturePath, mode: normalizeMode(value.mode) });
 }
 
 export function validateExternalRunnerManifest(raw) {
@@ -78,11 +117,7 @@ export function baselineMatches(run, expectation) {
 
 async function runCommand(command, { cwd, timeoutMs, env = {} }) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn('/bin/bash', ['-lc', command], {
-      cwd,
-      env: { ...process.env, ...env },
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
+    const child = spawn('/bin/bash', ['-lc', command], { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     const stdout = [];
     const stderr = [];
     let stdoutBytes = 0;
@@ -91,11 +126,7 @@ async function runCommand(command, { cwd, timeoutMs, env = {} }) {
     const collect = (chunks, data, kind) => {
       const bytes = Buffer.byteLength(data);
       if (kind === 'stdout') stdoutBytes += bytes; else stderrBytes += bytes;
-      if (stdoutBytes + stderrBytes > MAX_OUTPUT_BYTES) {
-        killedForOutput = true;
-        child.kill('SIGKILL');
-        return;
-      }
+      if (stdoutBytes + stderrBytes > MAX_OUTPUT_BYTES) { killedForOutput = true; child.kill('SIGKILL'); return; }
       chunks.push(Buffer.from(data));
     };
     child.stdout.on('data', data => collect(stdout, data, 'stdout'));
@@ -105,14 +136,76 @@ async function runCommand(command, { cwd, timeoutMs, env = {} }) {
     child.once('close', (code, signal) => {
       clearTimeout(timer);
       if (killedForOutput) return reject(new Error('FAULTLINE_EXTERNAL_COMMAND_OUTPUT_LIMIT'));
-      resolvePromise({
-        exitCode: Number.isInteger(code) ? code : 255,
-        signal: signal ?? null,
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8')
-      });
+      resolvePromise({ exitCode: Number.isInteger(code) ? code : 255, signal: signal ?? null, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') });
     });
   });
+}
+
+function startBackground(command, { cwd, env = {} }) {
+  const child = spawn('/bin/bash', ['-lc', `exec ${command}`], { cwd, env: { ...process.env, ...env }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const stdout = [];
+  const stderr = [];
+  let bytes = 0;
+  const collect = (target, data) => { if (bytes >= MAX_OUTPUT_BYTES) return; const buffer = Buffer.from(data); bytes += buffer.length; if (bytes <= MAX_OUTPUT_BYTES) target.push(buffer); };
+  child.stdout.on('data', data => collect(stdout, data));
+  child.stderr.on('data', data => collect(stderr, data));
+  return { child, output: () => ({ stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') }) };
+}
+
+async function stopBackground(child) {
+  if (!child || child.exitCode != null) return;
+  try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
+  await new Promise(resolvePromise => {
+    const timer = setTimeout(() => {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
+      resolvePromise();
+    }, 3000);
+    child.once('close', () => { clearTimeout(timer); resolvePromise(); });
+  });
+}
+
+async function waitUntilReady(url, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(2500) });
+      if (response.status >= 200 && response.status < 500) return;
+      lastError = new Error(`HTTP_${response.status}`);
+    } catch (error) { lastError = error; }
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 250));
+  }
+  const error = new Error('FAULTLINE_EXTERNAL_PLAYWRIGHT_READY_TIMEOUT', { cause: lastError });
+  throw error;
+}
+
+async function playwrightCapture(caseDef, { repoDir, captureAbs, faultlineRoot, raw }) {
+  const adapter = caseDef.adapter;
+  const background = startBackground(adapter.launchCommand, { cwd: repoDir, env: { FAULTLINE_ROOT: resolve(faultlineRoot) } });
+  let browser = null;
+  let diagnostics = null;
+  try {
+    await waitUntilReady(adapter.readyUrl, adapter.readyTimeoutMs);
+    browser = await BROWSERS[adapter.browser].launch({ headless: true });
+    const page = await browser.newPage();
+    diagnostics = armFaultlineDiagnostics(page);
+    await page.goto(adapter.readyUrl, { waitUntil: 'domcontentloaded', timeout: Math.min(caseDef.timeoutMs, 30_000) });
+    for (const action of adapter.recipe) await executeLiveAction(page, action, { timeoutMs: Math.min(caseDef.timeoutMs, 10_000) });
+    await captureFaultlineCase({
+      page,
+      oracle: clone(adapter.oracle),
+      provenance: { sourceRepository: caseDef.repository, sourceCommit: caseDef.commit, testTitle: caseDef.id, testFile: caseDef.provenance },
+      diagnostics,
+      writeTo: captureAbs
+    });
+    raw.captureCommand = { exitCode: 0, adapter: 'playwright-live', browser: adapter.browser, readyUrl: adapter.readyUrl };
+  } finally {
+    try { diagnostics?.dispose(); } catch {}
+    try { await browser?.close(); } catch {}
+    await stopBackground(background.child);
+    const output = background.output();
+    raw.launch = { stdoutSha256: sha256(output.stdout), stderrSha256: sha256(output.stderr), stdoutBytes: Buffer.byteLength(output.stdout), stderrBytes: Buffer.byteLength(output.stderr) };
+  }
 }
 
 async function checkoutCase(caseDef, workspace) {
@@ -151,7 +244,7 @@ export async function executeExternalCase(caseDef, { faultlineRoot = process.cwd
   if (!HASH40.test(caseDef.commit)) fail('FAULTLINE_EXTERNAL_INVALID_COMMIT');
   const workspace = await import('node:fs/promises').then(({ mkdtemp }) => mkdtemp(join(tmpdir(), `faultline-${caseDef.id.replace(/[^a-z0-9._-]/gi, '_')}-`)));
   const startedAt = Date.now();
-  const raw = { id: caseDef.id, repository: caseDef.repository, commit: caseDef.commit, provenance: caseDef.provenance, startedAt };
+  const raw = { id: caseDef.id, repository: caseDef.repository, commit: caseDef.commit, provenance: caseDef.provenance, adapterKind: caseDef.adapter.kind, startedAt };
   let result;
   try {
     const repoDir = await checkoutCase(caseDef, workspace);
@@ -169,9 +262,14 @@ export async function executeExternalCase(caseDef, { faultlineRoot = process.cwd
     }
 
     const captureAbs = safeRelative(repoDir, caseDef.adapter.capturePath, 'FAULTLINE_EXTERNAL_UNSAFE_CAPTURE_PATH');
-    const captureRun = await runCommand(caseDef.adapter.command, { cwd: repoDir, timeoutMs: caseDef.timeoutMs, env: { FAULTLINE_ROOT: resolve(faultlineRoot), FAULTLINE_CAPTURE_PATH: captureAbs } });
-    raw.captureCommand = { exitCode: captureRun.exitCode, stdoutSha256: sha256(captureRun.stdout), stderrSha256: sha256(captureRun.stderr) };
-    if (captureRun.exitCode !== 0) fail('FAULTLINE_EXTERNAL_CAPTURE_FAILED');
+    await mkdir(resolve(captureAbs, '..'), { recursive: true });
+    if (caseDef.adapter.kind === 'playwright-live') {
+      await playwrightCapture(caseDef, { repoDir, captureAbs, faultlineRoot, raw });
+    } else {
+      const captureRun = await runCommand(caseDef.adapter.command, { cwd: repoDir, timeoutMs: caseDef.timeoutMs, env: { FAULTLINE_ROOT: resolve(faultlineRoot), FAULTLINE_CAPTURE_PATH: captureAbs } });
+      raw.captureCommand = { exitCode: captureRun.exitCode, stdoutSha256: sha256(captureRun.stdout), stderrSha256: sha256(captureRun.stderr) };
+      if (captureRun.exitCode !== 0) fail('FAULTLINE_EXTERNAL_CAPTURE_FAILED');
+    }
     const capture = await fileEvidence(captureAbs, 'FAULTLINE_EXTERNAL_CAPTURE_ARTIFACT_MISSING');
     raw.capture = { path: caseDef.adapter.capturePath, sha256: capture.sha256, size: capture.size };
 

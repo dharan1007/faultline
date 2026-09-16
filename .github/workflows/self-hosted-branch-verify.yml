@@ -33,6 +33,9 @@ jobs:
         run: |
           npm test
           npm run check
+          node --check src/external-qualification-runner.js
+          node --check scripts/run-external-qualification.mjs
+          node --test tests/external-qualification-runner.test.js
           node --test tests/deploy-production-contract.test.js
           npm run build
           npm run sbom
@@ -82,6 +85,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run check
+      - run: node --test tests/external-qualification-runner.test.js
       - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v3
         with:
           category: /language:javascript-typescript

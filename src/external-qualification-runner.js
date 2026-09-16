@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve, sep } from 'node:path';
 import { spawn } from 'node:child_process';
 import { chromium, firefox, webkit } from 'playwright';
 import { validateQualificationManifest, qualificationDigest } from './qualification-evidence.js';
+import { validateCaptureAction } from './capture-contract.js';
 import { captureFaultlineCase, armFaultlineDiagnostics } from '../integrations/playwright-capture/index.js';
-import { executeLiveAction, validateLiveRecipe } from '../integrations/playwright-live/index.js';
+import { validateLiveRecipe } from '../integrations/playwright-live/index.js';
 
 const fail = code => { throw new Error(code); };
 const clone = value => value === undefined ? undefined : structuredClone(value);
@@ -21,6 +21,7 @@ function nonEmpty(value, code, max = 8192) { if (typeof value !== 'string' || !v
 function sha256(value) { return createHash('sha256').update(value).digest('hex'); }
 function within(root, candidate) { const r = resolve(root); const c = resolve(candidate); return c === r || c.startsWith(`${r}${sep}`); }
 function safeRelative(root, value, code) { value = nonEmpty(value, code, 4096); if (isAbsolute(value)) fail(code); const out = resolve(root, value); if (!within(root, out)) fail(code); return out; }
+function sameJson(left,right){return JSON.stringify(left)===JSON.stringify(right);}
 
 function normalizeRunnerExpectation(value) {
   if (value == null) return Object.freeze({ mode: 'nonzero-exit' });
@@ -58,21 +59,31 @@ function normalizeReadyUrl(value) {
   return url.toString();
 }
 
+function recipeAction(recipe){
+  if(recipe.length===0)return Object.freeze({kind:'none'});
+  if(recipe.length===1)return Object.freeze(clone(recipe[0]));
+  const action={kind:'sequence',steps:clone(recipe)};
+  try{validateCaptureAction(action);}catch{fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_RECIPE_INVALID');}
+  return Object.freeze(action);
+}
+
 function normalizePlaywrightAdapter(value) {
   const launchCommand = nonEmpty(value.launchCommand, 'FAULTLINE_EXTERNAL_PLAYWRIGHT_LAUNCH_COMMAND_REQUIRED', 16384);
   const readyUrl = normalizeReadyUrl(value.readyUrl);
   const browser = value.browser == null ? 'chromium' : nonEmpty(value.browser, 'FAULTLINE_EXTERNAL_PLAYWRIGHT_BROWSER_INVALID', 32).toLowerCase();
   if (!Object.prototype.hasOwnProperty.call(BROWSERS, browser)) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_BROWSER_INVALID');
-  if (!Array.isArray(value.recipe)) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_RECIPE_INVALID');
+  if (!Array.isArray(value.recipe) || value.recipe.length > 16) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_RECIPE_INVALID');
   let recipe;
   try { recipe = clone(validateLiveRecipe(value.recipe)); } catch { fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_RECIPE_INVALID'); }
+  const action=recipeAction(recipe);
   if (!isObject(value.oracle)) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_ORACLE_REQUIRED');
-  const oracle = clone(value.oracle);
+  if(value.oracle.action!==undefined&&!sameJson(value.oracle.action,action))fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_ORACLE_ACTION_MISMATCH');
+  const oracle = Object.freeze({...clone(value.oracle),action:clone(action)});
   const capturePath = nonEmpty(value.capturePath, 'FAULTLINE_EXTERNAL_CAPTURE_PATH_REQUIRED', 4096);
   const mode = normalizeMode(value.mode);
   const readyTimeoutMs = value.readyTimeoutMs == null ? 60_000 : Number(value.readyTimeoutMs);
   if (!Number.isSafeInteger(readyTimeoutMs) || readyTimeoutMs < 1_000 || readyTimeoutMs > 10 * 60_000) fail('FAULTLINE_EXTERNAL_PLAYWRIGHT_READY_TIMEOUT_INVALID');
-  return Object.freeze({ kind: 'playwright-live', launchCommand, readyUrl, browser, recipe: Object.freeze(recipe), oracle: Object.freeze(oracle), capturePath, mode, readyTimeoutMs });
+  return Object.freeze({ kind: 'playwright-live', launchCommand, readyUrl, browser, recipe: Object.freeze(recipe), oracle, capturePath, mode, readyTimeoutMs });
 }
 
 function normalizeAdapter(value) {
@@ -175,8 +186,7 @@ async function waitUntilReady(url, timeoutMs) {
     } catch (error) { lastError = error; }
     await new Promise(resolvePromise => setTimeout(resolvePromise, 250));
   }
-  const error = new Error('FAULTLINE_EXTERNAL_PLAYWRIGHT_READY_TIMEOUT', { cause: lastError });
-  throw error;
+  throw new Error('FAULTLINE_EXTERNAL_PLAYWRIGHT_READY_TIMEOUT', { cause: lastError });
 }
 
 async function playwrightCapture(caseDef, { repoDir, captureAbs, faultlineRoot, raw }) {
@@ -190,7 +200,6 @@ async function playwrightCapture(caseDef, { repoDir, captureAbs, faultlineRoot, 
     const page = await browser.newPage();
     diagnostics = armFaultlineDiagnostics(page);
     await page.goto(adapter.readyUrl, { waitUntil: 'domcontentloaded', timeout: Math.min(caseDef.timeoutMs, 30_000) });
-    for (const action of adapter.recipe) await executeLiveAction(page, action, { timeoutMs: Math.min(caseDef.timeoutMs, 10_000) });
     await captureFaultlineCase({
       page,
       oracle: clone(adapter.oracle),
@@ -198,7 +207,7 @@ async function playwrightCapture(caseDef, { repoDir, captureAbs, faultlineRoot, 
       diagnostics,
       writeTo: captureAbs
     });
-    raw.captureCommand = { exitCode: 0, adapter: 'playwright-live', browser: adapter.browser, readyUrl: adapter.readyUrl };
+    raw.captureCommand = { exitCode: 0, adapter: 'playwright-live', browser: adapter.browser, readyUrl: adapter.readyUrl, oracleAction: clone(adapter.oracle.action) };
   } finally {
     try { diagnostics?.dispose(); } catch {}
     try { await browser?.close(); } catch {}
@@ -242,7 +251,8 @@ function reportReduction(report) {
 
 export async function executeExternalCase(caseDef, { faultlineRoot = process.cwd(), outputRoot = 'benchmarks/results/external-incidents', keepWorkspace = false } = {}) {
   if (!HASH40.test(caseDef.commit)) fail('FAULTLINE_EXTERNAL_INVALID_COMMIT');
-  const workspace = await import('node:fs/promises').then(({ mkdtemp }) => mkdtemp(join(tmpdir(), `faultline-${caseDef.id.replace(/[^a-z0-9._-]/gi, '_')}-`)));
+  const { mkdtemp, rm }=await import('node:fs/promises');
+  const workspace = await mkdtemp(join(tmpdir(), `faultline-${caseDef.id.replace(/[^a-z0-9._-]/gi, '_')}-`));
   const startedAt = Date.now();
   const raw = { id: caseDef.id, repository: caseDef.repository, commit: caseDef.commit, provenance: caseDef.provenance, adapterKind: caseDef.adapter.kind, startedAt };
   let result;
@@ -295,7 +305,7 @@ export async function executeExternalCase(caseDef, { faultlineRoot = process.cwd
     const rawDir = resolve(outputRoot, 'raw');
     await mkdir(rawDir, { recursive: true });
     await writeFile(join(rawDir, `${caseDef.id}.json`), `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
-    if (!keepWorkspace) await import('node:fs/promises').then(({ rm }) => rm(workspace, { recursive: true, force: true }));
+    if (!keepWorkspace) await rm(workspace, { recursive: true, force: true });
   }
 }
 

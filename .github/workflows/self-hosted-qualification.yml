@@ -14,7 +14,7 @@ jobs:
   qualify:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: [self-hosted, Linux, X64, production-ci]
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,7 +45,6 @@ jobs:
           npm test
           npm run check
           node --test tests/deploy-production-contract.test.js
-          node scripts/qualification-gate.mjs
       - name: Build and package evidence
         run: |
           npm run build
@@ -60,6 +59,16 @@ jobs:
           npm run test:browser
           node tests/cross-browser-production.mjs
           node tests/cli-browser.mjs
+      - name: Execute immutable external incident corpus
+        env:
+          FAULTLINE_EXTERNAL_MANIFEST: benchmarks/manifests/external-incidents.json
+          FAULTLINE_QUALIFICATION_RESULTS: benchmarks/results/qualification-results.json
+          FAULTLINE_EXTERNAL_OUTPUT: benchmarks/results/external-incidents
+        run: |
+          set -euo pipefail
+          test -s "$FAULTLINE_EXTERNAL_MANIFEST" || { echo "FAULTLINE_EXTERNAL_MANIFEST_REQUIRED"; exit 1; }
+          node scripts/run-external-qualification.mjs
+          node scripts/qualification-gate.mjs
       - name: Upload qualification evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -67,6 +76,9 @@ jobs:
           path: |
             faultline-live-browser.jsonl
             faultline-browser-corpus.jsonl
+            benchmarks/results/qualification-results.json
+            benchmarks/results/external-incidents/raw/*.json
+            artifacts/faultline-external-corpus-summary.json
             artifacts/faultline-qualification-summary.json
             artifacts/faultline.spdx.json
             public/release.json

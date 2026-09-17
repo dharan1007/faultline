@@ -22,7 +22,7 @@ if(liveValidated.cases.length<10)throw new Error(`FAULTLINE_EXTERNAL_LIVE_CORPUS
 if(portableValidated.cases.length+liveValidated.cases.length<30)throw new Error(`FAULTLINE_EXTERNAL_CORPUS_TOO_SMALL:${portableValidated.cases.length+liveValidated.cases.length}`);
 const allCases=[...portableValidated.cases,...liveValidated.cases];
 const manifestIds=allCases.map(row=>row.id);if(new Set(manifestIds).size!==manifestIds.length)throw new Error('FAULTLINE_EXTERNAL_CROSS_MANIFEST_DUPLICATE_CASE_ID');
-const upstreamIdentities=allCases.map(row=>`${row.repository}|${row.commit}|${row.provenance}`);if(new Set(upstreamIdentities).size!==upstreamIdentities.length)throw new Error('FAULTLINE_EXTERNAL_CROSS_MANIFEST_DUPLICATE_UPSTREAM_CASE');
+const upstreamIdentities=allCases.map(row=>`${row.repository}|${row.commit}|${row.reproduction}`);if(new Set(upstreamIdentities).size!==upstreamIdentities.length)throw new Error('FAULTLINE_EXTERNAL_CROSS_MANIFEST_DUPLICATE_UPSTREAM_CASE');
 const portable=await executeExternalCorpus(portableManifest,{faultlineRoot:process.cwd(),outputRoot:portableOutput,keepWorkspace:false});
 const live=await executeExternalLiveCorpus(liveManifest,{outputRoot:liveOutput,keepWorkspace:false});
 const results=[...portable.results,...live.results];if(results.length!==manifestIds.length||new Set(results.map(row=>row.id)).size!==manifestIds.length)throw new Error('FAULTLINE_EXTERNAL_RESULT_IDENTITY_MISMATCH');

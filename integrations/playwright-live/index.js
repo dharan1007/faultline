@@ -2,7 +2,8 @@ import { performance } from 'node:perf_hooks';
 import { validateCaptureAction } from '../../src/capture-contract.js';
 import { buildFingerprint, signalsFromOracleEvidence } from '../../src/causal-fingerprint.js';
 
-const ORACLE_KINDS=new Set(['dom_property','dom_attribute','computed_style','dom_exists','runtime_error']);
+const ORACLE_KINDS=new Set(['dom_property','dom_attribute','computed_style','dom_exists','runtime_error','dom_focused','text_content']);
+const CLICK_BUTTONS=new Set(['left','right','middle']);
 const fail=code=>{throw new Error(code)};
 const clone=value=>value===undefined?undefined:structuredClone(value);
 const safeText=(value,max=2048)=>String(value??'').slice(0,max);
@@ -12,33 +13,49 @@ function validatePage(page){
   return page;
 }
 
+function captureCompatibleAction(action){
+  if(!action||typeof action!=='object'||Array.isArray(action))return action;
+  if(action.kind==='click'&&Object.prototype.hasOwnProperty.call(action,'button')){const {button,...base}=action;return base;}
+  if(action.kind==='sequence'&&Array.isArray(action.steps))return {...action,steps:action.steps.map(captureCompatibleAction)};
+  return action;
+}
+
+function validateLiveAction(action,{allowSequence=true,allowWait=false}={}){
+  try{validateCaptureAction(captureCompatibleAction(action),{allowSequence,allowWait});}catch{fail('FAULTLINE_LIVE_INVALID_ACTION');}
+  const inspect=value=>{
+    if(value?.kind==='click'&&value.button!==undefined&&(!CLICK_BUTTONS.has(value.button)||Object.keys(value).some(key=>!['kind','selector','button'].includes(key))))fail('FAULTLINE_LIVE_INVALID_ACTION');
+    if(value?.kind==='sequence')for(const step of value.steps)inspect(step);
+  };
+  inspect(action);
+  return action;
+}
+
 function validateOracle(oracle){
   if(!oracle||typeof oracle!=='object'||Array.isArray(oracle)||!ORACLE_KINDS.has(oracle.kind))fail('FAULTLINE_LIVE_INVALID_ORACLE');
   if(oracle.kind!=='runtime_error'&&(typeof oracle.selector!=='string'||!oracle.selector.trim()))fail('FAULTLINE_LIVE_INVALID_ORACLE');
   if(['dom_property','dom_attribute','computed_style'].includes(oracle.kind)&&(typeof oracle.property!=='string'||!oracle.property.trim()))fail('FAULTLINE_LIVE_INVALID_ORACLE');
   if(oracle.kind==='dom_attribute'&&!(typeof oracle.equals==='string'||oracle.equals===null))fail('FAULTLINE_LIVE_INVALID_ORACLE');
+  if(oracle.kind==='dom_focused'&&typeof oracle.equals!=='boolean')fail('FAULTLINE_LIVE_INVALID_ORACLE');
+  if(oracle.kind==='text_content'&&typeof oracle.equals!=='string')fail('FAULTLINE_LIVE_INVALID_ORACLE');
   if(oracle.delayMs!==undefined&&(!Number.isFinite(oracle.delayMs)||oracle.delayMs<0||oracle.delayMs>5000))fail('FAULTLINE_LIVE_INVALID_ORACLE');
   return oracle;
 }
 
 export function validateLiveRecipe(recipe){
   if(!Array.isArray(recipe)||recipe.length>64)fail('FAULTLINE_LIVE_INVALID_RECIPE');
-  for(const action of recipe)validateCaptureAction(action);
+  for(const action of recipe)validateLiveAction(action);
   return recipe;
 }
 
-function locator(page,selector){
-  const target=page.locator(selector).first();
-  return target;
-}
+function locator(page,selector){return page.locator(selector).first();}
 
 export async function executeLiveAction(page,action,{timeoutMs=5000}={}){
   validatePage(page);
-  validateCaptureAction(action,{allowSequence:true,allowWait:false});
+  validateLiveAction(action,{allowSequence:true,allowWait:false});
   const timeout={timeout:timeoutMs};
   switch(action.kind){
     case 'none': return;
-    case 'click': await locator(page,action.selector).click(timeout); return;
+    case 'click': await locator(page,action.selector).click({...timeout,...(action.button?{button:action.button}:{})}); return;
     case 'hover': await locator(page,action.selector).hover(timeout); return;
     case 'pointer_move': {
       if(!page.mouse||typeof page.mouse.move!=='function')fail('FAULTLINE_LIVE_POINTER_UNAVAILABLE');
@@ -92,6 +109,8 @@ async function observedValue(page,oracle,runtimeErrors){
   const target=locator(page,oracle.selector);
   if(oracle.kind==='dom_exists')return await target.count()>0;
   if(await target.count()<1)return undefined;
+  if(oracle.kind==='dom_focused')return target.evaluate(element=>element===document.activeElement);
+  if(oracle.kind==='text_content')return target.evaluate(element=>element.textContent);
   if(oracle.kind==='dom_attribute')return target.getAttribute(oracle.property);
   if(oracle.kind==='computed_style')return target.evaluate((element,property)=>getComputedStyle(element)[property],oracle.property);
   return target.evaluate((element,property)=>element[property],oracle.property);
@@ -101,7 +120,7 @@ export async function evaluateLiveOracle(page,oracle,{runtimeErrors=[]}={}){
   validatePage(page);validateOracle(oracle);
   if(oracle.delayMs)await page.waitForTimeout(oracle.delayMs);
   const actual=await observedValue(page,oracle,runtimeErrors);
-  const expected=oracle.kind==='computed_style'?String(oracle.equals):oracle.kind==='runtime_error'&&oracle.equals!==undefined?String(oracle.equals):oracle.equals;
+  const expected=oracle.kind==='computed_style'||oracle.kind==='text_content'?String(oracle.equals):oracle.kind==='runtime_error'&&oracle.equals!==undefined?String(oracle.equals):oracle.equals;
   const failed=oracle.kind==='runtime_error'?(oracle.equals===undefined?Boolean(actual):Object.is(actual,expected)):Object.is(actual,expected);
   const errorDetail=oracle.kind==='runtime_error'?runtimeErrors.find(error=>error.message===actual)??runtimeErrors.at(-1):null;
   return {status:failed?'FAIL':'PASS',evidence:{actual,expected,kind:oracle.kind,selector:oracle.selector,property:oracle.property,...(errorDetail?{errorName:errorDetail.name,errorStack:errorDetail.stack}: {})}};

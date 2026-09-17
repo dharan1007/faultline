@@ -1,0 +1,25 @@
+#!/usr/bin/env node
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { executeExternalCorpus, validateExternalRunnerManifest } from '../src/external-qualification-runner.js';
+import { executeExternalLiveCorpus, validateExternalLiveManifest } from '../src/external-live-qualification-runner.js';
+import { summarizeQualification } from '../src/qualification-evidence.js';
+
+const portablePath=resolve(process.env.FAULTLINE_EXTERNAL_MANIFEST||'benchmarks/manifests/external-incidents.json');
+const livePath=resolve(process.env.FAULTLINE_EXTERNAL_LIVE_MANIFEST||'benchmarks/manifests/external-live-incidents.json');
+const resultsPath=resolve(process.env.FAULTLINE_QUALIFICATION_RESULTS||'benchmarks/results/qualification-results.json');
+const portableOutput=resolve(process.env.FAULTLINE_EXTERNAL_OUTPUT||'benchmarks/results/external-incidents');
+const liveOutput=resolve(process.env.FAULTLINE_EXTERNAL_LIVE_OUTPUT||'benchmarks/results/external-live-incidents');
+if(!existsSync(portablePath))throw new Error('FAULTLINE_EXTERNAL_MANIFEST_REQUIRED');
+if(!existsSync(livePath))throw new Error('FAULTLINE_EXTERNAL_LIVE_MANIFEST_REQUIRED');
+const portableManifest=JSON.parse(await readFile(portablePath,'utf8'));
+const liveManifest=JSON.parse(await readFile(livePath,'utf8'));
+const portableValidated=validateExternalRunnerManifest(portableManifest);
+const liveValidated=validateExternalLiveManifest(liveManifest);
+if(portableValidated.cases.length+liveValidated.cases.length<30)throw new Error(`FAULTLINE_EXTERNAL_CORPUS_TOO_SMALL:${portableValidated.cases.length+liveValidated.cases.length}`);
+const manifestIds=[...portableValidated.cases,...liveValidated.cases].map(row=>row.id);if(new Set(manifestIds).size!==manifestIds.length)throw new Error('FAULTLINE_EXTERNAL_CROSS_MANIFEST_DUPLICATE_CASE');
+const portable=await executeExternalCorpus(portableManifest,{faultlineRoot:process.cwd(),outputRoot:portableOutput,keepWorkspace:false});
+const live=await executeExternalLiveCorpus(liveManifest,{outputRoot:liveOutput,keepWorkspace:false});
+const results=[...portable.results,...live.results];if(results.length!==manifestIds.length||new Set(results.map(row=>row.id)).size!==manifestIds.length)throw new Error('FAULTLINE_EXTERNAL_RESULT_IDENTITY_MISMATCH');
+const summary=summarizeQualification(results);await mkdir(resolve(resultsPath,'..'),{recursive:true});await writeFile(resultsPath,`${JSON.stringify({schema:'faultline.organizational-qualification-results.v1',portableManifestDigest:portable.manifestDigest,liveManifestDigest:live.manifestDigest,results},null,2)}\n`,'utf8');await mkdir('artifacts',{recursive:true});await writeFile('artifacts/faultline-external-corpus-summary.json',`${JSON.stringify({portableManifestPath:portablePath,liveManifestPath:livePath,portableManifestDigest:portable.manifestDigest,liveManifestDigest:live.manifestDigest,...summary},null,2)}\n`,'utf8');if(!summary.productionEligible)throw new Error(`FAULTLINE_EXTERNAL_QUALIFICATION_FAILED:${JSON.stringify({totalCases:summary.totalCases,acceptedReductions:summary.acceptedReductions,reproductionRate:summary.reproductionRate,sameCauseRate:summary.sameCauseRate,falseEquivalents:summary.falseEquivalents,medianPortableReduction:summary.medianPortableReduction,medianLiveReduction:summary.medianLiveReduction})}`);console.log(JSON.stringify({status:'FAULTLINE_ORGANIZATIONAL_QUALIFICATION_PASSED',...summary}));

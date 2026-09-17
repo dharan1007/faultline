@@ -14,9 +14,9 @@ concurrency:
 
 jobs:
   verify-production:
-    name: verify production matches current main and integrity manifest
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    name: verify canonical production matches current main
+    runs-on: [self-hosted, Linux, X64, production-ci]
+    timeout-minutes: 20
     env:
       CANONICAL_URL: https://faultline-webmcp.vercel.app
     steps:
@@ -26,78 +26,20 @@ jobs:
           ref: main
           fetch-depth: 1
           clean: true
-
-      - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-
+          cache: npm
       - name: Bind expected release to current main
         shell: bash
         run: |
           set -euo pipefail
           expected="$(git rev-parse HEAD)"
-          [[ "$expected" =~ ^[0-9a-f]{40}$ ]] || { echo "FAULTLINE_EXPECTED_SHA_INVALID" >&2; exit 1; }
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]] || { echo "FAULTLINE_EXPECTED_SHA_INVALID"; exit 1; }
           echo "EXPECTED_SHA=$expected" >> "$GITHUB_ENV"
-
-      - name: Verify canonical release provenance
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS --retry 5 --retry-all-errors --retry-delay 2 "$CANONICAL_URL/release.json" -o /tmp/faultline-release.json
-          EXPECTED_SHA="$EXPECTED_SHA" node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          const release=JSON.parse(fs.readFileSync('/tmp/faultline-release.json','utf8'));
-          if(release.source?.sha!==process.env.EXPECTED_SHA.toLowerCase())throw new Error('canonical production SHA does not match main');
-          if(release.source?.provenance!=='source-bound')throw new Error('canonical production is not source-bound');
-          if(release.source?.authority!=='vercel-git')throw new Error('canonical production has unexpected authority');
-          if(release.source?.repository!=='dharan1007/faultline')throw new Error('canonical production repository mismatch');
-          if(release.source?.ref!=='main')throw new Error('canonical production ref mismatch');
-          NODE
-
-      - name: Verify integrity manifest binding
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS --retry 5 --retry-all-errors --retry-delay 2 "$CANONICAL_URL/integrity.json" -o /tmp/faultline-integrity.json
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import {createHash} from 'node:crypto';
-          const release=JSON.parse(fs.readFileSync('/tmp/faultline-release.json','utf8'));
-          const bytes=fs.readFileSync('/tmp/faultline-integrity.json');
-          const digest=createHash('sha256').update(bytes).digest('hex');
-          if(release.evidence?.integrity?.sha256!==digest)throw new Error('release/integrity digest mismatch');
-          if(release.evidence?.integrity?.bytes!==bytes.length)throw new Error('release/integrity byte count mismatch');
-          const manifest=JSON.parse(bytes);
-          if(!manifest.assets||typeof manifest.assets!=='object'||Object.keys(manifest.assets).length<7)throw new Error('integrity manifest incomplete');
-          fs.writeFileSync('/tmp/faultline-asset-paths.txt',Object.keys(manifest.assets).join('\n')+'\n');
-          NODE
-
-      - name: Verify every published asset byte-for-byte
-        shell: bash
-        run: |
-          set -euo pipefail
-          while IFS= read -r path; do
-            [ -n "$path" ] || continue
-            file="/tmp/faultline-asset-$(printf '%s' "$path" | sha256sum | cut -d' ' -f1)"
-            curl -fsS --retry 5 --retry-all-errors --retry-delay 2 "$CANONICAL_URL$path" -o "$file"
-            PATH_TO_VERIFY="$path" FILE_TO_VERIFY="$file" node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import {createHash} from 'node:crypto';
-          const manifest=JSON.parse(fs.readFileSync('/tmp/faultline-integrity.json','utf8'));
-          const expected=manifest.assets?.[process.env.PATH_TO_VERIFY];
-          if(!expected)throw new Error(`missing manifest entry ${process.env.PATH_TO_VERIFY}`);
-          const bytes=fs.readFileSync(process.env.FILE_TO_VERIFY);
-          if(expected.bytes!==bytes.length)throw new Error(`byte mismatch ${process.env.PATH_TO_VERIFY}`);
-          const digest=createHash('sha256').update(bytes).digest('hex');
-          if(expected.sha256!==digest)throw new Error(`digest mismatch ${process.env.PATH_TO_VERIFY}`);
-          NODE
-          done < /tmp/faultline-asset-paths.txt
-
-      - name: Verify canonical workbench responds
-        shell: bash
-        run: |
-          set -euo pipefail
-          code="$(curl -sS -o /tmp/faultline-index.html -w '%{http_code}' --retry 5 --retry-all-errors --retry-delay 2 "$CANONICAL_URL/")"
-          test "$code" = "200" || { echo "FAULTLINE_CANONICAL_HTTP_$code" >&2; exit 1; }
-          grep -q '<title>FAULTLINE' /tmp/faultline-index.html || { echo "FAULTLINE_CANONICAL_WORKBENCH_INVALID" >&2; exit 1; }
+      - name: Install exact dependencies
+        run: npm ci --ignore-scripts
+      - name: Install production smoke browser
+        run: ./node_modules/.bin/playwright install chromium
+      - name: Verify canonical provenance, integrity, every asset and browser runtime
+        run: node scripts/verify-live-deployment.mjs "$CANONICAL_URL" "$EXPECTED_SHA"

@@ -113,7 +113,8 @@ export async function reduceLiveRecipe({
     finalStability: clone(finalStability.summary),
     baselineFingerprint: clone(baselineProfile.reference.fingerprint),
     finalFingerprint: clone(finalObservation?.fingerprint ?? baselineProfile.reference.fingerprint),
-    cause: finalStability.reason,
+    cause: 'SAME_CAUSE',
+    stabilityReason: finalStability.reason,
     independentFinalRerun: true
   };
 }

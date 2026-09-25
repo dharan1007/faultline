@@ -63,8 +63,9 @@ const shortHash = (value) => (value === null || value === undefined ? null : has
 export function buildFingerprint(signals = {}) {
   const dims = {};
   const oracle = signals.oracle && typeof signals.oracle === 'object' ? signals.oracle : null;
-  dims.oracleIdentity = oracle
-    ? hashString(stableStringify({ kind: oracle.kind ?? null, selector: oracle.selector ?? null, property: oracle.property ?? null, expected: oracle.equals ?? null }))
+  const oracleIdentity=oracle?Object.fromEntries(Object.entries(oracle).filter(([key])=>!['action','delayMs'].includes(key))):null;
+  dims.oracleIdentity = oracleIdentity
+    ? hashString(stableStringify(oracleIdentity))
     : (signals.oracleIdentity ? String(signals.oracleIdentity) : null);
   dims.exceptionClass = signals.exceptionClass ? String(signals.exceptionClass) : null;
   dims.stackSignature = signals.stack ? hashString(normalizeStack(signals.stack)) : null;

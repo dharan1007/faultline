@@ -50,10 +50,11 @@ export function describeOracleClass(cls) {
 }
 
 // Per-class engineering contract: identity, normalization, signals,
-// repeat/timeout and equivalence policy. Data-only: the browser runtime
-// maps its 5 executable oracle kinds onto these classes (see
-// RUNTIME_ORACLE_CLASS), while the remaining classes describe supported
-// extension points with explicit REQUIRED status gaps.
+// repeat/timeout and equivalence policy. The portable browser runtime maps its
+// five canonical oracle kinds through RUNTIME_ORACLE_CLASS. Caller-owned
+// Playwright execution implements additional observable classes through
+// LIVE_ORACLE_CLASS; classes not present in either mapping remain documented
+// extension points rather than falsely advertised executable behavior.
 export const ORACLE_CLASS_METADATA = Object.freeze({
   assertion_failure: { id: 'oracle.assertion_failure', failureType: 'assertion', signature: 'assertionId + normalized operands', normalization: 'operand JSON with key order canonicalized; floats compared with Object.is', allowedNondeterminism: [], requiredSignals: ['assertionId', 'actual', 'expected'], fingerprintInputs: ['assertionIdentity', 'domInvariant'], repeatPolicy: 'single-run sufficient when deterministic; else flaky_statistical', timeoutMs: 5000, equivalencePolicy: 'assertionIdentity must match; operands must match after normalization' },
   uncaught_exception: { id: 'oracle.uncaught_exception', failureType: 'exception', signature: 'exceptionClass + normalized stack (12 frames, lines stripped)', normalization: 'strip line/column numbers, addresses, query strings', allowedNondeterminism: ['error message text beyond class'], requiredSignals: ['errorName', 'errorStack'], fingerprintInputs: ['exceptionClass', 'stackSignature'], repeatPolicy: 'single-run sufficient when deterministic; else flaky_statistical', timeoutMs: 5000, equivalencePolicy: 'exceptionClass and stackSignature must match' },
@@ -83,3 +84,24 @@ export function describeOracleClassFull(cls) {
   const base = describeOracleClass(cls);
   return { ...base, ...(ORACLE_CLASS_METADATA[cls] || {}) };
 }
+
+
+// Caller-owned Playwright execution supports a broader observable surface than
+// the portable iframe runtime. These mappings are executable in
+// integrations/playwright-live/index.js and are still subject to the adaptive
+// SAME_CAUSE stability policy during reduction.
+export const LIVE_ORACLE_CLASS = Object.freeze({
+  dom_property: 'dom_state',
+  dom_attribute: 'dom_state',
+  dom_exists: 'dom_state',
+  computed_style: 'dom_state',
+  dom_focused: 'dom_state',
+  text_content: 'dom_state',
+  runtime_error: 'uncaught_exception',
+  console_event: 'console_event',
+  network_status: 'network_status',
+  network_body: 'network_body',
+  network_sequence: 'network_sequence',
+  race_timing: 'race_timing',
+  performance_threshold: 'performance_threshold'
+});

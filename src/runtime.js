@@ -2,6 +2,7 @@ import { semanticUnits, removeUnits, ddminReduce, createRevisionStore } from './
 import { navigationRisk } from './sandbox-policy.js';
 import { CAPTURE_SCHEMA, CAPTURE_LIMITS, normalizeCaptureArtifact, ACTION_KINDS as CAPTURE_ACTION_KINDS, ACTION_STEP_KINDS as CAPTURE_ACTION_STEP_KINDS, validateCaptureAction } from './capture-contract.js';
 import { buildFingerprint, verdictForReduction, signalsFromOracleEvidence } from './causal-fingerprint.js';
+import { establishCausalStability, evaluateCandidateStability } from './flaky-policy.js';
 import { buildDependencyGraph } from './causal-dependency-graph.js';
 
 const $ = id => document.getElementById(id);
@@ -539,6 +540,33 @@ function runCase(c=value(),{signal}={}){
   return task;
 }
 function preservedTrialStatus(baselineResult,candidateResult){return verdictForReduction(baselineResult,candidateResult).accept?'FAIL':candidateResult.status==='UNRESOLVED'?'UNRESOLVED':'PASS';}
+function representativeObservation(stability){
+  const observations=Array.isArray(stability?.observations)?stability.observations:[];
+  return [...observations].reverse().find(item=>item?.status==='FAIL')||observations.at(-1)||stability?.reference||null;
+}
+async function establishRuntimeStability(caseSnapshot,{signal,maxBrowserRuns=100,onRun}={}){
+  let localRuns=0;
+  const run=async()=>{
+    if(localRuns>=maxBrowserRuns)throw new Error('TRIAL_BUDGET_EXHAUSTED');
+    localRuns++;
+    onRun?.();
+    return runCase(caseSnapshot,{signal});
+  };
+  const profile=await establishCausalStability({run});
+  if(!profile.accepted)throw new Error(`BASELINE_NOT_STABLE:${profile.reason}`);
+  return {...profile,browserRuns:localRuns};
+}
+async function evaluateRuntimeCandidate(profile,caseSnapshot,{signal,remainingBrowserRuns=100,onRun}={}){
+  let localRuns=0;
+  const run=async()=>{
+    if(localRuns>=remainingBrowserRuns)throw new Error('TRIAL_BUDGET_EXHAUSTED');
+    localRuns++;
+    onRun?.();
+    return runCase(caseSnapshot,{signal});
+  };
+  const stability=await evaluateCandidateStability({run,profile});
+  return {...stability,browserRuns:localRuns};
+}
 
 function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},fingerprint:result.fingerprint||null,revision:revision(),at:new Date().toISOString(),...extra};rememberExperiment(entry);persistMutation(before);renderTrace();return entry; }
 async function run({expectedRevision=revision()}={}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const r=await runCase(value(),{signal});throwIfAborted(signal);record('run',r,{revision:testedRevision});renderHealth(r.status);return {...r,testedRevision}; }
@@ -588,48 +616,194 @@ async function importCapture({expectedRevision=revision(),capture}, {signal}={})
   return {status:'IMPORTED',revision:result.revision,baseline:clone(baseline),captureProvenance:clone(captureProvenance)};
 }
 function resetCase({expectedRevision=revision()}={}){ return loadCase({expectedRevision,case:fixture}); }
-async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const source=value()[targetAxis];const unit=annotatedUnits(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(unit.pinned||unit.protectedByDescendant)throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const baselineResult=await runCase(value(),{signal});const result=await runCase(candidate,{signal});throwIfAborted(signal);const cause=verdictForReduction(baselineResult,result);record('probe',result,{axis:targetAxis,unitId,mutated:false,revision:testedRevision,sameCause:cause.accept,cause:cause.reason});return {...result,mutated:false,testedRevision,canonicalRevision:revision(),sameCause:cause.accept,cause:cause.reason}; }
+async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){
+  const testedRevision=expectedRevision;
+  store.assertRevision(testedRevision);
+  const source=value()[targetAxis];
+  const unit=annotatedUnits(targetAxis,source).find(u=>u.id===unitId);
+  if(!unit)throw new Error('UNIT_NOT_FOUND');
+  if(unit.pinned||unit.protectedByDescendant)throw new Error('UNIT_PINNED');
+  const baseline=clone(value());
+  const candidate={...baseline,[targetAxis]:removeUnits(source,[unit])};
+  let browserRuns=0;
+  const baselineProfile=await establishRuntimeStability(baseline,{signal,maxBrowserRuns:100,onRun:()=>browserRuns++});
+  const candidateStability=await evaluateRuntimeCandidate(baselineProfile,candidate,{signal,remainingBrowserRuns:100-browserRuns,onRun:()=>browserRuns++});
+  throwIfAborted(signal);
+  const result=representativeObservation(candidateStability)||{status:'UNRESOLVED',evidence:{reason:'NO_CANDIDATE_OBSERVATION'},fingerprint:null};
+  record('probe',result,{
+    axis:targetAxis,
+    unitId,
+    mutated:false,
+    revision:testedRevision,
+    sameCause:candidateStability.accept,
+    cause:candidateStability.reason,
+    stabilityMode:baselineProfile.mode,
+    browserRuns,
+    stability:candidateStability.summary
+  });
+  return {
+    ...result,
+    mutated:false,
+    testedRevision,
+    canonicalRevision:revision(),
+    sameCause:candidateStability.accept,
+    cause:candidateStability.reason,
+    stabilityMode:baselineProfile.mode,
+    browserRuns,
+    baselineStability:clone(baselineProfile.summary),
+    stability:clone(candidateStability.summary)
+  };
+}
 function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);const alreadyPinned=pins.has(key);if(alreadyPinned===pinned)return inspect();const before=snapshotCanonical();pinned?pins.add(key):pins.delete(key);const result=store.commit(value(),{kind:pinned?'pin':'unpin',axis:targetAxis,unitId},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});rememberExperiment({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:result.revision,at:new Date().toISOString()});persistMutation(before);render();return inspect(); }
 async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}={}, {signal}={}){
-  store.assertRevision(expectedRevision);throwIfAborted(signal);
-  const baseline=clone(value());
-  const baselineResult=await runCase(baseline,{signal});
+  store.assertRevision(expectedRevision);
   throwIfAborted(signal);
-  if(baselineResult.status!=='FAIL')throw new Error('BASELINE_NOT_FAILING');
+  if(!Number.isSafeInteger(maxTrials)||maxTrials<8||maxTrials>2000)throw new Error('INVALID_TRIAL_BUDGET');
+
+  const baseline=clone(value());
+  let browserRuns=0;
+  const runBudgeted=async snapshot=>{
+    if(browserRuns>=maxTrials)throw new Error('TRIAL_BUDGET_EXHAUSTED');
+    browserRuns++;
+    return runCase(snapshot,{signal});
+  };
+
+  const baselineProfile=await establishCausalStability({run:()=>runBudgeted(baseline)});
+  throwIfAborted(signal);
+  if(!baselineProfile.accepted)throw new Error(`BASELINE_NOT_STABLE:${baselineProfile.reason}`);
+  const baselineResult=baselineProfile.reference;
+
   const source=baseline[targetAxis],all=unitsFor(targetAxis,source);
-  if(!all.length)return {status:'NO_UNITS',before:source.length,after:source.length,reduction:0,trials:0,removed:0,passes:0,revision:revision(),minimality:'LOCALLY_MINIMAL'};
+  if(!all.length)return {
+    status:'NO_UNITS',
+    before:source.length,
+    after:source.length,
+    reduction:0,
+    trials:0,
+    browserRuns,
+    removed:0,
+    passes:0,
+    revision:revision(),
+    sameCause:true,
+    stabilityMode:baselineProfile.mode,
+    baselineStability:clone(baselineProfile.summary),
+    minimality:'LOCALLY_MINIMAL'
+  };
+
   const pinDescriptors=capturePinDescriptors(targetAxis,source);
   let nextSource,reducedTrialCount,removedCount,passes=[];
-  const evaluateCandidate=async candidateSource=>{throwIfAborted(signal);const candidateResult=await runCase({...baseline,[targetAxis]:candidateSource},{signal});return preservedTrialStatus(baselineResult,candidateResult);};
+  const evaluateCandidate=async candidateSource=>{
+    throwIfAborted(signal);
+    const stability=await evaluateCandidateStability({
+      run:()=>runBudgeted({...baseline,[targetAxis]:candidateSource}),
+      profile:baselineProfile
+    });
+    if(stability.accept)return 'FAIL';
+    const observations=stability.observations||[];
+    return observations.some(item=>item?.status==='UNRESOLVED')&&!observations.some(item=>item?.status==='PASS')?'UNRESOLVED':'PASS';
+  };
+
   if(targetAxis==='html'||targetAxis==='css'){
     const reduced=await hierarchicalReduceSource(targetAxis,source,evaluateCandidate,{maxTrials});
-    nextSource=reduced.source;reducedTrialCount=reduced.trialCount;removedCount=reduced.removedCount;passes=reduced.passes;
+    nextSource=reduced.source;
+    reducedTrialCount=reduced.trialCount;
+    removedCount=reduced.removedCount;
+    passes=reduced.passes;
   }else{
     const protectedItems=all.filter(unit=>pins.has(pinKey(targetAxis,unit.id)));
-    const reduced=await ddminReduce(all,async kept=>{throwIfAborted(signal);const keptIds=new Set(kept.map(unit=>unit.id));const removed=all.filter(unit=>!keptIds.has(unit.id));return evaluateCandidate(removeUnits(source,removed));},{protectedItems,maxTrials});
-    const keptIds=new Set(reduced.items.map(unit=>unit.id)),removed=all.filter(unit=>!keptIds.has(unit.id));
-    nextSource=removeUnits(source,removed);reducedTrialCount=reduced.trialCount;removedCount=removed.length;
+    const reduced=await ddminReduce(all,async kept=>{
+      throwIfAborted(signal);
+      const keptIds=new Set(kept.map(unit=>unit.id));
+      const removed=all.filter(unit=>!keptIds.has(unit.id));
+      return evaluateCandidate(removeUnits(source,removed));
+    },{protectedItems,maxTrials});
+    const keptIds=new Set(reduced.items.map(unit=>unit.id));
+    const removed=all.filter(unit=>!keptIds.has(unit.id));
+    nextSource=removeUnits(source,removed);
+    reducedTrialCount=reduced.trialCount;
+    removedCount=removed.length;
   }
+
   throwIfAborted(signal);
   const remappedPinIds=resolvePinDescriptors(targetAxis,nextSource,pinDescriptors);
-  const final=await runCase({...baseline,[targetAxis]:nextSource},{signal});
-  throwIfAborted(signal);if(final.status!=='FAIL')throw new Error('REDUCTION_LOST_FAILURE');
-  const causeVerdict=verdictForReduction(baselineResult,final);
-  if(!causeVerdict.accept)throw new Error(`REDUCTION_LOST_FAILURE:${causeVerdict.reason}`);
-  const independentFinal=await runCase({...baseline,[targetAxis]:nextSource},{signal});
+  const finalStability=await evaluateCandidateStability({
+    run:()=>runBudgeted({...baseline,[targetAxis]:nextSource}),
+    profile:baselineProfile
+  });
   throwIfAborted(signal);
-  const independentCause=verdictForReduction(baselineResult,independentFinal);
-  if(!independentCause.accept)throw new Error(`REDUCTION_FINAL_RERUN_FAILED:${independentCause.reason}`);
+  if(!finalStability.accept)throw new Error(`REDUCTION_FINAL_RERUN_FAILED:${finalStability.reason}`);
+  const final=representativeObservation(finalStability);
+  if(!final||final.status!=='FAIL')throw new Error('REDUCTION_FINAL_RERUN_FAILED:NO_FAIL_OBSERVATION');
+
   store.assertRevision(expectedRevision);
   const beforeLength=source.length,after=nextSource.length,before=snapshotCanonical();
   const nextPins=new Set([...pins].filter(key=>!key.startsWith(`${targetAxis}|`)));
   for(const id of remappedPinIds)nextPins.add(pinKey(targetAxis,id));
   pins=nextPins;
-  const committed=store.commit({...baseline,[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length,cause:causeVerdict.reason,sameCause:true,minimality:'LOCALLY_MINIMAL',independentRerun:true},expectedRevision);
+
+  const committed=store.commit(
+    {...baseline,[targetAxis]:nextSource},
+    {
+      kind:'reduce',
+      axis:targetAxis,
+      trials:reducedTrialCount,
+      browserRuns,
+      removed:removedCount,
+      passes:passes.length,
+      cause:finalStability.reason,
+      sameCause:true,
+      stabilityMode:baselineProfile.mode,
+      minimality:'LOCALLY_MINIMAL',
+      independentRerun:true
+    },
+    expectedRevision
+  );
   rememberRevision(committed.revision,{value:clone(committed.value),pins:[...pins]});
-  rememberExperiment({kind:'reduce',status:independentFinal.status,evidence:independentFinal.evidence||{},fingerprint:independentFinal.fingerprint||null,revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length,reduction:beforeLength?1-after/beforeLength:0,cause:independentCause.reason,sameCause:true,minimality:'LOCALLY_MINIMAL',independentRerun:true});
-  persistMutation(before);render();renderPreview();renderHealth(independentFinal.status);
-  return {status:independentFinal.status,before:beforeLength,after,reduction:beforeLength?1-after/beforeLength:0,trials:reducedTrialCount,removed:removedCount,passes:passes.length,revision:revision(),cause:independentCause.reason,sameCause:true,fingerprint:independentFinal.fingerprint||null,minimality:'LOCALLY_MINIMAL',independentRerun:true};
+  rememberExperiment({
+    kind:'reduce',
+    status:final.status,
+    evidence:final.evidence||{},
+    fingerprint:final.fingerprint||null,
+    revision:committed.revision,
+    at:new Date().toISOString(),
+    axis:targetAxis,
+    trials:reducedTrialCount,
+    browserRuns,
+    removed:removedCount,
+    passes:passes.length,
+    reduction:beforeLength?1-after/beforeLength:0,
+    cause:finalStability.reason,
+    sameCause:true,
+    stabilityMode:baselineProfile.mode,
+    baselineStability:clone(baselineProfile.summary),
+    finalStability:clone(finalStability.summary),
+    minimality:'LOCALLY_MINIMAL',
+    independentRerun:true
+  });
+  persistMutation(before);
+  render();
+  renderPreview();
+  renderHealth(final.status);
+
+  return {
+    status:final.status,
+    before:beforeLength,
+    after,
+    reduction:beforeLength?1-after/beforeLength:0,
+    trials:reducedTrialCount,
+    browserRuns,
+    removed:removedCount,
+    passes:passes.length,
+    revision:revision(),
+    cause:finalStability.reason,
+    sameCause:true,
+    fingerprint:final.fingerprint||null,
+    stabilityMode:baselineProfile.mode,
+    baselineStability:clone(baselineProfile.summary),
+    finalStability:clone(finalStability.summary),
+    minimality:'LOCALLY_MINIMAL',
+    independentRerun:true
+  };
 }
 function history({limit=100}={}){ return clone(experimentLedger.slice(-Math.max(1,Math.min(200,Number(limit)||100)))); }
 function listRevisions({limit=MAX_RUNTIME_REVISIONS}={}){

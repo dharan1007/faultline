@@ -11,6 +11,7 @@ const productionFiles=[
   'src/sandbox-policy.js',
   'src/capture-contract.js',
   'src/causal-fingerprint.js',
+  'src/flaky-policy.js',
   'src/causal-dependency-graph.js',
   'src/commercial-cta.js',
   'vendor/acorn.js'

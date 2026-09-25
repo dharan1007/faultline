@@ -61,6 +61,7 @@ jobs:
             artifacts/faultline.spdx.json
             public/release.json
             public/integrity.json
+            public/provenance.json
           retention-days: 30
           if-no-files-found: error
 

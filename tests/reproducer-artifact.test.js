@@ -20,7 +20,7 @@ test('bundle evidence is emitted last and covers generated payloads',async()=>{
   try{
     const result=await writeReproBundle(dir,{
       oracle,fingerprint,
-      minimalFiles:{'index.html':'<main>minimal</main>'},
+      minimalFiles:{'index.html':'<main>minimal</main>','src/app.js':'console.log("nested")'},
       testFiles:{'repro.mjs':'console.log("repro")'}
     });
     const evidence=JSON.parse(await readFile(join(dir,'evidence.json'),'utf8'));
@@ -28,7 +28,7 @@ test('bundle evidence is emitted last and covers generated payloads',async()=>{
     for(const required of [
       'Dockerfile','package.json','environment.lock','failure-oracle.json',
       'causal-fingerprint.json','README.md','run.sh','run.ps1',
-      'minimal/index.html','test/repro.mjs'
+      'minimal/index.html','minimal/src/app.js','test/repro.mjs'
     ]) {
       assert.ok(evidence.files[required],`${required} must be covered by evidence`);
       assert.match(evidence.files[required].sha256,/^[0-9a-f]{64}$/);
@@ -36,8 +36,10 @@ test('bundle evidence is emitted last and covers generated payloads',async()=>{
     }
     assert.equal(result.files['evidence.json'].bytes,(await readFile(join(dir,'evidence.json'))).length);
     const docker=await readFile(join(dir,'Dockerfile'),'utf8');
+    const packageJson=JSON.parse(await readFile(join(dir,'package.json'),'utf8'));
     assert.match(docker,/FROM node:22-bookworm/);
-    assert.match(docker,/playwright@1\.63\.0|playwright.*1\.63\.0/);
+    assert.equal(packageJson.engines.node,'22.x');
+    assert.equal(packageJson.dependencies.playwright,'1.63.0');
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 

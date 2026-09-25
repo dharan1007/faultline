@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ORACLE_CLASSES, validateOracleClass, describeOracleClass, describeOracleClassFull, ORACLE_CLASS_METADATA, RUNTIME_ORACLE_CLASS } from '../src/oracle-classes.js';
+import { ORACLE_CLASSES, validateOracleClass, describeOracleClass, describeOracleClassFull, ORACLE_CLASS_METADATA, RUNTIME_ORACLE_CLASS, LIVE_ORACLE_CLASS } from '../src/oracle-classes.js';
 import { baselineAccepted, candidateAccepted } from '../src/flaky-policy.js';
 import { planReduction, MINIMALITY_DISCLAIMER, MINIMALITY_STATUSES, describeMinimality } from '../src/reduction-dimensions.js';
 import { buildReproManifest, REPRO_LAYOUT } from '../src/reproducer-artifact.js';
@@ -35,7 +35,7 @@ test('reduction plan documents minimality boundary', () => {
 test('repro manifest requires oracle + fingerprint', () => {
   assert.throws(() => buildReproManifest({}), /REPRO_MISSING_ORACLE/);
   const m = buildReproManifest({ oracle: { class: 'assertion_failure' }, fingerprint: { signature: 'abc' } });
-  assert.equal(m.format, 'faultline-repro.v1');
+  assert.equal(m.format, 'faultline-repro.v2');
   assert.match(m.manifestSha256, /^[0-9a-f]{64}$/);
   assert.ok(REPRO_LAYOUT.includes('run.sh') && REPRO_LAYOUT.includes('Dockerfile'));
 });
@@ -58,6 +58,17 @@ test('runtime oracle kinds map onto documented classes', () => {
     computed_style: 'dom_state',
     runtime_error: 'uncaught_exception',
   });
+});
+
+test('caller-owned live oracle kinds map onto executable documented classes', () => {
+  assert.equal(LIVE_ORACLE_CLASS.console_event,'console_event');
+  assert.equal(LIVE_ORACLE_CLASS.network_status,'network_status');
+  assert.equal(LIVE_ORACLE_CLASS.network_body,'network_body');
+  assert.equal(LIVE_ORACLE_CLASS.network_sequence,'network_sequence');
+  assert.equal(LIVE_ORACLE_CLASS.race_timing,'race_timing');
+  assert.equal(LIVE_ORACLE_CLASS.performance_threshold,'performance_threshold');
+  assert.equal(LIVE_ORACLE_CLASS.dom_focused,'dom_state');
+  assert.equal(LIVE_ORACLE_CLASS.text_content,'dom_state');
 });
 
 test('minimality vocabulary never calls a budget-limited result minimal', () => {

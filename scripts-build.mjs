@@ -68,6 +68,54 @@ integrity.assets['/commercial-config.json']={sha256:hash(commercialBytes),bytes:
 
 const integrityBytes=Buffer.from(`${JSON.stringify(integrity,null,2)}\n`);
 writeFileSync('public/integrity.json',integrityBytes);
-const release={schemaVersion:1,service:'faultline-webmcp',version:'0.9.0',source,evidence:{integrity:{path:'/integrity.json',sha256:hash(integrityBytes),bytes:integrityBytes.length}},runtime:{executionBoundary:'browser-iframe-local-first',arbitraryThirdPartyHostedExecution:false},commercial:{servicesPath:'/services.html',checkoutConfigured:Boolean(commercialConfig.paymentUrl)}};
+
+const integrityDigest=hash(integrityBytes);
+const provenance={
+  _type:'https://in-toto.io/Statement/v1',
+  subject:[{name:'faultline-webmcp/integrity.json',digest:{sha256:integrityDigest}}],
+  predicateType:'https://slsa.dev/provenance/v1',
+  predicate:{
+    buildDefinition:{
+      buildType:'https://faultline.dev/build/static-webmcp/v1',
+      externalParameters:{
+        source:{
+          repository:source.repository,
+          ref:source.ref,
+          sha:source.sha
+        },
+        runtime:{node:'22.x',playwright:'1.63.0'}
+      },
+      internalParameters:{
+        sourceAuthority:source.authority,
+        sourceBinding:source.provenance
+      },
+      resolvedDependencies:source.repository&&source.sha?[{
+        uri:source.repository.startsWith('http')?source.repository:`https://github.com/${source.repository}`,
+        digest:{gitCommit:source.sha}
+      }]:[]
+    },
+    runDetails:{
+      builder:{id:`https://faultline.dev/builders/${source.authority||'unknown'}`},
+      metadata:{
+        invocationId:String(process.env.GITHUB_RUN_ID||process.env.VERCEL_DEPLOYMENT_ID||source.sha||'local-unbound')
+      }
+    }
+  }
+};
+const provenanceBytes=Buffer.from(`${JSON.stringify(provenance,null,2)}\n`);
+writeFileSync('public/provenance.json',provenanceBytes);
+
+const release={
+  schemaVersion:1,
+  service:'faultline-webmcp',
+  version:'0.9.0',
+  source,
+  evidence:{
+    integrity:{path:'/integrity.json',sha256:integrityDigest,bytes:integrityBytes.length},
+    provenance:{path:'/provenance.json',sha256:hash(provenanceBytes),bytes:provenanceBytes.length,signed:false,format:'slsa-provenance-v1/in-toto-statement-v1'}
+  },
+  runtime:{executionBoundary:'browser-iframe-local-first',arbitraryThirdPartyHostedExecution:false},
+  commercial:{servicesPath:'/services.html',checkoutConfigured:Boolean(commercialConfig.paymentUrl)}
+};
 writeFileSync('public/release.json',`${JSON.stringify(release,null,2)}\n`);
 console.log(`static production tree verified and staged in public/ (${Object.keys(integrity.assets).length} runtime assets, ${source.provenance}/${source.authority})`);

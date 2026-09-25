@@ -9,7 +9,7 @@ export const FINGERPRINT_VERSION = 'faultline.causal-fingerprint.v1';
 
 // Strong dimensions: mismatch on any jointly-present strong dimension rejects.
 const STRONG_DIMENSIONS = ['oracleIdentity', 'exceptionClass', 'stackSignature', 'assertionIdentity'];
-// Supporting dimensions: count toward confidence.
+// Supporting dimensions are cause-bearing evidence. Any jointly observed mismatch rejects equivalence; matching dimensions also contribute to confidence.
 const SUPPORTING_DIMENSIONS = [
   'networkSequence', 'domInvariant', 'requestResponse',
   'eventOrdering', 'consoleSignature', 'renderRegion',
@@ -122,16 +122,16 @@ export function compareFingerprints(a, b) {
   for (const dim of SUPPORTING_DIMENSIONS) {
     if (da[dim] && db[dim]) {
       comparable++;
-      if (da[dim] === db[dim]) matched++;
+      if (da[dim] !== db[dim]) {
+        return { sameCause: false, reason: `SUPPORTING_MISMATCH:${dim}`, matched, confidence: comparable ? matched / comparable : 0 };
+      }
+      matched++;
     }
   }
   const strongPresent = STRONG_DIMENSIONS.filter((d) => da[d] && db[d]).length;
   const confidence = comparable ? matched / comparable : (strongPresent ? 0.5 : 0);
   if (strongPresent === 0 && matched < 2) {
     return { sameCause: false, reason: 'INSUFFICIENT_DIMENSIONS', matched, confidence };
-  }
-  if (matched < 2 && comparable >= 2) {
-    return { sameCause: false, reason: 'WEAK_MATCH', matched, confidence };
   }
   return { sameCause: true, reason: 'SAME_CAUSE', matched, confidence };
 }

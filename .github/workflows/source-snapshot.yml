@@ -2,6 +2,7 @@ name: faultline-source-snapshot
 on:
   push:
     branches: [hardening/production-100-20260915]
+  pull_request:
 permissions:
   contents: read
 jobs:

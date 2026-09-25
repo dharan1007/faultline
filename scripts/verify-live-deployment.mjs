@@ -17,7 +17,14 @@ if(release?.source?.repository!=='dharan1007/faultline')fail('FAULTLINE_LIVE_REP
 if(!String(release?.source?.ref??'').includes('main'))fail('FAULTLINE_LIVE_REF_MISMATCH');
 const integrityBytes=await bytes('/integrity.json');const integritySha=createHash('sha256').update(integrityBytes).digest('hex');
 if(release?.evidence?.integrity?.sha256!==integritySha||release?.evidence?.integrity?.bytes!==integrityBytes.length)fail('FAULTLINE_LIVE_INTEGRITY_BINDING_MISMATCH');
+const provenanceBytes=await bytes('/provenance.json');const provenanceSha=createHash('sha256').update(provenanceBytes).digest('hex');
+if(release?.evidence?.provenance?.sha256!==provenanceSha||release?.evidence?.provenance?.bytes!==provenanceBytes.length)fail('FAULTLINE_LIVE_PROVENANCE_BINDING_MISMATCH');
+const provenance=JSON.parse(provenanceBytes.toString('utf8'));
+if(provenance?._type!=='https://in-toto.io/Statement/v1'||provenance?.predicateType!=='https://slsa.dev/provenance/v1')fail('FAULTLINE_LIVE_PROVENANCE_SCHEMA_INVALID');
+const provenanceSource=provenance?.predicate?.buildDefinition?.externalParameters?.source;
+if(provenanceSource?.sha!==expectedSha||provenanceSource?.repository!=='dharan1007/faultline'||!String(provenanceSource?.ref??'').includes('main'))fail('FAULTLINE_LIVE_PROVENANCE_SOURCE_MISMATCH');
+if(provenance?.subject?.[0]?.digest?.sha256!==integritySha)fail('FAULTLINE_LIVE_PROVENANCE_SUBJECT_MISMATCH');
 const integrity=JSON.parse(integrityBytes.toString('utf8'));const assets=Object.entries(integrity?.assets??{});if(!assets.length)fail('FAULTLINE_LIVE_INTEGRITY_EMPTY');
 for(const [path,expected] of assets){const asset=await bytes(path);if(asset.length!==expected.bytes)fail(`FAULTLINE_LIVE_ASSET_BYTES_MISMATCH:${path}`);if(createHash('sha256').update(asset).digest('hex')!==expected.sha256)fail(`FAULTLINE_LIVE_ASSET_SHA_MISMATCH:${path}`)}
 const browser=await chromium.launch({headless:true});const page=await browser.newPage();const pageErrors=[],consoleErrors=[];page.on('pageerror',error=>pageErrors.push(String(error?.message??error).slice(0,500)));page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text().slice(0,500))});try{const response=await page.goto(`${base}/`,{waitUntil:'networkidle',timeout:30000});if(!response?.ok())fail('FAULTLINE_LIVE_BROWSER_DOCUMENT_FAILED');const body=await page.locator('body').innerText({timeout:5000});if(typeof body!=='string'||body.trim().length<20)fail('FAULTLINE_LIVE_BROWSER_EMPTY_UI');if(pageErrors.length)fail(`FAULTLINE_LIVE_PAGE_ERRORS:${pageErrors.join('|')}`);if(consoleErrors.length)fail(`FAULTLINE_LIVE_CONSOLE_ERRORS:${consoleErrors.join('|')}`)}finally{await browser.close()}
-console.log(JSON.stringify({ok:true,baseUrl:base,releaseSha:expectedSha,assetCount:assets.length,browser:'chromium',pageErrors:0,consoleErrors:0,integritySha256:integritySha}));
+console.log(JSON.stringify({ok:true,baseUrl:base,releaseSha:expectedSha,assetCount:assets.length,browser:'chromium',pageErrors:0,consoleErrors:0,integritySha256:integritySha,provenanceSha256:provenanceSha,provenanceSigned:release?.evidence?.provenance?.signed===true}));

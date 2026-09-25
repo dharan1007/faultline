@@ -23,6 +23,7 @@ RUN node scripts-vendor.mjs \
     && node --check integrations/playwright-live/index.js \
     && node --check integrations/playwright-environment/index.js \
     && node --check integrations/playwright-trace/index.js \
+    && node --check integrations/source-map-evidence/index.js \
     && node --check src/live-reducer.js \
     && node --check src/collection-reducer.js \
     && chown -R node:node /opt/faultline

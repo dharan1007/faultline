@@ -78,3 +78,24 @@ test('hash helpers are deterministic and key-order insensitive', () => {
   assert.equal(hashString('faultline'), hashString('faultline'));
   assert.equal(stableStringify({ b: 1, a: 2 }), stableStringify({ a: 2, b: 1 }));
 });
+
+
+test('network sequence drift is a different cause even under the same oracle', () => {
+  const oracle={kind:'network_sequence',sequence:[{url:'/checkout',method:'POST',status:500}]};
+  const a=buildFingerprint({oracle,networkSequence:[{method:'POST',status:500,url:'https://app.test/checkout'}]});
+  const b=buildFingerprint({oracle,networkSequence:[{method:'POST',status:200,url:'https://app.test/checkout'}]});
+  const v=verdictForReduction({status:'FAIL',fingerprint:a},{status:'FAIL',fingerprint:b});
+  assert.equal(v.accept,false);
+  assert.match(v.reason,/SUPPORTING_MISMATCH:networkSequence/);
+});
+
+test('oracle identity includes network/timing failure conditions but ignores action and delay', () => {
+  const base={kind:'network_status',url:'/api/save',status:500,action:{kind:'none'},delayMs:10};
+  const same={...base,action:{kind:'click',selector:'#retry'},delayMs:30};
+  const different={...base,status:409};
+  const a=buildFingerprint({oracle:base});
+  const b=buildFingerprint({oracle:same});
+  const c=buildFingerprint({oracle:different});
+  assert.equal(a.dimensions.oracleIdentity,b.dimensions.oracleIdentity);
+  assert.notEqual(a.dimensions.oracleIdentity,c.dimensions.oracleIdentity);
+});

@@ -86,16 +86,19 @@ async function analyze(capture,options){
       const reduction=await page.evaluate(({expectedRevision,targetAxis,maxTrials})=>window.faultline.reduce({expectedRevision,targetAxis,maxTrials}),{expectedRevision:state.revision,targetAxis,maxTrials});
       const after=await page.evaluate(()=>window.faultline.inspect());
       const axisAfter=String(after.case[targetAxis]??'');
-      reductions.push({axis:targetAxis,status:reduction.status,beforeBytes:Buffer.byteLength(axisBefore),afterBytes:Buffer.byteLength(axisAfter),removed:reduction.removed??0,trials:reduction.trials??reduction.trialCount??0,passes:reduction.passes??0,beforeSha256:digest(axisBefore),afterSha256:digest(axisAfter)});
+      reductions.push({axis:targetAxis,status:reduction.status,cause:reduction.cause??null,sameCause:reduction.sameCause??(reduction.status==='FAIL'),minimality:reduction.minimality??null,beforeBytes:Buffer.byteLength(axisBefore),afterBytes:Buffer.byteLength(axisAfter),removed:reduction.removed??0,trials:reduction.trials??reduction.trialCount??0,passes:reduction.passes??0,beforeSha256:digest(axisBefore),afterSha256:digest(axisAfter)});
     }
     const finalState=await page.evaluate(()=>window.faultline.inspect());
     const finalRun=await page.evaluate(expectedRevision=>window.faultline.run({expectedRevision}),finalState.revision);
     if(finalRun?.status!=='FAIL')fail('FAILURE_NOT_PRESERVED',3);
+    const {verdictForReduction:cliVerdict}=await import('../src/causal-fingerprint.js');
+    const finalCause=cliVerdict({status:imported.baseline.status,fingerprint:imported.baseline.fingerprint??null},{status:finalRun.status,fingerprint:finalRun.fingerprint??null});
+    if(!finalCause.accept)fail(`FAILURE_NOT_PRESERVED:${finalCause.reason}`,3);
     const escaped=local.requests.slice(baselineRequestCount).filter(path=>!allowedAsset(path));if(escaped.length)fail(`SANDBOX_ESCAPE_DETECTED:${escaped[0]}`,4);
     if(pageErrors.length)throw new Error(`PAGE_ERROR:${pageErrors[0]}`);
     const bundle=await page.evaluate(()=>window.faultline.exportBundle());
     const finalCase=finalState.case;
-    const report={schema:'faultline.ci-report.v1',generatedAt:new Date().toISOString(),browser:browserName,durationMs:Date.now()-started,capture:captureSummary(capture),baseline:{status:imported.baseline.status,revision:imported.revision},reductions,final:{status:finalRun.status,revision:finalState.revision,sourceBytes:Object.fromEntries(['html','css','js'].map(axis=>[axis,Buffer.byteLength(String(finalCase[axis]??''))])),sourceSha256:Object.fromEntries(['html','css','js'].map(axis=>[axis,digest(finalCase[axis])])),evidence:finalRun.evidence??null},containment:{unexpectedNetworkRequests:0,pageErrors:0}};
+    const report={schema:'faultline.ci-report.v1',generatedAt:new Date().toISOString(),browser:browserName,durationMs:Date.now()-started,capture:captureSummary(capture),baseline:{status:imported.baseline.status,revision:imported.revision,fingerprint:imported.baseline.fingerprint??null},reductions,final:{status:finalRun.status,revision:finalState.revision,cause:finalCause.reason,sameCause:finalCause.accept,sourceBytes:Object.fromEntries(['html','css','js'].map(axis=>[axis,Buffer.byteLength(String(finalCase[axis]??''))])),sourceSha256:Object.fromEntries(['html','css','js'].map(axis=>[axis,digest(finalCase[axis])])),evidence:finalRun.evidence??null,fingerprint:finalRun.fingerprint??null},containment:{unexpectedNetworkRequests:0,pageErrors:0}};
     if(options.out)await writeJson(options.out,report);if(options.bundle)await writeJson(options.bundle,bundle);
     return report;
   }finally{if(browser)await browser.close();await new Promise(ok=>local.server.close(ok));}
@@ -110,4 +113,4 @@ async function main(){
   fail('UNKNOWN_COMMAND');
 }
 
-main().catch(error=>{const message=String(error?.message||error||'INTERNAL_ERROR').replace(/[\r\n]+/g,' ');let code=Number(error?.exitCode)||5;if(code===5&&/^(INVALID_|UNSUPPORTED_|CAPTURE_)/.test(message))code=2;process.stderr.write(`FAULTLINE_ERROR ${message}\n`);process.exitCode=code;});
+main().catch(error=>{const message=String(error?.message||error||'INTERNAL_ERROR').replace(/[\r\n]+/g,' ');let code=Number(error?.exitCode)||5;if(code===5&&/^(INVALID_|UNSUPPORTED_|CAPTURE_)/.test(message))code=2;if(code===5&&/(BASELINE_NOT_FAILING|FAILURE_DID_NOT_REPRODUCE|FAILURE_NOT_PRESERVED|REDUCTION_LOST_FAILURE|DIFFERENT_FAIL)/.test(message))code=3;process.stderr.write(`FAULTLINE_ERROR ${message}\n`);process.exitCode=code;});

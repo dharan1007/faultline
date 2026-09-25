@@ -5,58 +5,104 @@ export const CAPTURE_LIMITS=Object.freeze({
   diagnosticsEntries:200,
   diagnosticStringChars:2048,
   metadataStringChars:2048,
-  sequenceSteps:8,
-  totalWaitMs:2000,
-  oracleDelayMs:2000
+  sequenceSteps:16,
+  totalWaitMs:5000,
+  oracleDelayMs:5000
 });
 
 const ORACLE_KINDS=new Set(['dom_property','dom_attribute','computed_style','dom_exists','runtime_error']);
-const ACTION_KINDS=new Set(['none','click','set_value','set_checked','sequence']);
-const ACTION_STEP_KINDS=new Set(['click','set_value','set_checked','wait']);
+export const ACTION_KINDS=Object.freeze(['none','click','hover','pointer_move','set_value','set_checked','key_press','focus','blur','scroll','select_option','sequence']);
+export const ACTION_STEP_KINDS=Object.freeze(['click','hover','pointer_move','set_value','set_checked','key_press','focus','blur','scroll','select_option','wait']);
+const ACTION_KIND_SET=new Set(ACTION_KINDS);
+const ACTION_STEP_KIND_SET=new Set(ACTION_STEP_KINDS);
 const CAPTURE_KEYS=new Set(['schema','capturedAt','source','oracle','environment','provenance','diagnostics']);
 const SOURCE_KEYS=new Set(['url','title','html','css','js']);
 const ORACLE_KEYS=new Set(['kind','selector','property','equals','action','delayMs']);
-const ACTION_KEYS=new Set(['kind','selector','value','checked','steps','durationMs']);
+const ACTION_KEYS=new Set(['kind','selector','value','checked','steps','durationMs','key','x','y']);
 const DIAGNOSTIC_KEYS=new Set(['externalDependencies','consoleErrors','pageErrors']);
 const utf8Size=value=>new TextEncoder().encode(String(value)).byteLength;
 const clone=value=>JSON.parse(JSON.stringify(value));
 const fail=code=>{throw new Error(code)};
 const hasUnknownKeys=(value,allowed)=>Object.keys(value).some(key=>!allowed.has(key));
+const hasOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
+const validSelector=value=>typeof value==='string'&&value.trim().length>0&&value.length<=2048;
+const finiteCoord=value=>Number.isFinite(value)&&Math.abs(value)<=1_000_000;
 
 function validateMetadataString(value,{optional=true}={}){
   if(value===undefined&&optional)return;
   if(typeof value!=='string'||value.length>CAPTURE_LIMITS.metadataStringChars)fail('INVALID_CAPTURE');
 }
 
-function validateAction(action,{allowSequence=true,allowWait=false}={}){
+function forbid(action,keys){
+  if(keys.some(key=>hasOwn(action,key)))fail('UNSUPPORTED_CAPTURE_ACTION');
+}
+
+export function validateCaptureAction(action,{allowSequence=true,allowWait=false}={}){
   if(!action||typeof action!=='object'||Array.isArray(action)||hasUnknownKeys(action,ACTION_KEYS))fail('UNSUPPORTED_CAPTURE_ACTION');
   if(action.kind==='wait'){
     if(!allowWait||Object.keys(action).some(key=>!['kind','durationMs'].includes(key))||!Number.isFinite(action.durationMs)||action.durationMs<0||action.durationMs>CAPTURE_LIMITS.totalWaitMs)fail('UNSUPPORTED_CAPTURE_ACTION');
-    return;
+    return action;
   }
-  if(!ACTION_KINDS.has(action.kind))fail('UNSUPPORTED_CAPTURE_ACTION');
+  if(!ACTION_KIND_SET.has(action.kind))fail('UNSUPPORTED_CAPTURE_ACTION');
   if(action.kind==='sequence'){
-    if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||Object.hasOwn(action,'checked')||Object.hasOwn(action,'durationMs')||!Array.isArray(action.steps)||action.steps.length<1||action.steps.length>CAPTURE_LIMITS.sequenceSteps)fail('UNSUPPORTED_CAPTURE_ACTION');
+    if(!allowSequence||Object.keys(action).some(key=>!['kind','steps'].includes(key))||!Array.isArray(action.steps)||action.steps.length<1||action.steps.length>CAPTURE_LIMITS.sequenceSteps)fail('UNSUPPORTED_CAPTURE_ACTION');
     let totalWait=0;
     for(const step of action.steps){
-      if(!ACTION_STEP_KINDS.has(step?.kind))fail('UNSUPPORTED_CAPTURE_ACTION');
-      validateAction(step,{allowSequence:false,allowWait:true});
+      if(!ACTION_STEP_KIND_SET.has(step?.kind))fail('UNSUPPORTED_CAPTURE_ACTION');
+      validateCaptureAction(step,{allowSequence:false,allowWait:true});
       if(step.kind==='wait')totalWait+=step.durationMs;
     }
     if(totalWait>CAPTURE_LIMITS.totalWaitMs)fail('UNSUPPORTED_CAPTURE_ACTION');
-    return;
+    return action;
   }
-  if(Object.hasOwn(action,'steps')||Object.hasOwn(action,'durationMs'))fail('UNSUPPORTED_CAPTURE_ACTION');
-  if(action.kind!=='set_checked'&&Object.hasOwn(action,'checked'))fail('UNSUPPORTED_CAPTURE_ACTION');
-  if(action.kind==='none')return;
-  if(typeof action.selector!=='string'||!action.selector.trim())fail('UNSUPPORTED_CAPTURE_ACTION');
-  if(action.kind==='set_value'&&typeof action.value!=='string')fail('UNSUPPORTED_CAPTURE_ACTION');
-  if(action.kind==='set_checked'&&(typeof action.checked!=='boolean'||Object.hasOwn(action,'value')))fail('UNSUPPORTED_CAPTURE_ACTION');
+  forbid(action,['steps','durationMs']);
+  if(action.kind==='none'){
+    if(Object.keys(action).length!==1)fail('UNSUPPORTED_CAPTURE_ACTION');
+    return action;
+  }
+  if(['click','hover','focus','blur'].includes(action.kind)){
+    if(!validSelector(action.selector)||Object.keys(action).some(key=>!['kind','selector'].includes(key)))fail('UNSUPPORTED_CAPTURE_ACTION');
+    return action;
+  }
+  if(action.kind==='pointer_move'){
+    if(hasOwn(action,'selector')&&!validSelector(action.selector))fail('UNSUPPORTED_CAPTURE_ACTION');
+    if(hasOwn(action,'x')&&!finiteCoord(action.x))fail('UNSUPPORTED_CAPTURE_ACTION');
+    if(hasOwn(action,'y')&&!finiteCoord(action.y))fail('UNSUPPORTED_CAPTURE_ACTION');
+    if(!hasOwn(action,'selector')&&!(hasOwn(action,'x')&&hasOwn(action,'y')))fail('UNSUPPORTED_CAPTURE_ACTION');
+    if(Object.keys(action).some(key=>!['kind','selector','x','y'].includes(key)))fail('UNSUPPORTED_CAPTURE_ACTION');
+    return action;
+  }
+  if(action.kind==='set_value'){
+    if(!validSelector(action.selector)||typeof action.value!=='string'||Object.keys(action).some(key=>!['kind','selector','value'].includes(key)))fail('UNSUPPORTED_CAPTURE_ACTION');
+    return action;
+  }
+  if(action.kind==='set_checked'){
+    if(!validSelector(action.selector)||typeof action.checked!=='boolean'||Object.keys(action).some(key=>!['kind','selector','checked'].includes(key)))fail('UNSUPPORTED_CAPTURE_ACTION');
+    return action;
+  }
+  if(action.kind==='key_press'){
+    if(hasOwn(action,'selector')&&!validSelector(action.selector))fail('UNSUPPORTED_CAPTURE_ACTION');
+    if(typeof action.key!=='string'||!action.key||action.key.length>64||/[\r\n\0]/.test(action.key)||Object.keys(action).some(key=>!['kind','selector','key'].includes(key)))fail('UNSUPPORTED_CAPTURE_ACTION');
+    return action;
+  }
+  if(action.kind==='scroll'){
+    if(hasOwn(action,'selector')&&!validSelector(action.selector))fail('UNSUPPORTED_CAPTURE_ACTION');
+    if(hasOwn(action,'x')&&!finiteCoord(action.x))fail('UNSUPPORTED_CAPTURE_ACTION');
+    if(hasOwn(action,'y')&&!finiteCoord(action.y))fail('UNSUPPORTED_CAPTURE_ACTION');
+    if(!hasOwn(action,'x')&&!hasOwn(action,'y'))fail('UNSUPPORTED_CAPTURE_ACTION');
+    if(Object.keys(action).some(key=>!['kind','selector','x','y'].includes(key)))fail('UNSUPPORTED_CAPTURE_ACTION');
+    return action;
+  }
+  if(action.kind==='select_option'){
+    if(!validSelector(action.selector)||typeof action.value!=='string'||Object.keys(action).some(key=>!['kind','selector','value'].includes(key)))fail('UNSUPPORTED_CAPTURE_ACTION');
+    return action;
+  }
+  fail('UNSUPPORTED_CAPTURE_ACTION');
 }
 
 function validateOracle(oracle){
   if(!oracle||typeof oracle!=='object'||Array.isArray(oracle)||hasUnknownKeys(oracle,ORACLE_KEYS)||!ORACLE_KINDS.has(oracle.kind))fail('INVALID_ORACLE');
-  validateAction(oracle.action);
+  validateCaptureAction(oracle.action);
   if(oracle.kind!=='runtime_error'&&(typeof oracle.selector!=='string'||!oracle.selector.trim()))fail('INVALID_ORACLE');
   if(['dom_property','dom_attribute','computed_style'].includes(oracle.kind)&&(typeof oracle.property!=='string'||!oracle.property.trim()))fail('INVALID_ORACLE');
   if(oracle.kind==='dom_attribute'&&!(typeof oracle.equals==='string'||oracle.equals===null))fail('INVALID_ORACLE');

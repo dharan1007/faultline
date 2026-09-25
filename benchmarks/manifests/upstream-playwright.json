@@ -1,0 +1,27 @@
+{
+  "suite": "upstream-playwright",
+  "description": "Real historical Playwright/Cypress failures from major open-source repos + BugsJS where relevant + SWE-bench browser/web issues. No rewritten equivalent tests: checkout exact upstream commit, run original failing test, capture, run Faultline, verify repro, compare same-model fix outcomes (Rules A, C).",
+  "benchmarkRepo": "https://github.com/microsoft/playwright",
+  "benchmarkCommit": "0000000000000000000000000000000000000000",
+  "benchmarkCommitNote": "Per-case upstream commit recorded in results/<suite>/<timestamp>/manifest.json (Rule C). This manifest pins the harness, not each upstream case.",
+  "container": null,
+  "containerDigest": null,
+  "caseSelection": [
+    "real historical Playwright failures (exact upstream commit)",
+    "Cypress failures with browser component",
+    "BugsJS cases where relevant",
+    "early Faultline user issues with reproduction consent"
+  ],
+  "budgets": {
+    "toolCallBudget": 100,
+    "wallClockTimeoutSec": 1200,
+    "tokenBudget": 200000,
+    "retryPolicy": "record-every-retry"
+  },
+  "targets": {
+    "falseEquivalents": 0,
+    "medianReduction": ">=80% structural size on eligible reproducers",
+    "deterministicRepro": "required where original failure is deterministic"
+  },
+  "excludedFailures": []
+}

@@ -1,53 +1,91 @@
-name: Verify FAULTLINE production
+name: deploy-production
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact 40-character current-main FAULTLINE commit SHA to promote
+        required: true
+        type: string
   workflow_run:
-    workflows: ["ci"]
+    workflows: ["self-hosted-qualification"]
     types: [completed]
 
 permissions:
   contents: read
+  checks: read
+  actions: read
 
 concurrency:
   group: faultline-production
   cancel-in-progress: false
 
+env:
+  CANONICAL_URL: https://faultline-webmcp.vercel.app
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  VERCEL_ORG_ID: team_APBZJjf6iizHCTuseqHosFnU
+  VERCEL_PROJECT_ID: prj_XtQdMYG2kOufYTrZ1SDj61VEExDM
+
 jobs:
-  verify-production:
+  deploy:
+    name: deploy exact organizationally qualified release
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.event == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
-      CANONICAL_URL: https://faultline-webmcp.vercel.app
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_TEAM_ID: team_APBZJjf6iizHCTuseqHosFnU
-      VERCEL_PROJECT_ID: prj_XtQdMYG2kOufYTrZ1SDj61VEExDM
-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: [self-hosted, Linux, X64, production-ci]
+    timeout-minutes: 90
+    environment: production
     steps:
-      - name: Check out exact verified source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Resolve exact qualified release
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_SHA: ${{ inputs.release_sha }}
+          QUALIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_sha="${DISPATCH_SHA:-}"
+          if [ "$EVENT_NAME" = workflow_run ]; then release_sha="${QUALIFIED_SHA:-}"; fi
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "FAULTLINE_RELEASE_SHA_INVALID"; exit 1; }
+          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
+          echo "EXPECTED_SHA=$release_sha" >> "$GITHUB_ENV"
 
-      - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.release.outputs.release_sha }}
+          fetch-depth: 0
+          clean: true
+
+      - name: Prove exact current-main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || { echo "FAULTLINE_RELEASE_CHECKOUT_MISMATCH"; exit 1; }
+          git fetch --no-tags origin main
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_SHA" || { echo "FAULTLINE_RELEASE_NOT_CURRENT_MAIN_HEAD"; exit 1; }
+          test -z "$(git status --porcelain=v1 --untracked-files=all)" || { echo "FAULTLINE_RELEASE_DIRTY"; exit 1; }
+
+      - name: Require exact-SHA organizational qualification and CodeQL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          checks="$(gh api "/repos/${GITHUB_REPOSITORY}/commits/${EXPECTED_SHA}/check-runs")"
+          qual_ok="$(jq '[.check_runs[] | select(.name == "self-hosted organizational qualification" and .conclusion == "success")] | length' <<<"$checks")"
+          codeql_ok="$(jq '[.check_runs[] | select(.name == "self-hosted organizational codeql" and .conclusion == "success")] | length' <<<"$checks")"
+          test "$qual_ok" -ge 1 || { echo "FAULTLINE_ORGANIZATIONAL_QUALIFICATION_NOT_GREEN"; exit 1; }
+          test "$codeql_ok" -ge 1 || { echo "FAULTLINE_ORGANIZATIONAL_CODEQL_NOT_GREEN"; exit 1; }
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
 
-      - name: Verify immutable candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test -z "$(git status --porcelain=v1 --untracked-files=all)" || { echo "verified source checkout is dirty" >&2; exit 1; }
-          test -n "${VERCEL_TOKEN:-}" || { echo "VERCEL_TOKEN is required for production promotion" >&2; exit 1; }
-
-      - name: Re-run deterministic build contract
+      - name: Re-run source verification
         shell: bash
         run: |
           set -euo pipefail
@@ -55,124 +93,44 @@ jobs:
           npm audit --audit-level=high --omit=dev
           npm test
           npm run check
+          node --check src/external-live-qualification-runner.js
+          node --check scripts/run-organizational-qualification.mjs
+          node --check scripts/verify-live-deployment.mjs
+          node --test tests/external-qualification-runner.test.js tests/external-live-qualification-runner.test.js tests/deploy-production-contract.test.js
           GITHUB_SHA="$EXPECTED_SHA" GITHUB_REPOSITORY="${{ github.repository }}" GITHUB_REF_NAME=main npm run build
-          EXPECTED_SHA="$EXPECTED_SHA" node --input-type=module -e "import fs from 'node:fs';const r=JSON.parse(fs.readFileSync('public/release.json','utf8'));if(r.source?.sha!==process.env.EXPECTED_SHA.toLowerCase())throw new Error('local release SHA mismatch');if(r.source?.provenance!=='source-bound'||r.source?.authority!=='github-actions')throw new Error('local release is not exact-source bound');"
+          npm run sbom
+          npm run verify:package
 
-      - name: Create exact Git-source Vercel production deployment
+      - name: Install production smoke browser
+        run: ./node_modules/.bin/playwright install chromium
+
+      - name: Require deploy credential and pull production configuration
         shell: bash
         run: |
           set -euo pipefail
-          jq -n \
-            --arg name 'faultline-webmcp' \
-            --arg project "$VERCEL_PROJECT_ID" \
-            --arg sha "$EXPECTED_SHA" \
-            '{name:$name,project:$project,target:"production",gitSource:{type:"github",org:"dharan1007",repo:"faultline",ref:"main",sha:$sha},gitMetadata:{remoteUrl:"https://github.com/dharan1007/faultline",commitRef:"main",commitSha:$sha,dirty:false,ci:true,ciType:"github-actions",ciGitProviderUsername:"dharan1007",ciGitRepoVisibility:"public"}}' >/tmp/faultline-deploy-request.json
-          http_code=$(curl -sS -o /tmp/faultline-deploy-create.json -w '%{http_code}' \
-            -X POST "https://api.vercel.com/v13/deployments?teamId=$VERCEL_TEAM_ID" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            -H 'Content-Type: application/json' \
-            --data-binary @/tmp/faultline-deploy-request.json)
-          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
-            echo "Vercel deployment creation failed with HTTP $http_code" >&2
-            jq '{error,code,message}' /tmp/faultline-deploy-create.json >&2 || true
-            exit 1
-          fi
-          deployment_id=$(jq -r '.id // empty' /tmp/faultline-deploy-create.json)
-          deployment_url=$(jq -r '.url // empty' /tmp/faultline-deploy-create.json)
-          test -n "$deployment_id"
-          test -n "$deployment_url"
-          echo "deployment_id=$deployment_id" >> "$GITHUB_ENV"
-          echo "deployment_url=$deployment_url" >> "$GITHUB_ENV"
+          test -n "${VERCEL_TOKEN:-}" || { echo "VERCEL_TOKEN_REQUIRED"; exit 1; }
+          npx --yes vercel@59.11.7 pull --yes --environment=production --token="$VERCEL_TOKEN"
 
-      - name: Wait for exact Vercel deployment and atomically assign canonical alias
+      - name: Build exact production-configured artifact
         shell: bash
         run: |
           set -euo pipefail
-          ready=0
-          for attempt in $(seq 1 120); do
-            curl -fsS \
-              -H "Authorization: Bearer $VERCEL_TOKEN" \
-              "https://api.vercel.com/v13/deployments/$deployment_id?teamId=$VERCEL_TEAM_ID" \
-              -o /tmp/faultline-deployment.json
-            state=$(jq -r '.readyState // .status // empty' /tmp/faultline-deployment.json)
-            case "$state" in
-              READY)
-                jq -e --arg sha "$EXPECTED_SHA" '(.meta.githubCommitSha // .gitSource.sha // "") == $sha' /tmp/faultline-deployment.json >/dev/null
-                jq -e '.meta.githubCommitRef == "main" and .meta.githubCommitRepo == "faultline" and .meta.githubCommitOrg == "dharan1007"' /tmp/faultline-deployment.json >/dev/null
-                ready=1
-                break
-                ;;
-              ERROR|CANCELED)
-                echo "Vercel deployment ended in $state" >&2
-                jq '{id,url,readyState,status,errorCode,errorMessage,meta,gitSource}' /tmp/faultline-deployment.json >&2
-                exit 1
-                ;;
-            esac
-            sleep 5
-          done
-          if [ "$ready" != 1 ]; then
-            echo "Timed out waiting for the exact FAULTLINE production deployment" >&2
-            exit 1
-          fi
-          alias_code=$(curl -sS -o /tmp/faultline-alias.json -w '%{http_code}' \
-            -X POST "https://api.vercel.com/v2/deployments/$deployment_id/aliases?teamId=$VERCEL_TEAM_ID" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            -H 'Content-Type: application/json' \
-            --data '{"alias":"faultline-webmcp.vercel.app","redirect":null}')
-          if [ "$alias_code" -lt 200 ] || [ "$alias_code" -ge 300 ]; then
-            echo "Canonical alias assignment failed with HTTP $alias_code" >&2
-            jq '{error,code,message}' /tmp/faultline-alias.json >&2 || true
-            exit 1
-          fi
-          jq -e '.alias == "faultline-webmcp.vercel.app"' /tmp/faultline-alias.json >/dev/null
+          GITHUB_SHA="$EXPECTED_SHA" GITHUB_REPOSITORY="${{ github.repository }}" GITHUB_REF_NAME=main npx --yes vercel@59.11.7 build --prod --token="$VERCEL_TOKEN"
 
-      - name: Verify canonical exact source
+      - name: Stage without assigning production domains
+        id: stage
         shell: bash
         run: |
           set -euo pipefail
-          converged=0
-          for attempt in $(seq 1 60); do
-            if curl -fsS --retry 2 --retry-all-errors --retry-delay 1 "$CANONICAL_URL/release.json" > /tmp/faultline-release.json && \
-               EXPECTED_SHA="$EXPECTED_SHA" node --input-type=module -e "import fs from 'node:fs';const r=JSON.parse(fs.readFileSync('/tmp/faultline-release.json','utf8'));if(r.source?.sha!==process.env.EXPECTED_SHA.toLowerCase())process.exit(1);if(r.source?.provenance!=='source-bound'||r.source?.authority!=='vercel-git')process.exit(1);if(r.source?.repository!=='dharan1007/faultline'||r.source?.ref!=='main')process.exit(1);"; then
-              converged=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "$converged" != 1 ]; then
-            echo "Canonical production did not converge to the verified FAULTLINE source" >&2
-            exit 1
-          fi
+          deployment_url="$(npx --yes vercel@59.11.7 deploy --prebuilt --prod --skip-domain --token="$VERCEL_TOKEN" | tail -n 1)"
+          [[ "$deployment_url" =~ ^https://[^[:space:]]+\.vercel\.app$ ]] || { echo "FAULTLINE_STAGED_DEPLOYMENT_URL_INVALID"; exit 1; }
+          echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
 
-      - name: Verify canonical integrity manifest and every runtime asset
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS --retry 5 --retry-all-errors --retry-delay 2 "$CANONICAL_URL/integrity.json" -o /tmp/faultline-integrity.json
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import {createHash} from 'node:crypto';
-          const release=JSON.parse(fs.readFileSync('/tmp/faultline-release.json','utf8'));
-          const bytes=fs.readFileSync('/tmp/faultline-integrity.json');
-          const digest=createHash('sha256').update(bytes).digest('hex');
-          if(release.evidence?.integrity?.sha256!==digest)throw new Error('integrity digest mismatch');
-          if(release.evidence?.integrity?.bytes!==bytes.length)throw new Error('integrity byte count mismatch');
-          const manifest=JSON.parse(bytes);
-          const required=['/index.html','/src/runtime.js','/src/ui.js','/src/reducer-engine.js','/src/sandbox-policy.js','/src/capture-contract.js','/vendor/acorn.js'];
-          for(const path of required){if(!manifest.assets?.[path])throw new Error(`missing integrity entry ${path}`);}
-          NODE
-          for path in /index.html /src/runtime.js /src/ui.js /src/reducer-engine.js /src/sandbox-policy.js /src/capture-contract.js /vendor/acorn.js; do
-            safe="${path//\//-}"
-            curl -fsS --retry 5 --retry-all-errors --retry-delay 2 "$CANONICAL_URL$path" -o "/tmp/$safe"
-            PATH_TO_VERIFY="$path" FILE_TO_VERIFY="/tmp/$safe" node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import {createHash} from 'node:crypto';
-          const manifest=JSON.parse(fs.readFileSync('/tmp/faultline-integrity.json','utf8'));
-          const expected=manifest.assets?.[process.env.PATH_TO_VERIFY];
-          const bytes=fs.readFileSync(process.env.FILE_TO_VERIFY);
-          if(!expected)throw new Error(`missing manifest entry ${process.env.PATH_TO_VERIFY}`);
-          if(expected.bytes!==bytes.length)throw new Error(`byte mismatch ${process.env.PATH_TO_VERIFY}`);
-          const digest=createHash('sha256').update(bytes).digest('hex');
-          if(expected.sha256!==digest)throw new Error(`asset digest mismatch ${process.env.PATH_TO_VERIFY}`);
-          NODE
-          done
+      - name: Verify immutable staged provenance, integrity and browser runtime
+        run: node scripts/verify-live-deployment.mjs "${{ steps.stage.outputs.deployment_url }}" "$EXPECTED_SHA"
+
+      - name: Promote only verified staged deployment
+        run: npx --yes vercel@59.11.7 promote "${{ steps.stage.outputs.deployment_url }}" --yes --token="$VERCEL_TOKEN"
+
+      - name: Verify canonical production after promotion
+        run: node scripts/verify-live-deployment.mjs "$CANONICAL_URL" "$EXPECTED_SHA"

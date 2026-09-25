@@ -1,0 +1,119 @@
+{
+  "repository": "faultline",
+  "contractVersion": "A-G/3",
+  "updatedAt": "2026-09-25",
+  "note": "Engineering implementation and production qualification are intentionally separate. No capability is PRODUCTION until immutable external real-workload evidence satisfies the qualification thresholds and the exact release SHA passes self-hosted verification, CodeQL, staged live verification and canonical post-promotion verification. Internal/synthetic browser corpora are regression evidence, not field validation.",
+  "capabilities": [
+    {
+      "id": "portable-capture-v1",
+      "title": "Bounded local Playwright capture to faultline.capture.v1",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented caller-owned page capture with bounded DOM/CSS/diagnostics, secret-safe control handling, explicit external-dependency rejection and atomic import semantics.",
+      "nextEvidence": "benchmarks/manifests/external-incidents.json"
+    },
+    {
+      "id": "portable-browser-runtime",
+      "title": "Sandboxed portable browser failure runtime",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented DOM/property/attribute/existence/computed-style/runtime-error oracles, bounded actions, restrictive iframe/CSP containment and revision-guarded state. Browser containment is not VM isolation.",
+      "nextEvidence": "benchmarks/results/external-incidents/"
+    },
+    {
+      "id": "adaptive-same-cause",
+      "title": "Adaptive SAME_CAUSE causal stability",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented full-oracle identity, hard rejection of jointly observed strong/supporting signal drift, three-run deterministic baseline probe, repeated candidate confirmation and 15/20 escalation for flaky baselines. Physical browser executions count against the trial budget.",
+      "nextEvidence": "benchmarks/results/qualification-results.json"
+    },
+    {
+      "id": "hierarchical-source-reduction",
+      "title": "Hierarchical HTML/CSS/JavaScript reduction",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented balanced HTML subtrees, CSS rules/declarations, parser-backed JavaScript statements/class members, pin/ancestor closure, SAME_CAUSE candidate acceptance and independent final confirmation.",
+      "nextEvidence": "benchmarks/results/external-incidents/"
+    },
+    {
+      "id": "structured-collection-reduction",
+      "title": "Bounded data/network/repository collection reduction",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented deterministic collection reduction with protected keys, memoization, bounded parallel evaluation and explicit 1-minimal fixpoint over caller-supplied replayable units. Automatic arbitrary repository rewriting is not claimed.",
+      "nextEvidence": "benchmarks/results/external-live-incidents/"
+    },
+    {
+      "id": "playwright-live",
+      "title": "Caller-owned in-situ Playwright execution and interaction reduction",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented reset-before-trial live execution, deterministic interaction recipes, adaptive SAME_CAUSE reduction and DOM/runtime/console/network/race/performance oracle families.",
+      "nextEvidence": "tests/playwright-live.mjs + tests/playwright-observability-oracles.mjs + external live corpus"
+    },
+    {
+      "id": "playwright-environment-replay",
+      "title": "Bounded browser-state and network capture/replay",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented opt-in cookie/storage replay, default secret redaction, sensitive-header stripping, origin allowlists, body/entry budgets and strict unmatched-request blocking.",
+      "nextEvidence": "benchmarks/results/external-live-incidents/"
+    },
+    {
+      "id": "trace-provenance",
+      "title": "Official Playwright trace provenance binding",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented official Playwright tracing wrapper with SHA-256/byte binding, source/test provenance and post-capture tamper verification without parsing undocumented trace internals.",
+      "nextEvidence": "tests/playwright-trace.test.js + external trace-backed incidents"
+    },
+    {
+      "id": "source-map-provenance",
+      "title": "Source-map evidence binding",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented bounded v3 source-map validation, generated/map SHA-256 binding, source provenance and sanitized source-name metadata without copying sourcesContent.",
+      "nextEvidence": "tests/source-map-evidence.test.js + external bundled-app incidents"
+    },
+    {
+      "id": "runtime-reproducer-v2",
+      "title": "Runtime-bound reproducer evidence artifact",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented immutable source/reset/fingerprint/metric binding plus optional environment state, network fixtures, trace and source-map evidence with an explicit secret-artifact confidentiality summary.",
+      "nextEvidence": "tests/runtime-reproducer-artifact.test.js + external live corpus"
+    },
+    {
+      "id": "one-command-repro-v2",
+      "title": "Path-safe pinned one-command reproducer bundle",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented Node 22 / Playwright 1.63 pinning, nested path-safe payloads, traversal rejection and complete SHA-256 ledger emitted after every generated payload.",
+      "nextEvidence": "tests/reproducer-artifact.test.js + external exported bundles"
+    },
+    {
+      "id": "enterprise-local-container",
+      "title": "Customer-owned container/CI deployment",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented Node 22 container packaging with exact locked Playwright 1.63 browser installation, non-root runtime and documented customer-owned trust/confidentiality boundary.",
+      "nextEvidence": "self-hosted branch verification + external organizational qualification"
+    },
+    {
+      "id": "release-integrity-provenance",
+      "title": "Exact-source release integrity and provenance",
+      "status": "EXPERIMENTAL",
+      "evidence": "Build emits SHA-256 integrity.json, unsigned SLSA v1/in-toto provenance.json and release.json bindings. Live verifier checks exact source, provenance subject and every integrity-manifest asset before and after promotion.",
+      "nextEvidence": "green self-hosted qualification + staged/canonical deployment evidence; cryptographic attestation only when account eligibility is proven"
+    },
+    {
+      "id": "webmcp-agent-surface",
+      "title": "Revision-guarded WebMCP + window.faultline agent surface",
+      "status": "EXPERIMENTAL",
+      "evidence": "Canonical operations, revision guards, cancellation and structured evidence remain shared between human and agent callers.",
+      "nextEvidence": "benchmarks/manifests/agent-uplift.json"
+    },
+    {
+      "id": "external-qualification",
+      "title": "Immutable external-case production qualification",
+      "status": "EXPERIMENTAL",
+      "evidence": "Implemented immutable upstream identity checks, portable/live runners and a release gate requiring at least 30 independent cases, at least 10 accepted reductions, zero false equivalents, >=99% same-cause rate, >=90% supported-case reproduction and useful median reduction. Required external manifests/results are not yet present.",
+      "nextEvidence": "benchmarks/manifests/external-incidents.json + benchmarks/manifests/external-live-incidents.json + benchmarks/results/qualification-results.json"
+    },
+    {
+      "id": "multi-tenant-hostile-execution",
+      "title": "Shared multi-tenant hostile-code execution service",
+      "status": "UNSUPPORTED",
+      "evidence": "Explicit non-goal. Browser containment is not a process/VM boundary; mutually untrusted tenant execution requires independent workload identity, quotas, network/filesystem namespaces and ephemeral process/VM isolation."
+    }
+  ]
+}

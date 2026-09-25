@@ -1,0 +1,45 @@
+name: production-integrity
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faultline-production-integrity
+  cancel-in-progress: true
+
+jobs:
+  verify-production:
+    name: verify canonical production matches current main
+    runs-on: [self-hosted, Linux, X64, production-ci]
+    timeout-minutes: 20
+    env:
+      CANONICAL_URL: https://faultline-webmcp.vercel.app
+    steps:
+      - name: Check out current main head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+          clean: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Bind expected release to current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(git rev-parse HEAD)"
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]] || { echo "FAULTLINE_EXPECTED_SHA_INVALID"; exit 1; }
+          echo "EXPECTED_SHA=$expected" >> "$GITHUB_ENV"
+      - name: Install exact dependencies
+        run: npm ci --ignore-scripts
+      - name: Install production smoke browser
+        run: ./node_modules/.bin/playwright install chromium
+      - name: Verify canonical provenance, integrity, every asset and browser runtime
+        run: node scripts/verify-live-deployment.mjs "$CANONICAL_URL" "$EXPECTED_SHA"

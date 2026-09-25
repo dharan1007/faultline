@@ -1,6 +1,9 @@
 import { semanticUnits, removeUnits, ddminReduce, createRevisionStore } from './reducer-engine.js';
 import { navigationRisk } from './sandbox-policy.js';
-import { CAPTURE_SCHEMA, CAPTURE_LIMITS, normalizeCaptureArtifact } from './capture-contract.js';
+import { CAPTURE_SCHEMA, CAPTURE_LIMITS, normalizeCaptureArtifact, ACTION_KINDS as CAPTURE_ACTION_KINDS, ACTION_STEP_KINDS as CAPTURE_ACTION_STEP_KINDS, validateCaptureAction } from './capture-contract.js';
+import { buildFingerprint, verdictForReduction, signalsFromOracleEvidence } from './causal-fingerprint.js';
+import { establishCausalStability, evaluateCandidateStability } from './flaky-policy.js';
+import { buildDependencyGraph } from './causal-dependency-graph.js';
 
 const $ = id => document.getElementById(id);
 const clone = v => JSON.parse(JSON.stringify(v));
@@ -17,10 +20,11 @@ const PERSISTENCE_PROFILES=[
   {storeSnapshots:1,storeLedger:1,runtimeRevisions:1,experiments:1}
 ];
 const ORACLE_KINDS=['dom_property','dom_attribute','computed_style','dom_exists','runtime_error'];
-const ACTION_KINDS=['none','click','set_value','set_checked','sequence'];
-const ACTION_STEP_KINDS=['click','set_value','set_checked','wait'];
-const MAX_SEQUENCE_WAIT_MS=2000;
-const HOST_TIMEOUT_MS=5000;
+const ACTION_KINDS=[...CAPTURE_ACTION_KINDS];
+const ACTION_STEP_KINDS=[...CAPTURE_ACTION_STEP_KINDS];
+const MAX_SEQUENCE_WAIT_MS=CAPTURE_LIMITS.totalWaitMs;
+const MAX_SEQUENCE_STEPS=CAPTURE_LIMITS.sequenceSteps;
+const HOST_TIMEOUT_MS=7000;
 const REQUEST_ID_PATTERN=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const fixture = {
   html:'<dialog id="modal" open><button id="save">Save</button></dialog><p id="noise">Irrelevant debug noise</p>',
@@ -202,30 +206,7 @@ function cancelActiveWebMCP({requestId}={}){
 }
 function abortAllWebMCP(){ for(const operation of activeWebMCPOperations.values())operation.controller.abort(); }
 function validateAction(action,{allowSequence=true,allowWait=false}={}){
-  if(!action||typeof action!=='object'||Array.isArray(action))throw new Error('INVALID_ORACLE');
-  const supported=allowWait?[...ACTION_KINDS,'wait']:ACTION_KINDS;
-  if(!supported.includes(action.kind)||Object.keys(action).some(key=>!['kind','selector','value','checked','steps','durationMs'].includes(key)))throw new Error('INVALID_ORACLE');
-  if(action.kind==='wait'){
-    if(!allowWait||Object.keys(action).some(key=>!['kind','durationMs'].includes(key))||!Number.isFinite(action.durationMs)||action.durationMs<0||action.durationMs>MAX_SEQUENCE_WAIT_MS)throw new Error('INVALID_ORACLE');
-    return action;
-  }
-  if(action.kind==='sequence'){
-    if(!allowSequence||Object.hasOwn(action,'selector')||Object.hasOwn(action,'value')||Object.hasOwn(action,'checked')||Object.hasOwn(action,'durationMs')||!Array.isArray(action.steps)||action.steps.length<1||action.steps.length>8)throw new Error('INVALID_ORACLE');
-    let totalWait=0;
-    for(const step of action.steps){
-      if(!ACTION_STEP_KINDS.includes(step?.kind))throw new Error('INVALID_ORACLE');
-      validateAction(step,{allowSequence:false,allowWait:true});
-      if(step.kind==='wait')totalWait+=step.durationMs;
-    }
-    if(totalWait>MAX_SEQUENCE_WAIT_MS)throw new Error('INVALID_ORACLE');
-    return action;
-  }
-  if(Object.hasOwn(action,'steps')||Object.hasOwn(action,'durationMs'))throw new Error('INVALID_ORACLE');
-  if(action.kind!=='set_checked'&&Object.hasOwn(action,'checked'))throw new Error('INVALID_ORACLE');
-  if(action.kind==='click'&&(typeof action.selector!=='string'||!action.selector.trim()))throw new Error('INVALID_ORACLE');
-  if(action.kind==='set_value'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.value!=='string'))throw new Error('INVALID_ORACLE');
-  if(action.kind==='set_checked'&&(typeof action.selector!=='string'||!action.selector.trim()||typeof action.checked!=='boolean'||Object.hasOwn(action,'value')))throw new Error('INVALID_ORACLE');
-  return action;
+  try{return validateCaptureAction(action,{allowSequence,allowWait});}catch{throw new Error('INVALID_ORACLE');}
 }
 function validateOracle(oracle){
   if(!oracle||typeof oracle!=='object'||Array.isArray(oracle))throw new Error('INVALID_ORACLE');
@@ -235,7 +216,7 @@ function validateOracle(oracle){
   if(oracle.kind!=='runtime_error'&&(typeof oracle.selector!=='string'||!oracle.selector.trim()))throw new Error('INVALID_ORACLE');
   if(['dom_property','dom_attribute','computed_style'].includes(oracle.kind)&&(typeof oracle.property!=='string'||!oracle.property.trim()))throw new Error('INVALID_ORACLE');
   if(oracle.kind==='dom_attribute'&&!(typeof oracle.equals==='string'||oracle.equals===null))throw new Error('INVALID_ORACLE');
-  if(oracle.delayMs!==undefined&&(!Number.isFinite(oracle.delayMs)||oracle.delayMs<0||oracle.delayMs>2000))throw new Error('INVALID_ORACLE');
+  if(oracle.delayMs!==undefined&&(!Number.isFinite(oracle.delayMs)||oracle.delayMs<0||oracle.delayMs>CAPTURE_LIMITS.oracleDelayMs))throw new Error('INVALID_ORACLE');
   return oracle;
 }
 function validateCase(candidate){
@@ -334,16 +315,22 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  const resultPort=resultChannel?.port1||null;
  const send=resultPort?resultPort.postMessage.bind(resultPort):null;
  const runtimeErrors=[];
+ const runtimeErrorDetails=[];
  const navigationAttempts=[];
  let runtimePolicyViolation=null;
  let candidateExecutionStarted=false;
  const nativeFormSubmit=HTMLFormElement.prototype.submit;
  const nativeFormRequestSubmit=HTMLFormElement.prototype.requestSubmit;
  const NativeInputElement=HTMLInputElement;
+ const NativeSelectElement=HTMLSelectElement;
  const nativeInputCheckedSetter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked')?.set;
  const nativeDispatchEvent=EventTarget.prototype.dispatchEvent;
  const NativeEvent=Event;
- const captureRuntimeError=value=>runtimeErrors.push(String(value));
+ const NativeMouseEvent=MouseEvent;
+ const NativeKeyboardEvent=KeyboardEvent;
+ const NativePointerEvent=globalThis.PointerEvent||MouseEvent;
+ const captureRuntimeError=(value,name,stack)=>{runtimeErrors.push(String(value));if(runtimeErrorDetails.length<8)runtimeErrorDetails.push({message:String(value).slice(0,500),name:String(name||'Error').slice(0,120),stack:String(stack||'').slice(0,2000)});};
+ const runtimeErrorEvidence=actual=>{const detail=runtimeErrorDetails.find(d=>d.message===String(actual))||runtimeErrorDetails.at(-1);return detail?{errorName:detail.name,errorStack:detail.stack}:{};};
  const reportRuntimePolicyViolation=event=>{
   if(runtimePolicyViolation)return;
   const directive=String(event.effectiveDirective||event.violatedDirective||'csp').trim().toLowerCase()||'csp';
@@ -406,15 +393,31 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
  addEventListener('click',captureNavigationAttempt,true);
  addEventListener('submit',captureFormNavigationAttempt,true);
  addEventListener('securitypolicyviolation',reportRuntimePolicyViolation,true);
- addEventListener('error',e=>{captureRuntimeError(e.error?.message??e.message??e.error??'runtime error');e.preventDefault()});
- addEventListener('unhandledrejection',e=>{captureRuntimeError(e.reason?.message??e.reason??'unhandled rejection');e.preventDefault()});
- const executeCandidate=()=>{candidateExecutionStarted=true;try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e)}};
+ addEventListener('error',e=>{const err=e.error;captureRuntimeError(err?.message??e.message??err??'runtime error',err?.name,err?.stack);e.preventDefault()});
+ addEventListener('unhandledrejection',e=>{const r=e.reason;captureRuntimeError(r?.message??r??'unhandled rejection',r?.name,r?.stack);e.preventDefault()});
+ const executeCandidate=()=>{candidateExecutionStarted=true;try{const script=document.createElement('script');script.textContent=candidateSource;document.body.appendChild(script);script.remove()}catch(e){captureRuntimeError(e&&e.message||e,e?.name,e?.stack)}};
  const waitActionTurn=durationMs=>new Promise(resolve=>schedule(resolve,durationMs));
+ const targetFor=action=>{const target=querySelector(action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');return target;};
+ const pointerCoordinates=(target,action)=>{const rect=target?.getBoundingClientRect?.();return {clientX:Number.isFinite(action.x)?Number(action.x):(rect?rect.left+rect.width/2:0),clientY:Number.isFinite(action.y)?Number(action.y):(rect?rect.top+rect.height/2:0)};};
+ const dispatchHover=(target,coords)=>{
+  nativeDispatchEvent.call(target,new NativePointerEvent('pointerover',{bubbles:true,composed:true,...coords}));
+  nativeDispatchEvent.call(target,new NativeMouseEvent('mouseover',{bubbles:true,composed:true,...coords}));
+  nativeDispatchEvent.call(target,new NativePointerEvent('pointerenter',{bubbles:false,composed:true,...coords}));
+  nativeDispatchEvent.call(target,new NativeMouseEvent('mouseenter',{bubbles:false,composed:true,...coords}));
+ };
  const performAtomicAction=action=>{
-  if(action?.kind==='click'){const target=querySelector(action.selector);if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');target.click();return}
+  if(action?.kind==='click'){targetFor(action).click();return}
+  if(action?.kind==='hover'){const target=targetFor(action);dispatchHover(target,pointerCoordinates(target,action));return}
+  if(action?.kind==='pointer_move'){
+   let target=action.selector?targetFor(action):null;
+   const coords=pointerCoordinates(target,action);
+   if(!target)target=document.elementFromPoint(coords.clientX,coords.clientY)||document.body;
+   nativeDispatchEvent.call(target,new NativePointerEvent('pointermove',{bubbles:true,composed:true,...coords}));
+   nativeDispatchEvent.call(target,new NativeMouseEvent('mousemove',{bubbles:true,composed:true,...coords}));
+   return;
+  }
   if(action?.kind==='set_value'){
-   const target=querySelector(action.selector);
-   if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');
+   const target=targetFor(action);
    let prototype=target,valueDescriptor=null;
    while((prototype=Object.getPrototypeOf(prototype))&&!valueDescriptor)valueDescriptor=Object.getOwnPropertyDescriptor(prototype,'value');
    if(!valueDescriptor?.set)throw new Error('ACTION_TARGET_NOT_VALUE_CONTROL');
@@ -424,10 +427,36 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
    return;
   }
   if(action?.kind==='set_checked'){
-   const target=querySelector(action.selector);
-   if(!target)throw new Error('ACTION_TARGET_NOT_FOUND');
+   const target=targetFor(action);
    if(!(target instanceof NativeInputElement)||!['checkbox','radio'].includes(String(target.type).toLowerCase())||!nativeInputCheckedSetter)throw new Error('ACTION_TARGET_NOT_CHECKABLE');
    nativeInputCheckedSetter.call(target,Boolean(action.checked));
+   nativeDispatchEvent.call(target,new NativeEvent('input',{bubbles:true,composed:true}));
+   nativeDispatchEvent.call(target,new NativeEvent('change',{bubbles:true}));
+   return;
+  }
+  if(action?.kind==='key_press'){
+   const target=action.selector?targetFor(action):(document.activeElement||document.body);
+   target.focus?.();
+   const init={key:String(action.key),bubbles:true,composed:true,cancelable:true};
+   nativeDispatchEvent.call(target,new NativeKeyboardEvent('keydown',init));
+   nativeDispatchEvent.call(target,new NativeKeyboardEvent('keypress',init));
+   nativeDispatchEvent.call(target,new NativeKeyboardEvent('keyup',init));
+   return;
+  }
+  if(action?.kind==='focus'){targetFor(action).focus();return}
+  if(action?.kind==='blur'){targetFor(action).blur();return}
+  if(action?.kind==='scroll'){
+   const x=Number.isFinite(action.x)?Number(action.x):0;
+   const y=Number.isFinite(action.y)?Number(action.y):0;
+   if(action.selector){const target=targetFor(action);if(typeof target.scrollTo==='function')target.scrollTo(x,y);else {target.scrollLeft=x;target.scrollTop=y;}nativeDispatchEvent.call(target,new NativeEvent('scroll'));}
+   else {if(typeof window.scrollTo==='function')window.scrollTo(x,y);else {document.documentElement.scrollLeft=x;document.documentElement.scrollTop=y;}nativeDispatchEvent.call(document,new NativeEvent('scroll'));}
+   return;
+  }
+  if(action?.kind==='select_option'){
+   const target=targetFor(action);
+   if(!(target instanceof NativeSelectElement))throw new Error('ACTION_TARGET_NOT_SELECT');
+   target.value=String(action.value);
+   if(target.value!==String(action.value))throw new Error('ACTION_OPTION_NOT_FOUND');
    nativeDispatchEvent.call(target,new NativeEvent('input',{bubbles:true,composed:true}));
    nativeDispatchEvent.call(target,new NativeEvent('change',{bubbles:true}));
   }
@@ -452,7 +481,7 @@ function buildSandboxDocument(c,bootstrapId,{previewOnly=false,executePreview=fa
    else {const el=querySelector(o.selector);if(o.kind==='dom_exists')actual=!!el;else if(o.kind==='dom_attribute')actual=el?el.getAttribute(o.property):undefined;else if(o.kind==='computed_style')actual=el?readComputedStyle(el)[o.property]:undefined;else actual=el?el[o.property]:undefined}
    const expected=o.kind==='computed_style'?String(o.equals):o.kind==='runtime_error'&&o.equals!==undefined?String(o.equals):o.equals;
    const fail=o.kind==='runtime_error'?(o.equals===undefined?Boolean(actual):same(actual,expected)):same(actual,expected);
-   sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected,kind:o.kind,selector:o.selector,property:o.property}})
+   sendResult({status:fail?'FAIL':'PASS',evidence:{actual,expected,kind:o.kind,selector:o.selector,property:o.property,...(o.kind==='runtime_error'?runtimeErrorEvidence(actual):{})}})
   }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},Number(o.delayMs)||0)
  }catch(e){sendResult({status:'UNRESOLVED',evidence:{reason:String(e&&e.message||e)}})}},0);
  const start=()=>{${previewOnly&&!executePreview?'':'executeCandidate();'}if(send)measure(send)};
@@ -496,6 +525,9 @@ function executeCase(c,{signal}={}){
     experiment.srcdoc=buildSandboxDocument(c,bootstrapId);
   });
 }
+function fingerprintFor(result,caseSnapshot){
+  try{return buildFingerprint(signalsFromOracleEvidence(result?.evidence,caseSnapshot?.oracle));}catch{return null;}
+}
 function runCase(c=value(),{signal}={}){
   const snapshot=clone(c);
   const task=experimentQueue.then(()=>{
@@ -503,12 +535,40 @@ function runCase(c=value(),{signal}={}){
     const risk=navigationRisk(snapshot);
     if(risk)return {status:'UNRESOLVED',evidence:{reason:'UNSAFE_NAVIGATION',...risk}};
     return executeCase(snapshot,{signal});
-  });
+  }).then(result=>({...result,fingerprint:fingerprintFor(result,snapshot)}));
   experimentQueue=task.then(()=>undefined,()=>undefined);
   return task;
 }
+function preservedTrialStatus(baselineResult,candidateResult){return verdictForReduction(baselineResult,candidateResult).accept?'FAIL':candidateResult.status==='UNRESOLVED'?'UNRESOLVED':'PASS';}
+function representativeObservation(stability){
+  const observations=Array.isArray(stability?.observations)?stability.observations:[];
+  return [...observations].reverse().find(item=>item?.status==='FAIL')||observations.at(-1)||stability?.reference||null;
+}
+async function establishRuntimeStability(caseSnapshot,{signal,maxBrowserRuns=100,onRun}={}){
+  let localRuns=0;
+  const run=async()=>{
+    if(localRuns>=maxBrowserRuns)throw new Error('TRIAL_BUDGET_EXHAUSTED');
+    localRuns++;
+    onRun?.();
+    return runCase(caseSnapshot,{signal});
+  };
+  const profile=await establishCausalStability({run});
+  if(!profile.accepted)throw new Error(`BASELINE_NOT_STABLE:${profile.reason}`);
+  return {...profile,browserRuns:localRuns};
+}
+async function evaluateRuntimeCandidate(profile,caseSnapshot,{signal,remainingBrowserRuns=100,onRun}={}){
+  let localRuns=0;
+  const run=async()=>{
+    if(localRuns>=remainingBrowserRuns)throw new Error('TRIAL_BUDGET_EXHAUSTED');
+    localRuns++;
+    onRun?.();
+    return runCase(caseSnapshot,{signal});
+  };
+  const stability=await evaluateCandidateStability({run,profile});
+  return {...stability,browserRuns:localRuns};
+}
 
-function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},revision:revision(),at:new Date().toISOString(),...extra};rememberExperiment(entry);persistMutation(before);renderTrace();return entry; }
+function record(kind,result,extra={}){ const before=snapshotCanonical();const entry={kind,status:result.status,evidence:result.evidence||{},fingerprint:result.fingerprint||null,revision:revision(),at:new Date().toISOString(),...extra};rememberExperiment(entry);persistMutation(before);renderTrace();return entry; }
 async function run({expectedRevision=revision()}={}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const r=await runCase(value(),{signal});throwIfAborted(signal);record('run',r,{revision:testedRevision});renderHealth(r.status);return {...r,testedRevision}; }
 function inspect(){ const s=store.inspect(); return {revision:s.revision,case:s.value,pins:[...pins],captureProvenance:clone(captureProvenance),unitCounts:{html:unitsFor('html',s.value.html).length,css:unitsFor('css',s.value.css).length,js:unitsFor('js',s.value.js).length},latest:experimentLedger.at(-1)||null,webmcp:!!document.modelContext}; }
 function units({targetAxis=axis}={}){
@@ -556,38 +616,220 @@ async function importCapture({expectedRevision=revision(),capture}, {signal}={})
   return {status:'IMPORTED',revision:result.revision,baseline:clone(baseline),captureProvenance:clone(captureProvenance)};
 }
 function resetCase({expectedRevision=revision()}={}){ return loadCase({expectedRevision,case:fixture}); }
-async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){ const testedRevision=expectedRevision;store.assertRevision(testedRevision);const source=value()[targetAxis];const unit=annotatedUnits(targetAxis,source).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');if(unit.pinned||unit.protectedByDescendant)throw new Error('UNIT_PINNED');const candidate={...value(),[targetAxis]:removeUnits(source,[unit])};const result=await runCase(candidate,{signal});throwIfAborted(signal);record('probe',result,{axis:targetAxis,unitId,mutated:false,revision:testedRevision});return {...result,mutated:false,testedRevision,canonicalRevision:revision()}; }
+async function probe({expectedRevision=revision(),targetAxis=axis,unitId}, {signal}={}){
+  const testedRevision=expectedRevision;
+  store.assertRevision(testedRevision);
+  const source=value()[targetAxis];
+  const unit=annotatedUnits(targetAxis,source).find(u=>u.id===unitId);
+  if(!unit)throw new Error('UNIT_NOT_FOUND');
+  if(unit.pinned||unit.protectedByDescendant)throw new Error('UNIT_PINNED');
+  const baseline=clone(value());
+  const candidate={...baseline,[targetAxis]:removeUnits(source,[unit])};
+  let browserRuns=0;
+  const baselineProfile=await establishRuntimeStability(baseline,{signal,maxBrowserRuns:100,onRun:()=>browserRuns++});
+  const candidateStability=await evaluateRuntimeCandidate(baselineProfile,candidate,{signal,remainingBrowserRuns:100-browserRuns,onRun:()=>browserRuns++});
+  throwIfAborted(signal);
+  const result=representativeObservation(candidateStability)||{status:'UNRESOLVED',evidence:{reason:'NO_CANDIDATE_OBSERVATION'},fingerprint:null};
+  record('probe',result,{
+    axis:targetAxis,
+    unitId,
+    mutated:false,
+    revision:testedRevision,
+    sameCause:candidateStability.accept,
+    cause:candidateStability.reason,
+    stabilityMode:baselineProfile.mode,
+    browserRuns,
+    stability:candidateStability.summary
+  });
+  return {
+    ...result,
+    mutated:false,
+    testedRevision,
+    canonicalRevision:revision(),
+    sameCause:candidateStability.accept,
+    cause:candidateStability.reason,
+    stabilityMode:baselineProfile.mode,
+    browserRuns,
+    baselineStability:clone(baselineProfile.summary),
+    stability:clone(candidateStability.summary)
+  };
+}
 function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ store.assertRevision(expectedRevision);const unit=unitsFor(targetAxis).find(u=>u.id===unitId);if(!unit)throw new Error('UNIT_NOT_FOUND');const key=pinKey(targetAxis,unitId);const alreadyPinned=pins.has(key);if(alreadyPinned===pinned)return inspect();const before=snapshotCanonical();pinned?pins.add(key):pins.delete(key);const result=store.commit(value(),{kind:pinned?'pin':'unpin',axis:targetAxis,unitId},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins]});rememberExperiment({kind:pinned?'pin':'unpin',status:'OK',axis:targetAxis,unitId,revision:result.revision,at:new Date().toISOString()});persistMutation(before);render();return inspect(); }
 async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}={}, {signal}={}){
-  store.assertRevision(expectedRevision);throwIfAborted(signal);
+  store.assertRevision(expectedRevision);
+  throwIfAborted(signal);
+  if(!Number.isSafeInteger(maxTrials)||maxTrials<1||maxTrials>2000)throw new Error('INVALID_TRIAL_BUDGET');
+
   const baseline=clone(value());
+  let browserRuns=0;
+  const runBudgeted=async snapshot=>{
+    if(browserRuns>=maxTrials)throw new Error('TRIAL_BUDGET_EXHAUSTED');
+    browserRuns++;
+    return runCase(snapshot,{signal});
+  };
+
+  const baselineProfile=await establishCausalStability({run:()=>runBudgeted(baseline)});
+  throwIfAborted(signal);
+  if(!baselineProfile.accepted)throw new Error(`BASELINE_NOT_STABLE:${baselineProfile.reason}`);
   const source=baseline[targetAxis],all=unitsFor(targetAxis,source);
-  if(!all.length)return {status:'NO_UNITS',before:source.length,after:source.length,reduction:0,trials:0,removed:0,passes:0,revision:revision()};
+  if(!all.length)return {
+    status:'NO_UNITS',
+    before:source.length,
+    after:source.length,
+    reduction:0,
+    trials:0,
+    browserRuns,
+    removed:0,
+    passes:0,
+    revision:revision(),
+    sameCause:true,
+    stabilityMode:baselineProfile.mode,
+    baselineStability:clone(baselineProfile.summary),
+    minimality:'LOCALLY_MINIMAL'
+  };
+
   const pinDescriptors=capturePinDescriptors(targetAxis,source);
   let nextSource,reducedTrialCount,removedCount,passes=[];
+  const evaluateCandidate=async candidateSource=>{
+    throwIfAborted(signal);
+    if(candidateSource===source)return 'FAIL';
+    const stability=await evaluateCandidateStability({
+      run:()=>runBudgeted({...baseline,[targetAxis]:candidateSource}),
+      profile:baselineProfile
+    });
+    if(stability.accept)return 'FAIL';
+    const observations=stability.observations||[];
+    return observations.some(item=>item?.status==='UNRESOLVED')&&!observations.some(item=>item?.status==='PASS')?'UNRESOLVED':'PASS';
+  };
+
   if(targetAxis==='html'||targetAxis==='css'){
-    const reduced=await hierarchicalReduceSource(targetAxis,source,async candidateSource=>{throwIfAborted(signal);return (await runCase({...baseline,[targetAxis]:candidateSource},{signal})).status;},{maxTrials});
-    nextSource=reduced.source;reducedTrialCount=reduced.trialCount;removedCount=reduced.removedCount;passes=reduced.passes;
+    const reduced=await hierarchicalReduceSource(targetAxis,source,evaluateCandidate,{maxTrials});
+    nextSource=reduced.source;
+    reducedTrialCount=reduced.trialCount;
+    removedCount=reduced.removedCount;
+    passes=reduced.passes;
   }else{
     const protectedItems=all.filter(unit=>pins.has(pinKey(targetAxis,unit.id)));
-    const reduced=await ddminReduce(all,async kept=>{throwIfAborted(signal);const keptIds=new Set(kept.map(unit=>unit.id));const removed=all.filter(unit=>!keptIds.has(unit.id));return (await runCase({...baseline,[targetAxis]:removeUnits(source,removed)},{signal})).status;},{protectedItems,maxTrials});
-    const keptIds=new Set(reduced.items.map(unit=>unit.id)),removed=all.filter(unit=>!keptIds.has(unit.id));
-    nextSource=removeUnits(source,removed);reducedTrialCount=reduced.trialCount;removedCount=removed.length;
+    const reduced=await ddminReduce(all,async kept=>{
+      throwIfAborted(signal);
+      const keptIds=new Set(kept.map(unit=>unit.id));
+      const removed=all.filter(unit=>!keptIds.has(unit.id));
+      return evaluateCandidate(removeUnits(source,removed));
+    },{protectedItems,maxTrials});
+    const keptIds=new Set(reduced.items.map(unit=>unit.id));
+    const removed=all.filter(unit=>!keptIds.has(unit.id));
+    nextSource=removeUnits(source,removed);
+    reducedTrialCount=reduced.trialCount;
+    removedCount=removed.length;
   }
+
   throwIfAborted(signal);
   const remappedPinIds=resolvePinDescriptors(targetAxis,nextSource,pinDescriptors);
-  const final=await runCase({...baseline,[targetAxis]:nextSource},{signal});
-  throwIfAborted(signal);if(final.status!=='FAIL')throw new Error('REDUCTION_LOST_FAILURE');
+  const finalStability=await evaluateCandidateStability({
+    run:()=>runBudgeted({...baseline,[targetAxis]:nextSource}),
+    profile:baselineProfile
+  });
+  throwIfAborted(signal);
+  if(!finalStability.accept)throw new Error(`REDUCTION_FINAL_RERUN_FAILED:${finalStability.reason}`);
+  const final=representativeObservation(finalStability);
+  if(!final||final.status!=='FAIL')throw new Error('REDUCTION_FINAL_RERUN_FAILED:NO_FAIL_OBSERVATION');
+
   store.assertRevision(expectedRevision);
-  const beforeLength=source.length,after=nextSource.length,before=snapshotCanonical();
+  const beforeLength=source.length,after=nextSource.length;
+  if(removedCount===0){
+    return {
+      status:final.status,
+      before:beforeLength,
+      after,
+      reduction:0,
+      trials:reducedTrialCount,
+      browserRuns,
+      removed:0,
+      passes:passes.length,
+      revision:revision(),
+      cause:'SAME_CAUSE',
+      stabilityReason:finalStability.reason,
+      sameCause:true,
+      fingerprint:final.fingerprint||null,
+      stabilityMode:baselineProfile.mode,
+      baselineStability:clone(baselineProfile.summary),
+      finalStability:clone(finalStability.summary),
+      minimality:'LOCALLY_MINIMAL',
+      independentRerun:true,
+      mutated:false
+    };
+  }
+  const before=snapshotCanonical();
   const nextPins=new Set([...pins].filter(key=>!key.startsWith(`${targetAxis}|`)));
   for(const id of remappedPinIds)nextPins.add(pinKey(targetAxis,id));
   pins=nextPins;
-  const committed=store.commit({...baseline,[targetAxis]:nextSource},{kind:'reduce',axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length},expectedRevision);
+
+  const committed=store.commit(
+    {...baseline,[targetAxis]:nextSource},
+    {
+      kind:'reduce',
+      axis:targetAxis,
+      trials:reducedTrialCount,
+      browserRuns,
+      removed:removedCount,
+      passes:passes.length,
+      cause:'SAME_CAUSE',
+      stabilityReason:finalStability.reason,
+      sameCause:true,
+      stabilityMode:baselineProfile.mode,
+      minimality:'LOCALLY_MINIMAL',
+      independentRerun:true
+    },
+    expectedRevision
+  );
   rememberRevision(committed.revision,{value:clone(committed.value),pins:[...pins]});
-  rememberExperiment({kind:'reduce',status:final.status,evidence:final.evidence||{},revision:committed.revision,at:new Date().toISOString(),axis:targetAxis,trials:reducedTrialCount,removed:removedCount,passes:passes.length,reduction:beforeLength?1-after/beforeLength:0});
-  persistMutation(before);render();renderPreview();renderHealth(final.status);
-  return {status:final.status,before:beforeLength,after,reduction:beforeLength?1-after/beforeLength:0,trials:reducedTrialCount,removed:removedCount,passes:passes.length,revision:revision()};
+  rememberExperiment({
+    kind:'reduce',
+    status:final.status,
+    evidence:final.evidence||{},
+    fingerprint:final.fingerprint||null,
+    revision:committed.revision,
+    at:new Date().toISOString(),
+    axis:targetAxis,
+    trials:reducedTrialCount,
+    browserRuns,
+    removed:removedCount,
+    passes:passes.length,
+    reduction:beforeLength?1-after/beforeLength:0,
+    cause:'SAME_CAUSE',
+      stabilityReason:finalStability.reason,
+    sameCause:true,
+    stabilityMode:baselineProfile.mode,
+    baselineStability:clone(baselineProfile.summary),
+    finalStability:clone(finalStability.summary),
+    minimality:'LOCALLY_MINIMAL',
+    independentRerun:true
+  });
+  persistMutation(before);
+  render();
+  renderPreview();
+  renderHealth(final.status);
+
+  return {
+    status:final.status,
+    before:beforeLength,
+    after,
+    reduction:beforeLength?1-after/beforeLength:0,
+    trials:reducedTrialCount,
+    browserRuns,
+    removed:removedCount,
+    passes:passes.length,
+    revision:revision(),
+    cause:'SAME_CAUSE',
+      stabilityReason:finalStability.reason,
+    sameCause:true,
+    fingerprint:final.fingerprint||null,
+    stabilityMode:baselineProfile.mode,
+    baselineStability:clone(baselineProfile.summary),
+    finalStability:clone(finalStability.summary),
+    minimality:'LOCALLY_MINIMAL',
+    independentRerun:true
+  };
 }
 function history({limit=100}={}){ return clone(experimentLedger.slice(-Math.max(1,Math.min(200,Number(limit)||100)))); }
 function listRevisions({limit=MAX_RUNTIME_REVISIONS}={}){
@@ -601,20 +843,16 @@ function listRevisions({limit=MAX_RUNTIME_REVISIONS}={}){
       revision:rev,
       current:rev===currentRevision,
       event:event?clone(event):null,
-      summary:{
-        htmlChars:String(c.html??'').length,
-        cssChars:String(c.css??'').length,
-        jsChars:String(c.js??'').length,
-        oracleKind:c.oracle?.kind||null,
-        pinCount:Array.isArray(snapshot?.pins)?snapshot.pins.length:0
-      }
+      summary:{htmlChars:String(c.html??'').length,cssChars:String(c.css??'').length,jsChars:String(c.js??'').length,oracleKind:c.oracle?.kind||null,pinCount:Array.isArray(snapshot?.pins)?snapshot.pins.length:0}
     };
   });
   return {currentRevision,retentionLimit:MAX_RUNTIME_REVISIONS,revisions:items};
 }
 function restore({expectedRevision=revision(),targetRevision}){ store.assertRevision(expectedRevision);const snap=revisions.get(targetRevision);if(!snap)throw new Error('REVISION_NOT_FOUND');const before=snapshotCanonical();pins=new Set(snap.pins||[]);captureProvenance=snap.captureProvenance?clone(snap.captureProvenance):null;const result=store.commit(snap.value,{kind:'restore',from:targetRevision},expectedRevision);rememberRevision(result.revision,{value:clone(result.value),pins:[...pins],captureProvenance:clone(captureProvenance)});persistMutation(before);render();renderPreview();return inspect(); }
 function exportCase(){const c=value(),safeCss=String(c.css).replace(/<\/style/gi,'<\\/style');return `<!doctype html><html><head><meta charset="utf-8"><style>${safeCss}</style></head><body>${c.html}<script>${String(c.js).replace(/<\/script/gi,'<\\/script')}<\/script></body></html>`;}
-function exportBundle(){return {schema:'faultline.export.v1',revision:revision(),case:clone(value()),standaloneHtml:exportCase(),captureProvenance:clone(captureProvenance),history:history({limit:200})};}
+function latestFingerprint(){return experimentLedger.filter(e=>e.fingerprint).at(-1)?.fingerprint??null;}
+function dependencyGraph(){const s=store.inspect();const slim=list=>list.map(u=>({id:u.id,kind:u.kind,parentId:u.parentId,depth:u.depth}));return buildDependencyGraph({oracle:s.value.oracle,unitsByAxis:{html:slim(annotatedUnits('html',s.value.html)),css:slim(annotatedUnits('css',s.value.css)),js:slim(annotatedUnits('js',s.value.js))}});}
+function exportBundle(){return {schema:'faultline.export.v1',revision:revision(),case:clone(value()),standaloneHtml:exportCase(),captureProvenance:clone(captureProvenance),causalFingerprint:latestFingerprint(),dependencyGraph:dependencyGraph(),history:history({limit:200})};}
 function validateAxes(axes){if(!Array.isArray(axes)||axes.length<1||axes.length>3||axes.some(targetAxis=>!['html','css','js'].includes(targetAxis))||new Set(axes).size!==axes.length)throw new Error('INVALID_AXES');return axes;}
 async function autopilot({expectedRevision=revision(),axes=['html','css','js'],maxTrialsPerAxis=60}={}, {signal}={}){
   validateAxes(axes);store.assertRevision(expectedRevision);throwIfAborted(signal);
@@ -638,58 +876,25 @@ function renderTrace(){const list=$('trace');list.innerHTML='';for(const e of [.
 function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 function renderUnits(){const list=$('units'),listed=units({targetAxis:axis}).units;list.innerHTML='';selectedUnitId=null;for(const unit of listed){const row=document.createElement('button');row.type='button';row.className='unit';row.dataset.unitId=unit.id;row.dataset.depth=String(unit.depth);row.setAttribute('aria-pressed','false');row.style.paddingInlineStart=`calc(12px + ${Math.min(unit.depth,6)} * 14px)`;const protection=unit.pinned?' · pinned':unit.protectedByDescendant?' · protected by pinned descendant':'';row.innerHTML=`<span>${escapeHtml(unit.text.trim().replace(/\s+/g,' ').slice(0,120))}</span><small>${unit.kind} · depth ${unit.depth}${protection}</small>`;row.onclick=()=>{document.querySelectorAll('.unit').forEach(x=>x.setAttribute('aria-pressed','false'));row.setAttribute('aria-pressed','true');selectedUnitId=unit.id;$('probe').disabled=unit.pinned||unit.protectedByDescendant;$('pin').disabled=false;};list.appendChild(row)}$('unit-count').textContent=`${listed.length} units`;}
 function renderPreview(executePreview=false){const preview=$('preview');if(!preview)return;previewBootstrapId=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;preview.srcdoc=buildSandboxDocument(value(),previewBootstrapId,{previewOnly:true,executePreview});}
-function installPreviewRunner(){
-  const toolbar=document.querySelector('.preview-toolbar');
-  if(!toolbar||$('preview-run'))return;
-  const button=document.createElement('button');
-  button.id='preview-run';
-  button.type='button';
-  button.className='btn ghost';
-  button.textContent='Run preview JS';
-  button.setAttribute('aria-label','Run canonical JavaScript in isolated preview');
-  button.style.marginLeft='auto';
-  const label=toolbar.querySelector('.preview-label');
-  if(label)label.style.marginLeft='0';
-  button.onclick=()=>renderPreview(true);
-  toolbar.appendChild(button);
-}
-function handlePreviewNavigationMessage(event){
-  const preview=$('preview');
-  if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-navigation-blocked'||event.data.bootstrapId!==previewBootstrapId)return;
-  const risk=event.data.risk||{};
-  renderHealth('UNRESOLVED');
-  $('summary').textContent=`UNSAFE_NAVIGATION · ${risk.axis||'html'} · ${risk.capability||'navigation'}`;
-}
-function handlePreviewPolicyMessage(event){
-  const preview=$('preview');
-  if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-policy-blocked'||event.data.bootstrapId!==previewBootstrapId)return;
-  const risk=event.data.risk||{};
-  renderHealth('UNRESOLVED');
-  $('summary').textContent=`UNSAFE_NETWORK · ${risk.axis||'js'} · ${risk.capability||'runtime-csp-resource'}${risk.directive?` · ${risk.directive}`:''}`;
-}
+function installPreviewRunner(){const toolbar=document.querySelector('.preview-toolbar');if(!toolbar||$('preview-run'))return;const button=document.createElement('button');button.id='preview-run';button.type='button';button.className='btn ghost';button.textContent='Run preview JS';button.setAttribute('aria-label','Run canonical JavaScript in isolated preview');button.style.marginLeft='auto';const label=toolbar.querySelector('.preview-label');if(label)label.style.marginLeft='0';button.onclick=()=>renderPreview(true);toolbar.appendChild(button);}
+function handlePreviewNavigationMessage(event){const preview=$('preview');if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-navigation-blocked'||event.data.bootstrapId!==previewBootstrapId)return;const risk=event.data.risk||{};renderHealth('UNRESOLVED');$('summary').textContent=`UNSAFE_NAVIGATION · ${risk.axis||'html'} · ${risk.capability||'navigation'}`;}
+function handlePreviewPolicyMessage(event){const preview=$('preview');if(!preview||event.source!==preview.contentWindow||event.data?.type!=='faultline:preview-policy-blocked'||event.data.bootstrapId!==previewBootstrapId)return;const risk=event.data.risk||{};renderHealth('UNRESOLVED');$('summary').textContent=`UNSAFE_NETWORK · ${risk.axis||'js'} · ${risk.capability||'runtime-csp-resource'}${risk.directive?` · ${risk.directive}`:''}`;}
 addEventListener('message',handlePreviewNavigationMessage);
 addEventListener('message',handlePreviewPolicyMessage);
-function syncActionControls(){const kind=$('action-kind').value;$('action-selector').disabled=kind==='none'||kind==='sequence';$('action-value').disabled=kind!=='set_value';$('action-checked').disabled=kind!=='set_checked';$('action-sequence').disabled=kind!=='sequence';}
-function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??'';$('action-checked').value=String(s.case.oracle.action?.checked??true);$('action-sequence').value=s.case.oracle.action?.kind==='sequence'?JSON.stringify(s.case.oracle.action.steps,null,2):'';syncActionControls();renderUnits();renderTrace();persistBestEffort();}
+function syncActionControls(){const kind=$('action-kind').value;$('action-selector').disabled=kind==='none'||kind==='sequence'||kind==='scroll';$('action-value').disabled=!['set_value','select_option'].includes(kind);$('action-checked').disabled=kind!=='set_checked';$('action-sequence').disabled=kind!=='sequence';}
+function render(){const s=inspect();$('revision').textContent=s.revision;document.querySelectorAll('[data-axis]').forEach(b=>{const active=b.dataset.axis===axis;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));});$('source').value=s.case[axis];$('reduce').textContent=`Reduce ${axis.toUpperCase()}`;$('oracle-kind').value=s.case.oracle.kind;$('oracle-selector').value=s.case.oracle.selector||'';$('oracle-property').value=s.case.oracle.property||'';$('oracle-equals').value=String(s.case.oracle.equals??'');if([...$('action-kind').options].some(option=>option.value===s.case.oracle.action?.kind))$('action-kind').value=s.case.oracle.action?.kind||'none';$('action-selector').value=s.case.oracle.action?.selector||'';$('action-value').value=s.case.oracle.action?.value??s.case.oracle.action?.key??'';$('action-checked').value=String(s.case.oracle.action?.checked??true);$('action-sequence').value=s.case.oracle.action?.kind==='sequence'?JSON.stringify(s.case.oracle.action.steps,null,2):'';syncActionControls();renderUnits();renderTrace();persistBestEffort();}
 
 const REVISION_PROPERTY={expectedRevision:{type:'string',pattern:'^r[1-9]\\d*$'}};
 const REQUEST_PROPERTY={requestId:{type:'string',pattern:'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}};
-const ACTION_STEP_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_STEP_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},durationMs:{type:'number',minimum:0,maximum:MAX_SEQUENCE_WAIT_MS}},required:['kind']};
-const ACTION_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ACTION_KINDS},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:8}},required:['kind']};
-const ORACLE_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ORACLE_KINDS},selector:{type:'string'},property:{type:'string'},equals:{},action:ACTION_SCHEMA,delayMs:{type:'number',minimum:0,maximum:2000}},required:['kind','action']};
+const ACTION_PROPERTIES={kind:{type:'string'},selector:{type:'string'},value:{type:'string'},checked:{type:'boolean'},durationMs:{type:'number',minimum:0,maximum:MAX_SEQUENCE_WAIT_MS},key:{type:'string',minLength:1,maxLength:64},x:{type:'number'},y:{type:'number'}};
+const ACTION_STEP_SCHEMA={type:'object',additionalProperties:false,properties:{...ACTION_PROPERTIES,kind:{type:'string',enum:ACTION_STEP_KINDS}},required:['kind']};
+const ACTION_SCHEMA={type:'object',additionalProperties:false,properties:{...ACTION_PROPERTIES,kind:{type:'string',enum:ACTION_KINDS},steps:{type:'array',items:ACTION_STEP_SCHEMA,minItems:1,maxItems:MAX_SEQUENCE_STEPS}},required:['kind']};
+const ORACLE_SCHEMA={type:'object',additionalProperties:false,properties:{kind:{type:'string',enum:ORACLE_KINDS},selector:{type:'string'},property:{type:'string'},equals:{},action:ACTION_SCHEMA,delayMs:{type:'number',minimum:0,maximum:CAPTURE_LIMITS.oracleDelayMs}},required:['kind','action']};
 const CASE_SCHEMA={type:'object',additionalProperties:false,properties:{html:{type:'string'},css:{type:'string'},js:{type:'string'},oracle:ORACLE_SCHEMA},required:['html','css','js','oracle']};
 const CAPTURE_STRING={type:'string',maxLength:CAPTURE_LIMITS.sourceBytes};
 const CAPTURE_METADATA_STRING={type:'string',maxLength:2048};
 const CAPTURE_DIAGNOSTIC_ARRAY={type:'array',maxItems:CAPTURE_LIMITS.diagnosticsEntries,items:CAPTURE_METADATA_STRING};
-const CAPTURE_ARTIFACT_SCHEMA={type:'object',additionalProperties:false,properties:{
- schema:{type:'string',enum:[CAPTURE_SCHEMA]},
- capturedAt:CAPTURE_METADATA_STRING,
- source:{type:'object',additionalProperties:false,properties:{url:CAPTURE_METADATA_STRING,title:CAPTURE_METADATA_STRING,html:CAPTURE_STRING,css:CAPTURE_STRING,js:CAPTURE_STRING},required:['html','css','js']},
- oracle:ORACLE_SCHEMA,
- environment:{type:'object',additionalProperties:true},
- provenance:{type:'object',additionalProperties:true,properties:{adapter:CAPTURE_METADATA_STRING},required:['adapter']},
- diagnostics:{type:'object',additionalProperties:false,properties:{externalDependencies:CAPTURE_DIAGNOSTIC_ARRAY,consoleErrors:CAPTURE_DIAGNOSTIC_ARRAY,pageErrors:CAPTURE_DIAGNOSTIC_ARRAY}}
-},required:['schema','source','oracle','provenance']};
+const CAPTURE_ARTIFACT_SCHEMA={type:'object',additionalProperties:false,properties:{schema:{type:'string',enum:[CAPTURE_SCHEMA]},capturedAt:CAPTURE_METADATA_STRING,source:{type:'object',additionalProperties:false,properties:{url:CAPTURE_METADATA_STRING,title:CAPTURE_METADATA_STRING,html:CAPTURE_STRING,css:CAPTURE_STRING,js:CAPTURE_STRING},required:['html','css','js']},oracle:ORACLE_SCHEMA,environment:{type:'object',additionalProperties:true},provenance:{type:'object',additionalProperties:true,properties:{adapter:CAPTURE_METADATA_STRING},required:['adapter']},diagnostics:{type:'object',additionalProperties:false,properties:{externalDependencies:CAPTURE_DIAGNOSTIC_ARRAY,consoleErrors:CAPTURE_DIAGNOSTIC_ARRAY,pageErrors:CAPTURE_DIAGNOSTIC_ARRAY}}},required:['schema','source','oracle','provenance']};
 const TOOL_DEFS=[
  ['faultline_inspect','Inspect the canonical failure case, revision, pins and semantic-unit counts.',{},async()=>inspect(),true,true],
  ['faultline_units','List canonical semantic units with hierarchy, direct pin state, and ancestor protection for one source axis.',{targetAxis:{type:'string',enum:['html','css','js']}},async input=>units(input),true,true,['targetAxis']],
@@ -701,7 +906,7 @@ const TOOL_DEFS=[
  ['faultline_define_oracle','Replace the deterministic failure oracle using an optimistic revision guard.',{...REVISION_PROPERTY,oracle:ORACLE_SCHEMA},async input=>defineOracle(input),false,true,['expectedRevision','oracle']],
  ['faultline_apply_source','Replace one canonical HTML, CSS, or JavaScript source axis using an optimistic revision guard.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},source:{type:'string'}},async input=>applySource(input),false,true,['expectedRevision','targetAxis','source']],
  ['faultline_probe','Test removing one semantic unit from the inspected canonical revision without mutating canonical state; the probe evidence trail is persisted. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'}},async(input,options)=>probe(input,options),false,true,['expectedRevision','targetAxis','unitId']],
- ['faultline_reduce','Delta-debug one source axis while preserving the failing oracle and rejecting stale revisions. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},maxTrials:{type:'integer',minimum:1,maximum:200}},async(input,options)=>reduce(input,options),false,false,['expectedRevision','targetAxis']],
+ ['faultline_reduce','Delta-debug one source axis while preserving the same causal failure and rejecting stale revisions. Native WebMCP options.signal cancellation is supported; requestId is optional.',{...REVISION_PROPERTY,...REQUEST_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},maxTrials:{type:'integer',minimum:1,maximum:200}},async(input,options)=>reduce(input,options),false,false,['expectedRevision','targetAxis']],
  ['faultline_pin','Pin or unpin a semantic unit so reduction cannot remove it, guarded by canonical revision.',{...REVISION_PROPERTY,targetAxis:{type:'string',enum:['html','css','js']},unitId:{type:'string'},pinned:{type:'boolean'}},async input=>pin(input),false,true,['expectedRevision','targetAxis','unitId']],
  ['faultline_history','Read recent deterministic experiment evidence.',{limit:{type:'integer',minimum:1,maximum:200}},async input=>history(input),true,true],
  ['faultline_revisions','List bounded recoverable canonical revisions with mutation metadata for guarded restore.',{limit:{type:'integer',minimum:1,maximum:16}},async input=>listRevisions(input),true,false],
@@ -711,7 +916,7 @@ const TOOL_DEFS=[
 ];
 function registerWebMCP(){const mc=document.modelContext;if(!mc?.registerTool){$('webmcp').textContent='WebMCP unavailable';return;}const controllers=[];Promise.all(TOOL_DEFS.map(async([name,description,properties,execute,readOnly,untrustedContent,required=[]])=>{const controller=new AbortController();controllers.push(controller);await mc.registerTool({name,title:name.replace('faultline_','FAULTLINE · '),description,inputSchema:{type:'object',properties,required,additionalProperties:false},execute:async(input,options)=>await (CANCELLABLE_WEBMCP_TOOLS.has(name)?executeWebMCPOperation(name,execute,input||{},options||{}):execute(input||{},options||{})),annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}},{signal:controller.signal});})).then(()=>{$('webmcp').textContent=`WebMCP ready · ${TOOL_DEFS.length} tools`;$('webmcp').dataset.state='ready';}).catch(e=>{$('webmcp').textContent='WebMCP registration error';$('webmcp').title=String(e?.message||e);});window.addEventListener('pagehide',()=>{controllers.forEach(c=>c.abort());abortAllWebMCP();},{once:true});}
 
-window.faultline={inspect,units,loadCase,importCapture,resetCase,run,defineOracle,applySource,probe,reduce,pin,history,revisions:listRevisions,restore,exportCase,exportBundle,autopilot,manifest:()=>TOOL_DEFS.map(([name,description,properties,,readOnly,untrustedContent,required=[]])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},readOnly,annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}}))};
+window.faultline={inspect,units,loadCase,importCapture,resetCase,run,defineOracle,applySource,probe,reduce,pin,history,revisions:listRevisions,restore,exportCase,exportBundle,dependencyGraph,autopilot,manifest:()=>TOOL_DEFS.map(([name,description,properties,,readOnly,untrustedContent,required=[]])=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},readOnly,annotations:{readOnlyHint:readOnly,untrustedContentHint:untrustedContent}}))};
 
 document.querySelectorAll('[data-axis]').forEach(b=>b.onclick=()=>{axis=b.dataset.axis;render();});
 $('apply').onclick=()=>applySource({source:$('source').value});
@@ -721,7 +926,7 @@ $('pin').onclick=()=>{if(!selectedUnitId)return;const key=pinKey(axis,selectedUn
 $('reduce').onclick=()=>reduce({targetAxis:axis}).then(r=>renderHealth(r.status)).catch(e=>{renderHealth('ERROR');$('summary').textContent=e.message;});
 $('autopilot').onclick=()=>autopilot().then(()=>renderHealth('COMPLETE')).catch(e=>{renderHealth('ERROR');$('summary').textContent=e.message;});
 $('action-kind').onchange=syncActionControls;
-$('lock').onclick=()=>{const actionKind=$('action-kind').value;let action;if(actionKind==='sequence'){try{action={kind:'sequence',steps:JSON.parse($('action-sequence').value)}}catch{renderHealth('ERROR');$('summary').textContent='INVALID_ACTION_SEQUENCE_JSON';return;}}else{action={kind:actionKind,selector:$('action-selector').value};if(actionKind==='set_value')action.value=$('action-value').value;if(actionKind==='set_checked')action.checked=$('action-checked').value==='true';}const oracleKind=$('oracle-kind').value,rawEquals=$('oracle-equals').value,equals=oracleKind==='dom_attribute'?(rawEquals==='null'?null:rawEquals):normalizeExpected(rawEquals);try{defineOracle({oracle:{kind:oracleKind,selector:$('oracle-selector').value,property:$('oracle-property').value,equals,action,delayMs:0}})}catch(e){renderHealth('ERROR');$('summary').textContent=String(e?.message||e);}};
+$('lock').onclick=()=>{const actionKind=$('action-kind').value;let action;if(actionKind==='sequence'){try{action={kind:'sequence',steps:JSON.parse($('action-sequence').value)}}catch{renderHealth('ERROR');$('summary').textContent='INVALID_ACTION_SEQUENCE_JSON';return;}}else{action={kind:actionKind};const selector=$('action-selector').value;if(selector)action.selector=selector;if(['set_value','select_option'].includes(actionKind))action.value=$('action-value').value;if(actionKind==='set_checked')action.checked=$('action-checked').value==='true';if(actionKind==='key_press')action.key=$('action-value').value;if(actionKind==='scroll')action.y=Number($('action-value').value)||0;}const oracleKind=$('oracle-kind').value,rawEquals=$('oracle-equals').value,equals=oracleKind==='dom_attribute'?(rawEquals==='null'?null:rawEquals):normalizeExpected(rawEquals);try{defineOracle({oracle:{kind:oracleKind,selector:$('oracle-selector').value,property:$('oracle-property').value,equals,action,delayMs:0}})}catch(e){renderHealth('ERROR');$('summary').textContent=String(e?.message||e);}};
 $('export').onclick=()=>{const a=document.createElement('a'),blob=new Blob([exportCase()],{type:'text/html'});a.href=URL.createObjectURL(blob);a.download='faultline-reproducer.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $('reset').onclick=()=>resetCase({expectedRevision:revision()});
 restoreLocal();rememberRevision(revision(),revisions.get(revision())||{value:clone(value()),pins:[...pins]});render();renderPreview();installPreviewRunner();registerWebMCP();

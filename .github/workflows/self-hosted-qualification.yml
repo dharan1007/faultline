@@ -1,0 +1,141 @@
+name: self-hosted-qualification
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact current main SHA to qualify (blank uses current main)
+        required: false
+        type: string
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+jobs:
+  qualify:
+    name: self-hosted organizational qualification
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: [self-hosted, Linux, X64, production-ci]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          fetch-depth: 0
+      - name: Bind qualification to exact current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          head="$(git rev-parse HEAD)"
+          main="$(git rev-parse origin/main)"
+          test "$head" = "$main" || { echo "FAULTLINE_QUALIFICATION_NOT_CURRENT_MAIN"; exit 1; }
+          requested='${{ inputs.sha }}'
+          if [ -n "$requested" ]; then test "$requested" = "$head" || { echo "FAULTLINE_QUALIFICATION_SHA_MISMATCH"; exit 1; }; fi
+          echo "FAULTLINE_SOURCE_COMMIT=$head" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install exact dependencies
+        run: npm ci --ignore-scripts
+      - name: Dependency security gate
+        run: npm audit --audit-level=high --omit=dev
+      - name: Unit, contract and syntax gates
+        run: |
+          npm test
+          npm run check
+          node --check src/external-qualification-runner.js
+          node --check src/external-live-qualification-runner.js
+          node --check scripts/run-external-qualification.mjs
+          node --check scripts/run-external-live-corpus.mjs
+          node --check scripts/run-organizational-qualification.mjs
+          node --test tests/external-qualification-runner.test.js
+          node --test tests/external-live-qualification-runner.test.js
+          node --test tests/deploy-production-contract.test.js
+      - name: Build and package evidence
+        run: |
+          npm run build
+          npm run sbom
+          npm run verify:package
+      - name: Install pinned browser binaries
+        run: ./node_modules/.bin/playwright install chromium firefox webkit
+      - name: Live and reducer browser qualification
+        run: |
+          node tests/playwright-live.mjs | tee faultline-live-browser.jsonl
+          node tests/reduction-corpus.mjs | tee faultline-browser-corpus.jsonl
+          npm run test:browser
+          node tests/cross-browser-production.mjs
+          node tests/cli-browser.mjs
+      - name: Execute immutable portable and true in-situ external incident corpora
+        env:
+          FAULTLINE_EXTERNAL_MANIFEST: benchmarks/manifests/external-incidents.json
+          FAULTLINE_EXTERNAL_LIVE_MANIFEST: benchmarks/manifests/external-live-incidents.json
+          FAULTLINE_QUALIFICATION_RESULTS: benchmarks/results/qualification-results.json
+          FAULTLINE_EXTERNAL_OUTPUT: benchmarks/results/external-incidents
+          FAULTLINE_EXTERNAL_LIVE_OUTPUT: benchmarks/results/external-live-incidents
+        run: |
+          set -euo pipefail
+          test -s "$FAULTLINE_EXTERNAL_MANIFEST" || { echo "FAULTLINE_EXTERNAL_MANIFEST_REQUIRED"; exit 1; }
+          test -s "$FAULTLINE_EXTERNAL_LIVE_MANIFEST" || { echo "FAULTLINE_EXTERNAL_LIVE_MANIFEST_REQUIRED"; exit 1; }
+          node scripts/run-organizational-qualification.mjs
+          node scripts/qualification-gate.mjs
+      - name: Upload qualification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: faultline-self-hosted-evidence-${{ github.sha }}
+          path: |
+            faultline-live-browser.jsonl
+            faultline-browser-corpus.jsonl
+            benchmarks/results/qualification-results.json
+            benchmarks/results/external-incidents/raw/*.json
+            benchmarks/results/external-live-incidents/raw/*.json
+            artifacts/faultline-external-corpus-summary.json
+            artifacts/faultline-qualification-summary.json
+            artifacts/faultline.spdx.json
+            public/release.json
+            public/integrity.json
+            public/provenance.json
+          retention-days: 90
+          if-no-files-found: error
+
+  codeql:
+    name: self-hosted organizational codeql
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: [self-hosted, Linux, X64, production-ci]
+    timeout-minutes: 60
+    permissions:
+      security-events: write
+      packages: read
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          fetch-depth: 0
+      - name: Bind CodeQL to exact current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          head="$(git rev-parse HEAD)"
+          main="$(git rev-parse origin/main)"
+          test "$head" = "$main" || { echo "FAULTLINE_CODEQL_NOT_CURRENT_MAIN"; exit 1; }
+          requested='${{ inputs.sha }}'
+          if [ -n "$requested" ]; then test "$requested" = "$head" || { echo "FAULTLINE_CODEQL_SHA_MISMATCH"; exit 1; }; fi
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: javascript-typescript
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run check
+      - run: node --test tests/external-qualification-runner.test.js tests/external-live-qualification-runner.test.js
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: /language:javascript-typescript

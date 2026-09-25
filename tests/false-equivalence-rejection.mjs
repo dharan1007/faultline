@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 // underlying reason must be rejected even though its status is FAIL.
 // Baseline throws TypeError; removing the declaration turns the survivor
 // into a ReferenceError. probe() must report sameCause:false and reduce()
-// must throw REDUCTION_LOST_FAILURE:* without committing anything.
+// must retain the original cause and never commit the different-failure candidate.
 const port = 4228;
 const server = spawn(process.execPath, ['-e', `const http=require('http'),fs=require('fs'),path=require('path');http.createServer((req,res)=>{let p=req.url.split('?')[0];if(p==='/')p='/index.html';const f=path.join(process.cwd(),p);if(!f.startsWith(process.cwd())){res.statusCode=403;return res.end()}fs.readFile(f,(e,b)=>{if(e){res.statusCode=404;return res.end('not found')}if(f.endsWith('.js'))res.setHeader('content-type','application/javascript');if(f.endsWith('.html'))res.setHeader('content-type','text/html; charset=utf-8');res.end(b)})}).listen(${port},'127.0.0.1')`], { stdio: 'inherit' });
 await new Promise(r => setTimeout(r, 700));

@@ -3,7 +3,7 @@
 // every generated payload except evidence.json itself (which carries the
 // finalized hash ledger).
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve, relative, isAbsolute, sep } from 'node:path';
+import { join, resolve, relative, isAbsolute, sep, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 
 const sha256 = value => createHash('sha256').update(value).digest('hex');
@@ -67,6 +67,7 @@ export async function writeReproBundle(dir, {
     const back=relative(root,target);
     if(back.startsWith('..'+sep)||back==='..'||isAbsolute(back))throw new Error('REPRO_FILE_ESCAPE');
     const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2) + '\n';
+    await mkdir(dirname(target),{recursive:true});
     await writeFile(target, text, 'utf8');
     files[rel] = {sha256:sha256(text),bytes:Buffer.byteLength(text)};
   };

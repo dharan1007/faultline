@@ -28,7 +28,7 @@ test('flaky policy requires 15/20 baseline and confident candidate', () => {
 test('reduction plan documents minimality boundary', () => {
   const plan = planReduction({});
   assert.ok(plan.some((d) => d.level === 'dom' && d.status === 'SHIPPED'));
-  assert.ok(plan.some((d) => d.level === 'repository' && d.status === 'PLANNED'));
+  assert.ok(plan.some((d) => d.level === 'repository' && d.status === 'PARTIAL'));
   assert.match(MINIMALITY_DISCLAIMER, /never a globally shortest program/);
 });
 

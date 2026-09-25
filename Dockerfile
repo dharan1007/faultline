@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.63.0-noble
+FROM node:22-bookworm
 
 ENV NODE_ENV=production \
     CI=true \
@@ -6,14 +6,17 @@ ENV NODE_ENV=production \
 
 WORKDIR /opt/faultline
 
-COPY --chown=pwuser:pwuser package.json package-lock.json ./
+COPY package.json package-lock.json ./
+
+# Install the exact locked Node dependencies first, then install the system
+# libraries and browser revisions belonging to Playwright 1.63.0.
 RUN npm ci --ignore-scripts --omit=dev \
-    && npm cache clean --force
+    && ./node_modules/.bin/playwright install --with-deps chromium firefox webkit \
+    && npm cache clean --force \
+    && chmod -R a+rX /ms-playwright
 
-COPY --chown=pwuser:pwuser . .
+COPY . .
 
-# Materialize the pinned parser asset and verify the installable CLI/package
-# surface while still building as root. Runtime execution is non-root.
 RUN node scripts-vendor.mjs \
     && node --check bin/faultline.mjs \
     && node --check integrations/playwright-capture/index.js \
@@ -21,9 +24,10 @@ RUN node scripts-vendor.mjs \
     && node --check integrations/playwright-environment/index.js \
     && node --check integrations/playwright-trace/index.js \
     && node --check src/live-reducer.js \
-    && node --check src/collection-reducer.js
+    && node --check src/collection-reducer.js \
+    && chown -R node:node /opt/faultline
 
-USER pwuser
+USER node
 
 ENTRYPOINT ["node","bin/faultline.mjs"]
 CMD ["--help"]

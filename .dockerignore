@@ -1,0 +1,13 @@
+.git
+.github
+.bootstrap
+node_modules
+public
+artifacts
+benchmarks/results
+benchmarks/reports
+*.log
+*.zip
+*.tgz
+.env
+.env.*

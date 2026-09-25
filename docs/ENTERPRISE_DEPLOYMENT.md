@@ -4,11 +4,7 @@ FAULTLINE's supported organizational boundary is customer-owned execution. The C
 
 ## Container contract
 
-The repository ships a pinned Playwright container based on:
-
-`mcr.microsoft.com/playwright:v1.63.0-noble`
-
-The project dependency is also pinned to Playwright 1.63.0. Matching the package and browser image versions is mandatory because Playwright browser binaries are version-coupled.
+The repository ships a Node 22 container that installs the exact locked Playwright 1.63.0 package and then installs the Chromium, Firefox and WebKit browser revisions belonging to that exact version. This keeps the container runtime aligned with the same Node 22 contract used in CI while preserving Playwright's version-coupled browser binaries.
 
 Build:
 

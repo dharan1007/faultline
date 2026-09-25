@@ -45,7 +45,7 @@ function validateNetworkMatcher(value,{statusRequired=false,bodyRequired=false}=
   if(bodyRequired&&!nonEmpty(value.bodyPattern,4096))fail('FAULTLINE_LIVE_INVALID_ORACLE');
 }
 
-function validateOracle(oracle){
+export function validateLiveOracle(oracle){
   if(!oracle||typeof oracle!=='object'||Array.isArray(oracle)||!ORACLE_KINDS.has(oracle.kind))fail('FAULTLINE_LIVE_INVALID_ORACLE');
   if(['dom_property','dom_attribute','computed_style','dom_exists','dom_focused','text_content'].includes(oracle.kind)&&!nonEmpty(oracle.selector))fail('FAULTLINE_LIVE_INVALID_ORACLE');
   if(['dom_property','dom_attribute','computed_style'].includes(oracle.kind)&&!nonEmpty(oracle.property))fail('FAULTLINE_LIVE_INVALID_ORACLE');
@@ -192,7 +192,7 @@ async function observedDomValue(page,oracle,runtimeErrors){
 }
 
 export async function evaluateLiveOracle(page,oracle,{runtimeErrors=[],consoleEvents=[],networkEvents=[],timingMs=0}={}){
-  validatePage(page);validateOracle(oracle);
+  validatePage(page);validateLiveOracle(oracle);
   if(oracle.delayMs)await page.waitForTimeout(oracle.delayMs);
 
   if(oracle.kind==='console_event'){
@@ -271,7 +271,7 @@ function assertExpectedOrigin(page,expectedOrigin){
 }
 
 export async function runLiveTrial({page,reset,recipe=[],oracle,provenance={},expectedOrigin=null,timeoutMs=5000,signal}={}){
-  validatePage(page);validateLiveRecipe(recipe);validateOracle(oracle);
+  validatePage(page);validateLiveRecipe(recipe);validateLiveOracle(oracle);
   if(typeof reset!=='function')fail('FAULTLINE_LIVE_RESET_REQUIRED');
   if(expectedOrigin!=null){try{expectedOrigin=new URL(expectedOrigin).origin;}catch{fail('FAULTLINE_LIVE_INVALID_EXPECTED_ORIGIN');}}
   if(signal?.aborted)throw new DOMException('Faultline live trial aborted','AbortError');

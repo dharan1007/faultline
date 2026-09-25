@@ -51,20 +51,18 @@ try {
   }
 
   const preReduce = await page.evaluate(() => window.faultline.inspect());
-  const reduceOutcome = await page.evaluate(async revision => {
-    try {
-      const value = await window.faultline.reduce({ expectedRevision: revision, targetAxis: 'js', maxTrials: 80 });
-      return { error: null, value };
-    } catch (error) {
-      return { error: String(error?.message || error), value: null };
-    }
-  }, preReduce.revision);
-  assert.match(reduceOutcome.error || '', /REDUCTION_LOST_FAILURE:STRONG_MISMATCH/, 'a cause-changing reduction must be rejected, never committed');
+  const reduced = await page.evaluate(revision =>
+    window.faultline.reduce({ expectedRevision: revision, targetAxis: 'js', maxTrials: 80 }),
+    preReduce.revision
+  );
+  assert.equal(reduced.sameCause, true, 'the final retained case must preserve the baseline cause');
+  assert.equal(reduced.removed, 0, 'a different-cause candidate must never be accepted as a reduction');
+  assert.equal(reduced.mutated, false, 'a no-op reduction must not create a canonical mutation');
   const postReduce = await page.evaluate(() => window.faultline.inspect());
-  assert.equal(postReduce.revision, preReduce.revision, 'rejected reduction must not advance the canonical revision');
-  assert.deepEqual(postReduce.case, preReduce.case, 'rejected reduction must preserve the exact canonical case');
+  assert.equal(postReduce.revision, preReduce.revision, 'cause-drifting candidates must not advance the canonical revision');
+  assert.deepEqual(postReduce.case, preReduce.case, 'cause-drifting candidates must preserve the exact canonical case');
 
-  console.log('False-equivalence rejection PASS: DIFFERENT_FAIL candidates rejected at probe and reduce without canonical mutation.');
+  console.log('False-equivalence rejection PASS: DIFFERENT_FAIL candidates are rejected while the original same-cause case remains canonical.');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');

@@ -671,8 +671,6 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
   const baselineProfile=await establishCausalStability({run:()=>runBudgeted(baseline)});
   throwIfAborted(signal);
   if(!baselineProfile.accepted)throw new Error(`BASELINE_NOT_STABLE:${baselineProfile.reason}`);
-  const baselineResult=baselineProfile.reference;
-
   const source=baseline[targetAxis],all=unitsFor(targetAxis,source);
   if(!all.length)return {
     status:'NO_UNITS',
@@ -694,6 +692,7 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
   let nextSource,reducedTrialCount,removedCount,passes=[];
   const evaluateCandidate=async candidateSource=>{
     throwIfAborted(signal);
+    if(candidateSource===source)return 'FAIL';
     const stability=await evaluateCandidateStability({
       run:()=>runBudgeted({...baseline,[targetAxis]:candidateSource}),
       profile:baselineProfile

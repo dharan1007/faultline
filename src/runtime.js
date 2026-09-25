@@ -658,7 +658,7 @@ function pin({expectedRevision=revision(),targetAxis=axis,unitId,pinned=true}){ 
 async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}={}, {signal}={}){
   store.assertRevision(expectedRevision);
   throwIfAborted(signal);
-  if(!Number.isSafeInteger(maxTrials)||maxTrials<8||maxTrials>2000)throw new Error('INVALID_TRIAL_BUDGET');
+  if(!Number.isSafeInteger(maxTrials)||maxTrials<1||maxTrials>2000)throw new Error('INVALID_TRIAL_BUDGET');
 
   const baseline=clone(value());
   let browserRuns=0;
@@ -736,7 +736,31 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
   if(!final||final.status!=='FAIL')throw new Error('REDUCTION_FINAL_RERUN_FAILED:NO_FAIL_OBSERVATION');
 
   store.assertRevision(expectedRevision);
-  const beforeLength=source.length,after=nextSource.length,before=snapshotCanonical();
+  const beforeLength=source.length,after=nextSource.length;
+  if(removedCount===0){
+    return {
+      status:final.status,
+      before:beforeLength,
+      after,
+      reduction:0,
+      trials:reducedTrialCount,
+      browserRuns,
+      removed:0,
+      passes:passes.length,
+      revision:revision(),
+      cause:'SAME_CAUSE',
+      stabilityReason:finalStability.reason,
+      sameCause:true,
+      fingerprint:final.fingerprint||null,
+      stabilityMode:baselineProfile.mode,
+      baselineStability:clone(baselineProfile.summary),
+      finalStability:clone(finalStability.summary),
+      minimality:'LOCALLY_MINIMAL',
+      independentRerun:true,
+      mutated:false
+    };
+  }
+  const before=snapshotCanonical();
   const nextPins=new Set([...pins].filter(key=>!key.startsWith(`${targetAxis}|`)));
   for(const id of remappedPinIds)nextPins.add(pinKey(targetAxis,id));
   pins=nextPins;
@@ -750,7 +774,8 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
       browserRuns,
       removed:removedCount,
       passes:passes.length,
-      cause:finalStability.reason,
+      cause:'SAME_CAUSE',
+      stabilityReason:finalStability.reason,
       sameCause:true,
       stabilityMode:baselineProfile.mode,
       minimality:'LOCALLY_MINIMAL',
@@ -772,7 +797,8 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
     removed:removedCount,
     passes:passes.length,
     reduction:beforeLength?1-after/beforeLength:0,
-    cause:finalStability.reason,
+    cause:'SAME_CAUSE',
+      stabilityReason:finalStability.reason,
     sameCause:true,
     stabilityMode:baselineProfile.mode,
     baselineStability:clone(baselineProfile.summary),
@@ -795,7 +821,8 @@ async function reduce({expectedRevision=revision(),targetAxis=axis,maxTrials=80}
     removed:removedCount,
     passes:passes.length,
     revision:revision(),
-    cause:finalStability.reason,
+    cause:'SAME_CAUSE',
+      stabilityReason:finalStability.reason,
     sameCause:true,
     fingerprint:final.fingerprint||null,
     stabilityMode:baselineProfile.mode,

@@ -1,6 +1,8 @@
 name: self-hosted-branch-verify
 
 on:
+  push:
+    branches: [hardening/production-100-20260915]
   workflow_dispatch:
     inputs:
       ref:

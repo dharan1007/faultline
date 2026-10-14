@@ -34,7 +34,7 @@
     "verify:package": "npm pack --dry-run"
   },
   "dependencies": {
-    "acorn": "8.18.0",
+    "acorn": "8.19.0",
     "playwright": "1.63.0"
   }
 }

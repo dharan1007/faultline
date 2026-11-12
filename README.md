@@ -36,7 +36,7 @@ A `PASS` baseline is not imported as a failure. An unsafe or unsupported experim
 
 ### Public browser workbench
 
-Open `https://faultline-webmcp.vercel.app/`. The browser owns the workspace and revision history. You can load a case, import a `faultline.capture.v1` artifact, run the oracle, probe individual removals, pin required units, reduce one axis or run Autopilot, restore prior revisions, inspect evidence, and export a standalone reproducer.
+Open `https://faultline-webmcp.vercel.app`. The browser owns the workspace and revision history. You can load a case, import a `faultline.capture.v1` artifact, run the oracle, probe individual removals, pin required units, reduce one axis or run Autopilot, restore prior revisions, inspect evidence, and export a standalone reproducer.
 
 The hosted application does not provide a server-side customer source workspace and does not fetch a capture's `source.url`.
 

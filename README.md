@@ -104,42 +104,15 @@ Pin an immutable commit SHA or a reviewed release tag in production. Do not use 
 
 The capture adapter receives a `page` your test already owns. It does not navigate to arbitrary remote targets or extract credentials.
 
-```js
-import {captureFaultlineCase} from './integrations/playwright-capture/index.js';
+Capture from the Playwright test that already reproduces the failure:
 
-await page.goto('http://127.0.0.1:3000/profile');
+1. Keep the actual page setup and interaction in the existing test. First confirm the failure is repeatable there.
+2. Pass the caller-owned `page`, the exact source needed for reproduction, the same deterministic oracle/action that detects the failure, provenance from that test, and a local output path to `captureFaultlineCase`.
+3. Validate and inspect the captured artifact locally before running reduction with the CLI. Confirm the final case still returns the same `FAIL`.
 
-await captureFaultlineCase({
-  page,
-  js: `
-    const input = document.querySelector('#name');
-    const save = document.querySelector('#save');
-    input.addEventListener('input', () => save.dataset.name = input.value);
-    save.addEventListener('click', () => {
-      save.setAttribute('aria-disabled', save.dataset.name === 'alice' ? 'true' : 'false');
-    });
-  `,
-  oracle: {
-    kind: 'dom_attribute',
-    selector: '#save',
-    property: 'aria-disabled',
-    equals: 'true',
-    action: {
-      kind: 'sequence',
-      steps: [
-        {kind: 'set_value', selector: '#name', value: 'alice'},
-        {kind: 'click', selector: '#save'}
-      ]
-    },
-    delayMs: 0
-  },
-  provenance: {
-    testTitle: 'save remains disabled after valid name',
-    testFile: 'tests/profile.spec.mjs'
-  },
-  writeTo: 'save-disabled.faultline.json'
-});
-```
+The Playwright test remains responsible for reaching the scenario. The standalone FAULTLINE artifact contains only the bounded page source and oracle/action needed to rerun that failure. The handoff is manual; FAULTLINE does not automatically import an arbitrary Playwright test.
+
+Use real user-owned or otherwise authorized page/source data. Do not include credentials or unrelated source in the capture.
 
 The v1 capture contract is deliberately bounded:
 

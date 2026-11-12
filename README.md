@@ -4,7 +4,7 @@
 
 FAULTLINE is a local-first causal browser debugging workbench. It captures an already-authorized Playwright page into a bounded `faultline.capture.v1` artifact, independently reproduces the failure, removes candidate HTML/CSS/JavaScript units under a deterministic oracle, and commits a reduction only while the same failure remains `FAIL`.
 
-[Live workbench](https://faultline-webmcp.vercel.app/) · [Production contract](docs/PRODUCTION.md) · [Security](docs/SECURITY.md) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md)
+[Live workbench](https://faultline-webmcp.vercel.app) · [Production contract](docs/PRODUCTION.md) · [Security](docs/SECURITY.md) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
 [![ci](https://github.com/dharan1007/faultline/actions/workflows/ci.yml/badge.svg)](https://github.com/dharan1007/faultline/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

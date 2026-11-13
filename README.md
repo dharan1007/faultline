@@ -6,7 +6,6 @@ FAULTLINE is a local-first causal browser debugging workbench. It captures an al
 
 [Live workbench](https://faultline-webmcp.vercel.app) · [Production contract](docs/PRODUCTION.md) · [Security](docs/SECURITY.md) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
-[![ci](https://github.com/dharan1007/faultline/actions/workflows/ci.yml/badge.svg)](https://github.com/dharan1007/faultline/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## What FAULTLINE proves
@@ -50,6 +49,8 @@ cd faultline
 npm ci
 npx playwright install chromium
 ```
+
+These CLI commands require a local artifact produced from a real, authorized Playwright failure using the capture workflow below. `failure.faultline.json` is an example local path, not a sample file shipped in this repository.
 
 Validate or inspect a capture without printing source:
 

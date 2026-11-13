@@ -48,7 +48,7 @@ npm run test:browser
 
 ## Change discipline
 
-- Add the smallest synthetic regression case possible.
+- Use only real, repeatable browser failures or observations that the contributor owns or is authorized to publish, with provenance and permission recorded. Do not invent synthetic fixtures, simulate failures, or add artificial content. If no suitable rights-cleared case exists, do not fabricate one; re-scope to work that does not require a new case.
 - Run negative/error paths for parser/reducer/oracle changes.
 - Do not silently expand sandbox capabilities.
 - Keep browser tests explicit; syntax checks do not prove browser behavior.

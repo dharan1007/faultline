@@ -4,15 +4,23 @@ FAULTLINE is a deterministic browser-failure reducer. The best contributions mak
 
 ## High-value contributions
 
-- Small synthetic browser-failure fixtures that expose real reducer/oracle edge cases.
+- Regression coverage from real, reproducible browser failures or observations from sources the contributor is authorized to publish.
 - Improvements to HTML/CSS/JavaScript semantic-unit extraction with regression tests.
-- New deterministic oracle cases or normalization tests.
+- Evidence-backed oracle or normalization regressions from real browser observations.
 - Sandbox/navigation/result-channel containment tests.
 - Real-browser regression tests.
 - Export/import and Playwright/browser-test integration improvements.
 - Accessibility and developer-experience improvements.
 
 Look for [`good first issue`](https://github.com/dharan1007/faultline/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and [`help wanted`](https://github.com/dharan1007/faultline/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
+
+## Real evidence and source rights
+
+- Use only real, repeatable browser behavior from a page or application the contributor owns or is authorized to publish.
+- Record enough provenance to reproduce the observation, including source, browser/version, and the applicable license or permission.
+- Publish only the minimum source needed. Remove credentials, personal data, unrelated code, and material without redistribution rights.
+- Do not invent or simulate failures, CSS outputs, runtime errors, or irrelevant noise.
+- If no rights-cleared real case exists, do not create a fixture; choose documentation or implementation work that does not need one.
 
 ## Setup
 
@@ -68,7 +76,7 @@ Potential sandbox escapes or security vulnerabilities should be reported private
 A strong PR includes:
 
 - concrete failure/reducer problem,
-- minimal synthetic fixture,
+- a minimal real case with provenance and permission when regression coverage requires one,
 - expected PASS/FAIL/UNRESOLVED behavior,
 - tests,
 - browser-test evidence where relevant,
